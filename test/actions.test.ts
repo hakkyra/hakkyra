@@ -307,6 +307,7 @@ describe('Actions', () => {
         code: 200,
         body: {
           ledgerEntryId: 'e0000000-0000-0000-0000-000000000099',
+          clientId: ALICE_ID,
           newBalance: 150.0,
           success: true,
         },
@@ -350,7 +351,7 @@ describe('Actions', () => {
 
       webhook.onPath('/actions/adjust-account', () => ({
         code: 200,
-        body: { ledgerEntryId: 'e0000000-0000-0000-0000-000000000001', newBalance: 100, success: true },
+        body: { ledgerEntryId: 'e0000000-0000-0000-0000-000000000001', clientId: ALICE_ID, newBalance: 100, success: true },
       }));
 
       const mutation = `mutation($input: AdjustAccountInput!) {

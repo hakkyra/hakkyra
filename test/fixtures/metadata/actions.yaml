@@ -11,6 +11,12 @@ actions:
           value_from_env: ACTION_SECRET
     permissions:
       - role: client
+    relationships:
+      - name: invoice
+        type: object
+        remote_table: { schema: public, name: invoice }
+        field_mapping:
+          invoiceId: id
     comment: "Client initiates a payment via payment provider"
 
   # Sync mutation: admin-only action to adjust account balance
@@ -26,6 +32,12 @@ actions:
     permissions:
       - role: administrator
       - role: backoffice
+    relationships:
+      - name: ledgerEntries
+        type: array
+        remote_table: { schema: public, name: ledger_entry }
+        field_mapping:
+          clientId: client_id
     comment: "Admin/backoffice manual account balance adjustment"
 
   # Async mutation: trigger identity verification process

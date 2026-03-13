@@ -10,6 +10,7 @@ import type {
   EventTriggerConfig,
   WebhookHeader,
   ActionConfig,
+  ActionRelationship,
   RequestTransform,
   ResponseTransform,
   CronTriggerConfig,
@@ -511,6 +512,24 @@ function transformAction(raw: RawAction): ActionConfig {
     };
   }
 
+  let relationships: ActionRelationship[] | undefined;
+  if (raw.relationships && raw.relationships.length > 0) {
+    relationships = raw.relationships.map((rel) => {
+      let remoteTable: { schema: string; name: string };
+      if (typeof rel.remote_table === 'string') {
+        remoteTable = { schema: 'public', name: rel.remote_table };
+      } else {
+        remoteTable = { schema: rel.remote_table.schema, name: rel.remote_table.name };
+      }
+      return {
+        name: rel.name,
+        type: rel.type,
+        remoteTable,
+        fieldMapping: rel.field_mapping,
+      };
+    });
+  }
+
   return {
     name: raw.name,
     definition: {
@@ -525,6 +544,7 @@ function transformAction(raw: RawAction): ActionConfig {
     requestTransform,
     responseTransform,
     permissions: raw.permissions,
+    relationships,
     comment: raw.comment,
   };
 }

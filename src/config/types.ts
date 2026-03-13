@@ -182,6 +182,12 @@ export interface RawAction {
     };
   };
   permissions?: { role: string }[];
+  relationships?: Array<{
+    name: string;
+    type: 'object' | 'array';
+    remote_table: { schema: string; name: string } | string;
+    field_mapping: Record<string, string>;
+  }>;
   comment?: string;
 }
 

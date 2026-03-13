@@ -7,6 +7,9 @@
  * Supports both synchronous and asynchronous actions:
  * - Sync: mutation calls webhook inline, returns result directly
  * - Async: mutation enqueues job, returns { actionId }, result queried separately
+ *
+ * Action output types can include relationship fields that resolve nested
+ * database records via the action's configured field_mapping.
  */
 
 import {
@@ -31,13 +34,16 @@ import type {
   GraphQLOutputType,
   GraphQLInputType,
   GraphQLNamedType,
+  GraphQLFieldConfigMap,
 } from 'graphql';
-import type { ActionConfig } from '../types.js';
+import type { ActionConfig, ActionRelationship, TableInfo, BoolExp } from '../types.js';
 import { customScalars } from '../schema/scalars.js';
 import type { ResolverContext } from '../schema/resolvers.js';
 import { checkActionPermission } from './permissions.js';
 import { executeAction } from './proxy.js';
 import { enqueueAsyncAction, getAsyncActionResult } from './async.js';
+import { compileSelect } from '../sql/select.js';
+import { toCamelCase } from '../schema/type-builder.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -45,6 +51,17 @@ export interface ActionSchemaResult {
   queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>>;
   mutationFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>>;
   types: GraphQLNamedType[];
+}
+
+/**
+ * Options for building action fields, including table type information
+ * needed for relationship resolution.
+ */
+export interface ActionSchemaOptions {
+  /** All tracked tables in the schema model */
+  tables?: TableInfo[];
+  /** Registry of table GraphQL object types, keyed by "schema.name" */
+  tableTypeRegistry?: Map<string, GraphQLObjectType>;
 }
 
 // ─── SDL Type Resolution ────────────────────────────────────────────────────
@@ -112,6 +129,16 @@ interface ParsedAction {
   rootType: 'Query' | 'Mutation';
   inputTypeName: string;
   returnTypeNode: TypeNode;
+}
+
+/**
+ * Unwrap a TypeNode to get the base named type name.
+ */
+function getBaseTypeName(typeNode: TypeNode): string {
+  if (typeNode.kind === 'NonNullType' || typeNode.kind === 'ListType') {
+    return getBaseTypeName(typeNode.type);
+  }
+  return typeNode.name.value;
 }
 
 /**
@@ -189,6 +216,165 @@ const AsyncActionIdType = new GraphQLObjectType({
   },
 });
 
+// ─── Relationship Helpers ────────────────────────────────────────────────────
+
+/**
+ * Remap a database result row from snake_case column names to camelCase field names.
+ */
+function remapRowToCamel(
+  row: Record<string, unknown>,
+  table: TableInfo,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const col of table.columns) {
+    if (col.name in row) {
+      result[toCamelCase(col.name)] = row[col.name];
+    }
+  }
+  // Preserve any extra keys (e.g., nested relationship data)
+  for (const [key, value] of Object.entries(row)) {
+    const camelKey = toCamelCase(key);
+    if (!(camelKey in result)) {
+      result[camelKey] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * Build relationship fields for an action output type.
+ *
+ * For each configured relationship, adds a field to the output type that
+ * resolves to the related database record(s) by querying via the field mapping.
+ */
+function buildRelationshipFields(
+  relationships: ActionRelationship[],
+  tables: TableInfo[],
+  tableTypeRegistry: Map<string, GraphQLObjectType>,
+): GraphQLFieldConfigMap<Record<string, unknown>, ResolverContext> {
+  const fields: GraphQLFieldConfigMap<Record<string, unknown>, ResolverContext> = {};
+
+  for (const rel of relationships) {
+    const tableKey = `${rel.remoteTable.schema}.${rel.remoteTable.name}`;
+    const remoteTable = tables.find(
+      (t) => t.schema === rel.remoteTable.schema && t.name === rel.remoteTable.name,
+    );
+    const remoteType = tableTypeRegistry.get(tableKey);
+
+    if (!remoteTable || !remoteType) {
+      // Remote table not found in schema — skip this relationship
+      continue;
+    }
+
+    if (rel.type === 'object') {
+      fields[rel.name] = {
+        type: remoteType,
+        resolve: makeActionRelationshipResolver(rel, remoteTable),
+      };
+    } else {
+      // array relationship
+      fields[rel.name] = {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(remoteType))),
+        resolve: makeActionRelationshipResolver(rel, remoteTable),
+      };
+    }
+  }
+
+  return fields;
+}
+
+/**
+ * Creates a resolver for an action relationship field.
+ *
+ * The resolver extracts the join key value from the parent (action result),
+ * compiles a SELECT query with a WHERE clause matching the field mapping,
+ * executes it with the current session context, and returns the result.
+ */
+function makeActionRelationshipResolver(
+  rel: ActionRelationship,
+  remoteTable: TableInfo,
+) {
+  return async (
+    parent: Record<string, unknown>,
+    _args: unknown,
+    context: ResolverContext,
+  ): Promise<unknown> => {
+    const { auth, queryWithSession, permissionLookup } = context;
+
+    // Check permissions on the remote table
+    const perm = permissionLookup.getSelect(
+      remoteTable.schema,
+      remoteTable.name,
+      auth.role,
+    );
+
+    if (!perm && !auth.isAdmin) {
+      // No select permission on remote table — return null/empty
+      return rel.type === 'object' ? null : [];
+    }
+
+    // Build WHERE condition from the field mapping
+    // field_mapping: { actionOutputField: remoteTableColumn }
+    const whereConditions: Record<string, { _eq: unknown }> = {};
+    let hasMissingKey = false;
+
+    for (const [actionField, remoteColumn] of Object.entries(rel.fieldMapping)) {
+      const value = parent[actionField];
+      if (value === undefined || value === null) {
+        hasMissingKey = true;
+        break;
+      }
+      whereConditions[remoteColumn] = { _eq: value };
+    }
+
+    if (hasMissingKey) {
+      return rel.type === 'object' ? null : [];
+    }
+
+    // Select all permitted columns
+    const allColumns = remoteTable.columns.map((c) => c.name);
+    const columns =
+      !perm || perm.columns === '*'
+        ? allColumns
+        : allColumns.filter((c) => (perm.columns as string[]).includes(c));
+
+    const compiled = compileSelect({
+      table: remoteTable,
+      columns,
+      where: whereConditions as BoolExp,
+      limit: rel.type === 'object' ? 1 : undefined,
+      permission: perm
+        ? {
+            filter: perm.filter,
+            columns: perm.columns,
+            limit: perm.limit,
+          }
+        : undefined,
+      session: auth,
+    });
+
+    const result = await queryWithSession(compiled.sql, compiled.params, auth, 'read');
+
+    // compileSelect wraps results in json_agg → single row with "data" column
+    const data = (result.rows[0] as Record<string, unknown> | undefined)?.data;
+
+    if (rel.type === 'object') {
+      if (!data || !Array.isArray(data) || data.length === 0) {
+        return null;
+      }
+      return remapRowToCamel(data[0] as Record<string, unknown>, remoteTable);
+    }
+
+    // array relationship
+    if (!data || !Array.isArray(data)) {
+      return [];
+    }
+    return data.map((row) =>
+      remapRowToCamel(row as Record<string, unknown>, remoteTable),
+    );
+  };
+}
+
 // ─── Main Builder ───────────────────────────────────────────────────────────
 
 /**
@@ -196,11 +382,13 @@ const AsyncActionIdType = new GraphQLObjectType({
  *
  * @param actions   - Action configs from actions.yaml
  * @param sdl       - Raw actions.graphql SDL content
+ * @param options   - Additional options for relationship resolution
  * @returns Query and Mutation field configs with wired resolvers
  */
 export function buildActionFields(
   actions: ActionConfig[],
   sdl: string,
+  options?: ActionSchemaOptions,
 ): ActionSchemaResult {
   if (!sdl || actions.length === 0) {
     return { queryFields: {}, mutationFields: {}, types: [] };
@@ -212,6 +400,32 @@ export function buildActionFields(
   const actionConfigMap = new Map<string, ActionConfig>();
   for (const action of actions) {
     actionConfigMap.set(action.name, action);
+  }
+
+  // Build a mapping from action name to its return type name (for relationship augmentation)
+  const actionReturnTypeNames = new Map<string, string>();
+  for (const parsed of parsedActions) {
+    const baseTypeName = getBaseTypeName(parsed.returnTypeNode);
+    actionReturnTypeNames.set(parsed.name, baseTypeName);
+  }
+
+  // Build a mapping from output type name to the relationships that should augment it
+  const typeRelationships = new Map<string, ActionRelationship[]>();
+  if (options?.tables && options?.tableTypeRegistry) {
+    for (const action of actions) {
+      if (!action.relationships || action.relationships.length === 0) continue;
+      const returnTypeName = actionReturnTypeNames.get(action.name);
+      if (!returnTypeName) continue;
+
+      const existing = typeRelationships.get(returnTypeName) ?? [];
+      // Merge relationships (avoid duplicates by name)
+      for (const rel of action.relationships) {
+        if (!existing.some((r) => r.name === rel.name)) {
+          existing.push(rel);
+        }
+      }
+      typeRelationships.set(returnTypeName, existing);
+    }
   }
 
   // Build GraphQL input types
@@ -234,20 +448,34 @@ export function buildActionFields(
     );
   }
 
-  // Build GraphQL output types
+  // Build GraphQL output types (with optional relationship fields)
   const outputTypes = new Map<string, GraphQLObjectType>();
   for (const [name, fieldDefs] of outputTypeDefs) {
+    const rels = typeRelationships.get(name);
     outputTypes.set(
       name,
       new GraphQLObjectType({
         name,
         fields: () => {
-          const fields: Record<string, { type: GraphQLOutputType }> = {};
+          const fields: GraphQLFieldConfigMap<Record<string, unknown>, ResolverContext> = {};
           for (const fieldDef of fieldDefs) {
             fields[fieldDef.name.value] = {
               type: resolveOutputType(fieldDef.type, outputTypes),
             };
           }
+
+          // Add relationship fields if this output type has configured relationships
+          if (rels && rels.length > 0 && options?.tables && options?.tableTypeRegistry) {
+            const relFields = buildRelationshipFields(
+              rels,
+              options.tables,
+              options.tableTypeRegistry,
+            );
+            for (const [fieldName, fieldConfig] of Object.entries(relFields)) {
+              fields[fieldName] = fieldConfig;
+            }
+          }
+
           return fields;
         },
       }),

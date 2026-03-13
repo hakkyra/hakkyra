@@ -31,6 +31,7 @@ input AdjustAccountInput {
 
 type AdjustAccountResult {
   ledgerEntryId: uuid!
+  clientId: uuid!
   newBalance: Float!
   success: Boolean!
 }

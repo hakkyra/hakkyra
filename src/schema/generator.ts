@@ -270,7 +270,10 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
   // ── Step 5c: Build action fields ────────────────────────────────────────
   const actionFields = (options?.actions?.length && options?.actionsGraphql)
-    ? buildActionFields(options.actions, options.actionsGraphql)
+    ? buildActionFields(options.actions, options.actionsGraphql, {
+        tables,
+        tableTypeRegistry: typeRegistry,
+      })
     : { queryFields: {}, mutationFields: {}, types: [] };
 
   // Add action query fields to Query

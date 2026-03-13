@@ -289,7 +289,15 @@ export interface ActionConfig {
   requestTransform?: RequestTransform;
   responseTransform?: ResponseTransform;
   permissions?: { role: string }[];
+  relationships?: ActionRelationship[];
   comment?: string;
+}
+
+export interface ActionRelationship {
+  name: string;
+  type: 'object' | 'array';
+  remoteTable: { schema: string; name: string };
+  fieldMapping: Record<string, string>; // action output field -> remote table column
 }
 
 // ─── Async Action Result ─────────────────────────────────────────────────────
