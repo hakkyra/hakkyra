@@ -178,7 +178,6 @@
 - [x] Event triggers, cron triggers, actions, REST endpoints, query collections
 - [x] Seed data: fixture data for all tracked tables
 - [x] JWT test helpers (HS256 tokens for test roles)
-- [x] **279 tests passing** across 11 test suites
 
 ### Phase 1 Nice-to-have
 - [ ] Doc regeneration on config/schema change (SDL endpoint currently caches at startup)
@@ -290,7 +289,7 @@
 
 ---
 
-## Phase 3 — Remaining Work
+## Phase 3 — Remaining Minor
 - [ ] Configurable event_log retention period (currently hardcoded to 7 days in server.ts)
 
 ---
@@ -382,7 +381,7 @@
 | Server / E2E | 59 | Pass |
 | Events | 9 | Pass |
 | Crons | 14 | Pass |
-| Subscriptions | 13 | Flaky (test infra) |
+| Subscriptions | 13 | Pass |
 | Actions | 16 | Pass |
 | Async actions | 18 | Pass |
 | Computed fields | 17 | Pass |
@@ -395,4 +394,4 @@
 | Action transforms | 32 | Pass |
 | Batch operations | 26 | Pass |
 | Action relationships | 13 | Pass |
-| **Total** | **~517** | |
+| **Total** | **491** | **22 suites, all passing** |
