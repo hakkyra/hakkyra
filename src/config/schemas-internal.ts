@@ -1,10 +1,13 @@
 import { z } from 'zod';
+import type { BoolExp } from '../types.js';
 
 // ---------------------------------------------------------------------------
-// BoolExp helper — recursive/dynamic, validated as a generic record
+// BoolExp helper — recursive/dynamic, validated as a generic record.
+// Typed as ZodType<BoolExp> so that z.infer produces the manual BoolExp union
+// instead of a plain Record<string, unknown>.
 // ---------------------------------------------------------------------------
 
-const BoolExpSchema = z.record(z.string(), z.unknown());
+const BoolExpSchema: z.ZodType<BoolExp> = z.record(z.string(), z.unknown()) as z.ZodType<BoolExp>;
 
 // ---------------------------------------------------------------------------
 // RelationshipConfig

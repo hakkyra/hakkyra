@@ -1,6 +1,38 @@
 /**
  * Core type definitions shared across all Hakkyra modules.
+ *
+ * Config-related types are derived from Zod schemas via z.infer<>.
+ * Runtime / introspection types remain as manual interfaces.
  */
+
+import { z } from 'zod';
+import {
+  RelationshipConfigSchema,
+  SelectPermissionSchema,
+  InsertPermissionSchema,
+  UpdatePermissionSchema,
+  DeletePermissionSchema,
+  TablePermissionsSchema,
+  CustomRootFieldsSchema,
+  EventTriggerConfigSchema,
+  WebhookHeaderSchema,
+  CronTriggerConfigSchema,
+  RequestTransformSchema,
+  ResponseTransformSchema,
+  ActionConfigSchema,
+  ActionRelationshipSchema,
+  RESTEndpointOverrideSchema,
+  RESTConfigSchema,
+  CustomQueryConfigSchema,
+  APIDocsConfigSchema,
+  JobQueueProviderSchema,
+  JobQueueConfigSchema,
+  AuthConfigSchema,
+  DatabasesConfigSchema,
+  PoolConfigSchema,
+  ComputedFieldConfigSchema,
+  HakkyraConfigSchema,
+} from './config/schemas-internal.js';
 
 // ─── PostgreSQL Type Mapping ────────────────────────────────────────────────
 
@@ -45,16 +77,7 @@ export interface TableInfo {
 
 // ─── Computed Fields ─────────────────────────────────────────────────────────
 
-export interface ComputedFieldConfig {
-  name: string;
-  function: {
-    name: string;
-    schema?: string;  // defaults to 'public'
-  };
-  tableArgument?: string;  // the function param name for the table row
-  sessionArgument?: string; // optional param for session vars (hasura compat)
-  comment?: string;
-}
+export type ComputedFieldConfig = z.infer<typeof ComputedFieldConfigSchema>;
 
 export interface ColumnInfo {
   name: string;
@@ -108,52 +131,19 @@ export interface FunctionInfo {
 
 export type RelationshipType = 'object' | 'array';
 
-export interface RelationshipConfig {
-  name: string;
-  type: RelationshipType;
-  remoteTable: { name: string; schema: string };
-  /** Foreign key on this table (object rel) */
-  localColumns?: string[];
-  /** Foreign key on the remote table (array rel) */
-  remoteColumns?: string[];
-  /** Manual mapping when no FK constraint exists */
-  columnMapping?: Record<string, string>;
-}
+export type RelationshipConfig = z.infer<typeof RelationshipConfigSchema>;
 
 // ─── Permissions (Hasura-compatible) ────────────────────────────────────────
 
-export interface TablePermissions {
-  select: Record<string, SelectPermission>;
-  insert: Record<string, InsertPermission>;
-  update: Record<string, UpdatePermission>;
-  delete: Record<string, DeletePermission>;
-}
+export type TablePermissions = z.infer<typeof TablePermissionsSchema>;
 
-export interface SelectPermission {
-  columns: string[] | '*';
-  filter: BoolExp;
-  limit?: number;
-  allowAggregations?: boolean;
-  computedFields?: string[];
-}
+export type SelectPermission = z.infer<typeof SelectPermissionSchema>;
 
-export interface InsertPermission {
-  columns: string[] | '*';
-  check: BoolExp;
-  set?: Record<string, string>;       // column presets
-  backendOnly?: boolean;
-}
+export type InsertPermission = z.infer<typeof InsertPermissionSchema>;
 
-export interface UpdatePermission {
-  columns: string[] | '*';
-  filter: BoolExp;
-  check?: BoolExp;                     // post-update validation
-  set?: Record<string, string>;
-}
+export type UpdatePermission = z.infer<typeof UpdatePermissionSchema>;
 
-export interface DeletePermission {
-  filter: BoolExp;
-}
+export type DeletePermission = z.infer<typeof DeletePermissionSchema>;
 
 // ─── Boolean Expressions (permission filters + query where clauses) ─────────
 
@@ -204,101 +194,27 @@ export interface ColumnOperators {
 
 // ─── Custom Root Fields ─────────────────────────────────────────────────────
 
-export interface CustomRootFields {
-  select?: string;
-  select_by_pk?: string;
-  select_aggregate?: string;
-  insert?: string;
-  insert_one?: string;
-  update?: string;
-  update_by_pk?: string;
-  delete?: string;
-  delete_by_pk?: string;
-}
+export type CustomRootFields = z.infer<typeof CustomRootFieldsSchema>;
 
 // ─── Event Triggers ─────────────────────────────────────────────────────────
 
-export interface EventTriggerConfig {
-  name: string;
-  definition: {
-    enableManual?: boolean;
-    insert?: { columns: string[] | '*' };
-    update?: { columns: string[] | '*' };
-    delete?: { columns: string[] | '*' };
-  };
-  retryConf: {
-    intervalSec: number;
-    numRetries: number;
-    timeoutSec: number;
-  };
-  webhook: string;
-  webhookFromEnv?: string;
-  headers?: WebhookHeader[];
-}
+export type EventTriggerConfig = z.infer<typeof EventTriggerConfigSchema>;
 
-export interface WebhookHeader {
-  name: string;
-  value?: string;
-  valueFromEnv?: string;
-}
+export type WebhookHeader = z.infer<typeof WebhookHeaderSchema>;
 
 // ─── Cron Triggers ──────────────────────────────────────────────────────────
 
-export interface CronTriggerConfig {
-  name: string;
-  webhook: string;
-  webhookFromEnv?: string;
-  schedule: string;                    // cron expression
-  payload?: unknown;
-  retryConf?: {
-    numRetries: number;
-    retryIntervalSeconds: number;
-    timeoutSeconds: number;
-    toleranceSeconds?: number;
-  };
-  headers?: WebhookHeader[];
-  comment?: string;
-}
+export type CronTriggerConfig = z.infer<typeof CronTriggerConfigSchema>;
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
-export interface RequestTransform {
-  method?: string;
-  url?: string;
-  body?: string | Record<string, unknown>;
-  contentType?: string;
-  queryParams?: Record<string, string>;
-  headers?: Record<string, string>;
-}
+export type RequestTransform = z.infer<typeof RequestTransformSchema>;
 
-export interface ResponseTransform {
-  body?: string | Record<string, unknown>;
-}
+export type ResponseTransform = z.infer<typeof ResponseTransformSchema>;
 
-export interface ActionConfig {
-  name: string;
-  definition: {
-    kind: 'synchronous' | 'asynchronous';
-    type: 'query' | 'mutation';
-    handler: string;                   // URL or local file path
-    handlerFromEnv?: string;
-    forwardClientHeaders?: boolean;
-    headers?: WebhookHeader[];
-    timeout?: number;
-  };
-  requestTransform?: RequestTransform;
-  responseTransform?: ResponseTransform;
-  permissions?: { role: string }[];
-  relationships?: ActionRelationship[];
-  comment?: string;
-}
+export type ActionConfig = z.infer<typeof ActionConfigSchema>;
 
-export interface ActionRelationship {
-  name: string;
-  type: 'object' | 'array';
-  remoteTable: { schema: string; name: string };
-  fieldMapping: Record<string, string>; // action output field -> remote table column
-}
+export type ActionRelationship = z.infer<typeof ActionRelationshipSchema>;
 
 // ─── Async Action Result ─────────────────────────────────────────────────────
 
@@ -316,45 +232,17 @@ export interface AsyncActionResult {
 
 // ─── REST API Config (Hakkyra extension) ────────────────────────────────────
 
-export interface RESTEndpointOverride {
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  path: string;
-  operation: string;
-  defaultOrder?: string;
-}
+export type RESTEndpointOverride = z.infer<typeof RESTEndpointOverrideSchema>;
 
-export interface RESTConfig {
-  autoGenerate: boolean;
-  basePath: string;
-  pagination: {
-    defaultLimit: number;
-    maxLimit: number;
-  };
-  overrides?: Record<string, RESTEndpointOverride[]>;
-}
+export type RESTConfig = z.infer<typeof RESTConfigSchema>;
 
 // ─── Custom Queries (Hakkyra extension) ─────────────────────────────────────
 
-export interface CustomQueryConfig {
-  name: string;
-  type: 'query' | 'mutation';
-  sql: string;
-  params?: { name: string; type: string }[];
-  returns: string;                     // GraphQL type name
-  permissions?: {
-    role: string;
-    filter?: BoolExp;
-  }[];
-}
+export type CustomQueryConfig = z.infer<typeof CustomQueryConfigSchema>;
 
 // ─── API Docs Config (Hakkyra extension) ────────────────────────────────────
 
-export interface APIDocsConfig {
-  generate: boolean;
-  output?: string;
-  llmFormat?: boolean;
-  includeExamples?: boolean;
-}
+export type APIDocsConfig = z.infer<typeof APIDocsConfigSchema>;
 
 // ─── Authentication ─────────────────────────────────────────────────────────
 
@@ -414,92 +302,26 @@ export interface CompiledFilter {
 
 // ─── Server Configuration ───────────────────────────────────────────────────
 
-export interface HakkyraConfig {
-  version: number;
-  server: {
-    port: number;
-    host: string;
-  };
-  auth: AuthConfig;
-  databases: DatabasesConfig;
+/**
+ * HakkyraConfig derived from the Zod schema, with the `tables` field
+ * narrowed to `TableInfo[]` (the schema uses `z.any()` for tables since
+ * TableInfo contains introspection data that is not schema-validated).
+ */
+export type HakkyraConfig = Omit<z.infer<typeof HakkyraConfigSchema>, 'tables'> & {
   tables: TableInfo[];
-  actions: ActionConfig[];
-  actionsGraphql?: string;
-  cronTriggers: CronTriggerConfig[];
-  rest: RESTConfig;
-  customQueries: CustomQueryConfig[];
-  apiDocs: APIDocsConfig;
-  tableAliases: Record<string, string>;
-  /** Job queue backend configuration (default: pg-boss). */
-  jobQueue?: JobQueueConfig;
-  /** Number of days to retain delivered events in the event_log table (default: 7). */
-  eventLogRetentionDays: number;
-  /** Threshold in ms for slow query warnings. 0 to disable (default: 200). */
-  slowQueryThresholdMs: number;
-}
+};
 
 // ─── Job Queue Configuration ─────────────────────────────────────────────────
 
-export type JobQueueProvider = 'pg-boss' | 'bullmq';
+export type JobQueueProvider = z.infer<typeof JobQueueProviderSchema>;
 
-export interface JobQueueConfig {
-  provider: JobQueueProvider;
-  /** pg-boss uses the database connection string. Falls back to the primary database URL. */
-  connectionString?: string;
-  /** Redis connection info, required when provider is 'bullmq'. */
-  redis?: {
-    url?: string;
-    host?: string;
-    port?: number;
-    password?: string;
-  };
-}
+export type JobQueueConfig = z.infer<typeof JobQueueConfigSchema>;
 
-export interface AuthConfig {
-  jwt?: {
-    type: string;                      // RS256, HS256, etc.
-    key?: string;
-    keyEnv?: string;
-    jwkUrl?: string;
-    claimsNamespace?: string;
-    claimsMap?: Record<string, { path: string; default?: string }>;
-    audience?: string;
-    issuer?: string;
-  };
-  adminSecretEnv?: string;
-  unauthorizedRole?: string;
-  webhook?: {
-    url: string;
-    urlFromEnv?: string;
-    mode: 'GET' | 'POST';
-    forwardHeaders?: boolean;
-  };
-}
+export type AuthConfig = z.infer<typeof AuthConfigSchema>;
 
-export interface DatabasesConfig {
-  primary: {
-    urlEnv: string;
-    pool?: PoolConfig;
-  };
-  replicas?: {
-    urlEnv: string;
-    pool?: PoolConfig;
-  }[];
-  readYourWrites?: {
-    enabled: boolean;
-    windowSeconds: number;
-  };
-  preparedStatements?: {
-    enabled: boolean;
-    maxCached?: number;
-  };
-}
+export type DatabasesConfig = z.infer<typeof DatabasesConfigSchema>;
 
-export interface PoolConfig {
-  max?: number;
-  idleTimeout?: number;
-  connectionTimeout?: number;
-}
+export type PoolConfig = z.infer<typeof PoolConfigSchema>;
 
 // ─── Utility types ──────────────────────────────────────────────────────────
 

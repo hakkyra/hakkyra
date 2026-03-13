@@ -19,6 +19,7 @@ import type {
 } from '../types.js';
 import { parseRESTFilters } from './filters.js';
 import type { ParsedRESTQuery, OrderByClause } from './filters.js';
+import { MutationBodySchema, PaginationSchema } from './schemas.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from '../sql/utils.js';
 import { compileWhere } from '../sql/where.js';
 import { compileSelectAggregate } from '../sql/select.js';
@@ -585,6 +586,17 @@ function registerListRoute(
 
     try {
       const queryParams = request.query as Record<string, string>;
+
+      // Validate pagination parameters
+      const paginationResult = PaginationSchema.safeParse(queryParams);
+      if (!paginationResult.success) {
+        void reply.code(400).send({
+          error: 'validation_error',
+          message: paginationResult.error.issues[0].message,
+        });
+        return;
+      }
+
       const parsed = parseRESTFilters(queryParams);
 
       // Apply default order from override if no order specified by the client
@@ -781,11 +793,15 @@ function registerInsertRoute(
     }
 
     try {
-      const body = request.body as Record<string, unknown> | null;
-      if (!body || typeof body !== 'object' || Array.isArray(body)) {
-        sendBadRequest(reply, 'Request body must be a JSON object');
+      const bodyResult = MutationBodySchema.safeParse(request.body);
+      if (!bodyResult.success) {
+        void reply.code(400).send({
+          error: 'validation_error',
+          message: bodyResult.error.issues[0].message,
+        });
         return;
       }
+      const body = bodyResult.data;
 
       // Extract on_conflict from body if present
       const onConflict = body.on_conflict as
@@ -840,11 +856,15 @@ function registerUpdateRoute(
 
     try {
       const { id } = request.params as { id: string };
-      const body = request.body as Record<string, unknown> | null;
-      if (!body || typeof body !== 'object' || Array.isArray(body)) {
-        sendBadRequest(reply, 'Request body must be a JSON object');
+      const bodyResult = MutationBodySchema.safeParse(request.body);
+      if (!bodyResult.success) {
+        void reply.code(400).send({
+          error: 'validation_error',
+          message: bodyResult.error.issues[0].message,
+        });
         return;
       }
+      const body = bodyResult.data;
 
       const pkValues = extractPKValues(table, id);
       const permission = session.isAdmin ? undefined : deps.getPermission(table, session.role);

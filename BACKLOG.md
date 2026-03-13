@@ -342,11 +342,11 @@
 - [ ] Tests for Zod schemas (valid configs pass, invalid configs produce clear errors with paths)
 
 ### P4.2 — Observability
-- [ ] Structured logging with pino
-- [ ] Request/query logging (configurable verbosity)
-- [ ] Query performance metrics (timing, rows returned)
+- [x] Structured logging with pino (Fastify logger, connection manager logger)
+- [x] Request/query logging (onResponse hook with method, URL, status, time, role, GraphQL operation)
+- [x] Slow query detection and logging (configurable `slow_query_threshold_ms`, default 200ms)
 - [ ] OpenTelemetry tracing integration
-- [ ] Slow query detection and logging
+- [ ] Query performance metrics dashboard/export
 
 ### P4.3 — Performance
 - [x] Query plan caching (LRU cache for compiled SQL templates)
