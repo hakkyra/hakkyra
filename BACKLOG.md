@@ -292,6 +292,12 @@
 
 ### P4.3 — Performance
 - [x] Query plan caching (LRU cache for compiled SQL templates)
+- [ ] Trigger reconciliation — diff-based startup instead of DROP+CREATE all
+  - [ ] Query existing hakkyra triggers from pg_trigger/pg_proc in single query
+  - [ ] Diff desired (YAML) vs actual (DB) trigger sets
+  - [ ] Only CREATE new triggers, DROP orphaned triggers, skip unchanged
+  - [ ] `CREATE OR REPLACE FUNCTION` for event trigger functions (no data lock)
+  - [ ] Orphan cleanup: auto-remove triggers for tables removed from YAML
 - [ ] Connection pool tuning
 - [ ] Memory profiling for subscription-heavy workloads
 
