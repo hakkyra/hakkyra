@@ -33,8 +33,8 @@ import type { QueryCache } from './sql/cache.js';
 import { createConfigWatcher } from './config/watcher.js';
 import type { ConfigWatcher } from './config/watcher.js';
 import { loadConfig } from './config/loader.js';
-import { createPgBossManager } from './shared/pg-boss-manager.js';
-import type { PgBossManager } from './shared/pg-boss-manager.js';
+import { createJobQueue } from './shared/job-queue/index.js';
+import type { JobQueue } from './shared/job-queue/types.js';
 import { initCronTriggers } from './crons/index.js';
 import { initEventTriggers } from './events/manager.js';
 import type { EventManager } from './events/manager.js';
@@ -354,13 +354,13 @@ export async function createServer(
     });
   }
 
-  // ── Phase 2: pg-boss, events, crons, subscriptions ──────────────────
+  // ── Phase 2: job queue, events, crons, subscriptions ────────────────
 
-  // Resolve the primary database connection string for pg-boss and pg-listen
+  // Resolve the primary database connection string for job queue and pg-listen
   const primaryUrlEnv = config.databases.primary.urlEnv;
   const primaryConnectionString = process.env[primaryUrlEnv] ?? '';
 
-  let pgBossManager: PgBossManager | undefined;
+  let jobQueue: JobQueue | undefined;
   let eventManager: EventManager | undefined;
   let changeListener: ChangeListener | undefined;
   let subscriptionMgr: SubscriptionManager | undefined;
@@ -371,36 +371,41 @@ export async function createServer(
 
   if (primaryConnectionString) {
     try {
-      // Start pg-boss (shared by events + crons)
-      pgBossManager = createPgBossManager(primaryConnectionString);
-      await pgBossManager.start();
-      server.log.info('pg-boss started');
+      // Start job queue (shared by events + crons)
+      // Determine provider from config (default: pg-boss)
+      const jobQueueConfig = config.jobQueue ?? { provider: 'pg-boss' as const };
+      jobQueue = await createJobQueue({
+        ...jobQueueConfig,
+        connectionString: jobQueueConfig.connectionString ?? primaryConnectionString,
+      });
+      await jobQueue.start();
+      server.log.info({ provider: jobQueueConfig.provider ?? 'pg-boss' }, 'Job queue started');
 
       // Initialize cron triggers
-      await initCronTriggers(pgBossManager.boss, config.cronTriggers, log);
+      await initCronTriggers(jobQueue, config.cronTriggers, log);
 
       // Initialize event triggers
       eventManager = await initEventTriggers(
         primaryPool,
-        pgBossManager.boss,
+        jobQueue,
         schemaModel.tables,
         primaryConnectionString,
         log,
       );
 
       // Register event log cleanup
-      await registerEventCleanup(pgBossManager.boss, primaryPool, 7, log);
+      await registerEventCleanup(jobQueue, primaryPool, 7, log);
     } catch (err) {
 
       server.log.warn({ err }, 'Phase 2 (events/crons) initialization failed — continuing without');
-      pgBossManager = undefined;
+      jobQueue = undefined;
       eventManager = undefined;
     }
 
     // ── Manual event invocation route ─────────────────────────────────────
     registerInvokeRoute(server as any, {
       pool: primaryPool,
-      boss: pgBossManager?.boss,
+      jobQueue,
       tables: schemaModel.tables,
     });
 
@@ -533,7 +538,7 @@ export async function createServer(
       configWatcher?.stop();
       await changeListener?.stop();
       await eventManager?.stop();
-      await pgBossManager?.stop();
+      await jobQueue?.stop();
       await server.close();
       await connectionManager.shutdown();
       server.log.info('Server shut down gracefully');

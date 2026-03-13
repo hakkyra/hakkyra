@@ -6,9 +6,9 @@
  */
 
 import type { Pool } from 'pg';
-import type { PgBoss, Job } from 'pg-boss';
 import type { Logger } from 'pino';
 import type { TableInfo, EventTriggerConfig } from '../types.js';
+import type { JobQueue, Job } from '../shared/job-queue/types.js';
 import {
   deliverWebhook,
   resolveWebhookUrl,
@@ -78,7 +78,7 @@ function buildTriggerLookup(tables: TableInfo[]): Map<string, { trigger: EventTr
  */
 export async function enqueuePendingEvents(
   pool: Pool,
-  boss: PgBoss,
+  jobQueue: JobQueue,
   logger: Logger,
 ): Promise<number> {
   const result = await pool.query<EventLogRow>(
@@ -101,7 +101,7 @@ export async function enqueuePendingEvents(
 
   // Enqueue each event into pg-boss
   for (const event of result.rows) {
-    await boss.send(`event/${event.trigger_name}`, {
+    await jobQueue.send(`event/${event.trigger_name}`, {
       eventId: event.id,
       payload: buildEventPayload(event),
     });
@@ -117,7 +117,7 @@ export async function enqueuePendingEvents(
  * Each worker delivers the webhook and updates the event_log status.
  */
 export async function registerEventWorkers(
-  boss: PgBoss,
+  jobQueue: JobQueue,
   pool: Pool,
   tables: TableInfo[],
   logger: Logger,
@@ -128,14 +128,14 @@ export async function registerEventWorkers(
     const queueName = `event/${triggerName}`;
 
     // Configure the queue with retry settings
-    await boss.createQueue(queueName, {
+    await jobQueue.createQueue(queueName, {
       retryLimit: trigger.retryConf.numRetries,
       retryDelay: trigger.retryConf.intervalSec,
       retryBackoff: true,
       expireInSeconds: trigger.retryConf.timeoutSec,
     });
 
-    await boss.work<{ eventId: string; payload: unknown }>(queueName, async (jobs: Job<{ eventId: string; payload: unknown }>[]) => {
+    await jobQueue.work<{ eventId: string; payload: unknown }>(queueName, async (jobs: Job<{ eventId: string; payload: unknown }>[]) => {
       for (const job of jobs) {
       const { eventId, payload } = job.data;
 

@@ -227,6 +227,16 @@ export interface RawServerConfig {
     port?: number;
     host?: string;
   };
+  job_queue?: {
+    provider?: 'pg-boss' | 'bullmq';
+    connection_string?: string;
+    redis?: {
+      url?: string;
+      host?: string;
+      port?: number;
+      password?: string;
+    };
+  };
   auth?: {
     jwt?: {
       type?: string;

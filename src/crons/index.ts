@@ -4,9 +4,9 @@
  * Registers cron schedules and webhook delivery workers with pg-boss.
  */
 
-import type { PgBoss } from 'pg-boss';
 import type { Logger } from 'pino';
 import type { CronTriggerConfig } from '../types.js';
+import type { JobQueue } from '../shared/job-queue/types.js';
 import { registerCronTriggers } from './scheduler.js';
 import { registerCronWorkers } from './worker.js';
 
@@ -17,7 +17,7 @@ export { registerCronWorkers } from './worker.js';
  * Initialize all cron triggers: register schedules and start workers.
  */
 export async function initCronTriggers(
-  boss: PgBoss,
+  jobQueue: JobQueue,
   triggers: CronTriggerConfig[],
   logger: Logger,
 ): Promise<void> {
@@ -26,8 +26,8 @@ export async function initCronTriggers(
     return;
   }
 
-  await registerCronTriggers(boss, triggers);
-  await registerCronWorkers(boss, triggers, logger);
+  await registerCronTriggers(jobQueue, triggers);
+  await registerCronWorkers(jobQueue, triggers, logger);
 
   logger.info({ count: triggers.length }, 'Cron triggers initialized');
 }

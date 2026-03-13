@@ -17,6 +17,7 @@ import type {
   APIDocsConfig,
   AuthConfig,
   DatabasesConfig,
+  JobQueueConfig,
   BoolExp,
 } from '../types.js';
 import type {
@@ -154,6 +155,7 @@ export async function loadConfig(
     customQueries: transformCustomQueries(apiConfig),
     apiDocs: transformDocsConfig(apiConfig),
     tableAliases,
+    jobQueue: transformJobQueueConfig(serverConfig),
   };
 }
 
@@ -610,6 +612,24 @@ async function loadServerConfig(configPath?: string): Promise<RawServerConfig | 
     return null;
   }
   return raw as RawServerConfig;
+}
+
+function transformJobQueueConfig(serverConfig: RawServerConfig | null): JobQueueConfig | undefined {
+  const jq = serverConfig?.job_queue;
+  if (!jq) return undefined;
+
+  return {
+    provider: jq.provider ?? 'pg-boss',
+    connectionString: jq.connection_string,
+    redis: jq.redis
+      ? {
+          url: jq.redis.url,
+          host: jq.redis.host,
+          port: jq.redis.port,
+          password: jq.redis.password,
+        }
+      : undefined,
+  };
 }
 
 function transformAuth(serverConfig: RawServerConfig | null): AuthConfig {

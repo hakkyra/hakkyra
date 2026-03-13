@@ -370,6 +370,25 @@ export interface HakkyraConfig {
   customQueries: CustomQueryConfig[];
   apiDocs: APIDocsConfig;
   tableAliases: Record<string, string>;
+  /** Job queue backend configuration (default: pg-boss). */
+  jobQueue?: JobQueueConfig;
+}
+
+// ─── Job Queue Configuration ─────────────────────────────────────────────────
+
+export type JobQueueProvider = 'pg-boss' | 'bullmq';
+
+export interface JobQueueConfig {
+  provider: JobQueueProvider;
+  /** pg-boss uses the database connection string. Falls back to the primary database URL. */
+  connectionString?: string;
+  /** Redis connection info, required when provider is 'bullmq'. */
+  redis?: {
+    url?: string;
+    host?: string;
+    port?: number;
+    password?: string;
+  };
 }
 
 export interface AuthConfig {

@@ -8,8 +8,8 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Pool } from 'pg';
-import type { PgBoss } from 'pg-boss';
 import type { TableInfo, EventTriggerConfig } from '../types.js';
+import type { JobQueue } from '../shared/job-queue/types.js';
 import { buildEventPayload } from './delivery.js';
 import type { EventLogRow } from './delivery.js';
 
@@ -73,7 +73,7 @@ function validateBody(body: unknown): string | null {
 
 export interface InvokeRouteDeps {
   pool: Pool;
-  boss: PgBoss | undefined;
+  jobQueue: JobQueue | undefined;
   tables: TableInfo[];
 }
 
@@ -105,7 +105,7 @@ export function registerInvokeRoute(
       }
 
       // ── 2. Check event system availability ─────────────────────────────
-      if (!deps.boss) {
+      if (!deps.jobQueue) {
         void reply.code(503).send({
           error: 'service_unavailable',
           message: 'Event system is not available',
@@ -183,7 +183,7 @@ export function registerInvokeRoute(
 
         const eventPayload = buildEventPayload(eventLogRow);
 
-        await deps.boss.send(`event/${triggerName}`, {
+        await deps.jobQueue.send(`event/${triggerName}`, {
           eventId,
           payload: eventPayload,
         });

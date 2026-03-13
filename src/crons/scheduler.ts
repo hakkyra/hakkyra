@@ -5,19 +5,19 @@
  * scheduled job processing.
  */
 
-import type { PgBoss, ScheduleOptions } from 'pg-boss';
 import type { CronTriggerConfig } from '../types.js';
+import type { JobQueue, ScheduleOptions } from '../shared/job-queue/types.js';
 
 /**
- * Register all cron triggers with pg-boss.
+ * Register all cron triggers with the job queue.
  *
- * Each trigger is scheduled as a pg-boss cron job. pg-boss handles:
- * - Distributed single-execution via advisory locks
+ * Each trigger is scheduled as a cron job. The underlying provider handles:
+ * - Distributed single-execution
  * - Cron expression parsing and scheduling
  * - Retry with configurable backoff
  */
 export async function registerCronTriggers(
-  boss: PgBoss,
+  jobQueue: JobQueue,
   triggers: CronTriggerConfig[],
 ): Promise<void> {
   for (const trigger of triggers) {
@@ -32,7 +32,7 @@ export async function registerCronTriggers(
       options.expireInSeconds = trigger.retryConf.timeoutSeconds;
     }
 
-    await boss.schedule(
+    await jobQueue.schedule(
       queueName,
       trigger.schedule,
       { payload: trigger.payload ?? null },

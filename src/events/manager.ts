@@ -10,10 +10,10 @@
  */
 
 import type { Pool } from 'pg';
-import type { PgBoss } from 'pg-boss';
 import type { Logger } from 'pino';
 import createSubscriber from 'pg-listen';
 import type { TableInfo } from '../types.js';
+import type { JobQueue } from '../shared/job-queue/types.js';
 import { ensureEventSchema } from './schema.js';
 import { installEventTriggers, removeEventTriggers } from './triggers.js';
 import { enqueuePendingEvents, registerEventWorkers } from './delivery.js';
@@ -31,7 +31,7 @@ export interface EventManager {
  * Initialize the event trigger system.
  *
  * @param pool - Primary database connection pool
- * @param boss - pg-boss instance (must already be started)
+ * @param jobQueue - Job queue instance (must already be started)
  * @param tables - All tracked tables (only those with eventTriggers are processed)
  * @param connectionString - Connection string for pg-listen
  * @param logger - Pino logger instance
@@ -39,7 +39,7 @@ export interface EventManager {
  */
 export async function initEventTriggers(
   pool: Pool,
-  boss: PgBoss,
+  jobQueue: JobQueue,
   tables: TableInfo[],
   connectionString: string,
   logger: Logger,
@@ -62,15 +62,15 @@ export async function initEventTriggers(
     'Event triggers installed',
   );
 
-  // 3. Register pg-boss workers
-  await registerEventWorkers(boss, pool, tables, logger);
+  // 3. Register job queue workers
+  await registerEventWorkers(jobQueue, pool, tables, logger);
 
   // 4. Start pg-listen subscriber
   const subscriber = createSubscriber({ connectionString });
 
   subscriber.notifications.on('hakkyra_events', async () => {
     try {
-      await enqueuePendingEvents(pool, boss, logger);
+      await enqueuePendingEvents(pool, jobQueue, logger);
     } catch (err) {
       logger.error({ err }, 'Error processing event notification');
     }
@@ -85,7 +85,7 @@ export async function initEventTriggers(
   logger.info('Event listener connected');
 
   // 5. Catchup: process any pending events from before startup
-  const catchupCount = await enqueuePendingEvents(pool, boss, logger);
+  const catchupCount = await enqueuePendingEvents(pool, jobQueue, logger);
   if (catchupCount > 0) {
     logger.info({ count: catchupCount }, 'Caught up pending events');
   }

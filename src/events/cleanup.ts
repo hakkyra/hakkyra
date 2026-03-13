@@ -6,19 +6,19 @@
  */
 
 import type { Pool } from 'pg';
-import type { PgBoss } from 'pg-boss';
 import type { Logger } from 'pino';
+import type { JobQueue } from '../shared/job-queue/types.js';
 
 /**
  * Register a cleanup job that runs daily to remove old delivered events.
  *
- * @param boss - pg-boss instance
+ * @param jobQueue - Job queue instance
  * @param pool - Database connection pool
  * @param retentionDays - Number of days to retain delivered events (default: 7)
  * @param logger - Logger instance
  */
 export async function registerEventCleanup(
-  boss: PgBoss,
+  jobQueue: JobQueue,
   pool: Pool,
   retentionDays: number = 7,
   logger: Logger,
@@ -26,9 +26,9 @@ export async function registerEventCleanup(
   const queueName = 'hakkyra/cleanup_events';
 
   // Schedule daily cleanup at 3 AM
-  await boss.schedule(queueName, '0 3 * * *', { retentionDays });
+  await jobQueue.schedule(queueName, '0 3 * * *', { retentionDays });
 
-  await boss.work(queueName, async (_jobs) => {
+  await jobQueue.work(queueName, async (_jobs) => {
     const result = await pool.query(
       `DELETE FROM hakkyra.event_log
        WHERE status = 'delivered'

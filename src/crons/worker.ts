@@ -5,9 +5,9 @@
  * webhooks with Hasura-compatible payload format.
  */
 
-import type { PgBoss, Job } from 'pg-boss';
 import type { Logger } from 'pino';
 import type { CronTriggerConfig } from '../types.js';
+import type { JobQueue, Job } from '../shared/job-queue/types.js';
 import {
   deliverWebhook,
   resolveWebhookUrl,
@@ -27,23 +27,23 @@ function buildCronPayload(trigger: CronTriggerConfig, scheduledTime: string): un
 }
 
 /**
- * Register pg-boss workers for all cron triggers.
+ * Register workers for all cron triggers.
  *
  * Each worker:
  * 1. Resolves the webhook URL and headers
  * 2. Builds a Hasura-compatible payload
  * 3. Delivers the webhook via HTTP POST
- * 4. Throws on failure (pg-boss handles retry)
+ * 4. Throws on failure (job queue handles retry)
  */
 export async function registerCronWorkers(
-  boss: PgBoss,
+  jobQueue: JobQueue,
   triggers: CronTriggerConfig[],
   logger: Logger,
 ): Promise<void> {
   for (const trigger of triggers) {
     const queueName = `cron:${trigger.name}`;
 
-    await boss.work<Record<string, unknown>>(queueName, async (jobs: Job<Record<string, unknown>>[]) => {
+    await jobQueue.work<Record<string, unknown>>(queueName, async (jobs: Job<Record<string, unknown>>[]) => {
       for (const job of jobs) {
         const url = resolveWebhookUrl(trigger.webhook, trigger.webhookFromEnv);
         const headers = resolveWebhookHeaders(trigger.headers);
