@@ -23,7 +23,7 @@ export interface PgBossManager {
  * Uses the `hakkyra` schema to isolate pg-boss tables from the application schema.
  * Auto-creates required tables on startup via `migrate: true`.
  */
-export function createPgBossManager(connectionString: string): PgBossManager {
+export function createPgBossManager(connectionString: string, gracefulShutdownMs: number = 10000): PgBossManager {
   const boss = new PgBoss({
     connectionString,
     schema: 'hakkyra_boss',
@@ -39,7 +39,7 @@ export function createPgBossManager(connectionString: string): PgBossManager {
     },
 
     async stop(): Promise<void> {
-      await boss.stop({ graceful: true, timeout: 10000 });
+      await boss.stop({ graceful: true, timeout: gracefulShutdownMs });
     },
   };
 }

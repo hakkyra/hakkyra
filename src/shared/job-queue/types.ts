@@ -84,4 +84,6 @@ export interface JobQueueConfig {
     port?: number;
     password?: string;
   };
+  /** Timeout in milliseconds for graceful shutdown (default: 10000). */
+  gracefulShutdownMs?: number;
 }

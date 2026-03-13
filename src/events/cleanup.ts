@@ -9,6 +9,11 @@ import type { Pool } from 'pg';
 import type { Logger } from 'pino';
 import type { JobQueue } from '../shared/job-queue/types.js';
 
+export interface EventCleanupOptions {
+  /** Cron schedule for the cleanup job (default: '0 3 * * *'). */
+  schedule?: string;
+}
+
 /**
  * Register a cleanup job that runs daily to remove old delivered events.
  *
@@ -16,17 +21,20 @@ import type { JobQueue } from '../shared/job-queue/types.js';
  * @param pool - Database connection pool
  * @param retentionDays - Number of days to retain delivered events (default: 7)
  * @param logger - Logger instance
+ * @param options - Optional configuration overrides
  */
 export async function registerEventCleanup(
   jobQueue: JobQueue,
   pool: Pool,
   retentionDays: number = 7,
   logger: Logger,
+  options?: EventCleanupOptions,
 ): Promise<void> {
   const queueName = 'hakkyra/cleanup_events';
+  const schedule = options?.schedule ?? '0 3 * * *';
 
-  // Schedule daily cleanup at 3 AM
-  await jobQueue.schedule(queueName, '0 3 * * *', { retentionDays });
+  // Schedule cleanup
+  await jobQueue.schedule(queueName, schedule, { retentionDays });
 
   await jobQueue.work(queueName, async (_jobs) => {
     const result = await pool.query(

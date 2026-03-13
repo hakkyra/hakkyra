@@ -316,67 +316,67 @@
 
 ## Improvements
 
-### Centralize Magic Defaults into Zod Schemas
-Move all hardcoded default values to Zod `.default()` in `src/config/schemas.ts` / `schemas-internal.ts` so they are configurable, documented in one place, and validated at load time.
+### Centralize Magic Defaults into Zod Schemas — COMPLETE
+Move all hardcoded default values to Zod `.default()` in `src/config/schemas-internal.ts` so they are configurable, documented in one place, and validated at load time. Raw YAML schemas (`schemas.ts`) accept optional fields; internal schemas apply defaults via `.default()`. Loader strips undefined values and parses through `HakkyraConfigSchema.parse()`.
 
 **Server & CLI** (`src/cli.ts`, `src/config/loader.ts`, `src/server.ts`)
-- [ ] `server.port` → `3000`
-- [ ] `server.host` → `'0.0.0.0'`
-- [ ] `server.logLevel` → `'info'`
-- [ ] `configPath` → `'./hakkyra.yaml'`, `metadataPath` → `'./metadata'`
-- [ ] `configWatcher.debounceMs` → `500`
+- [x] `server.port` → `3000`
+- [x] `server.host` → `'0.0.0.0'`
+- [x] `server.logLevel` → `'info'`
+- [x] `configPath` → `'./hakkyra.yaml'`, `metadataPath` → `'./metadata'` (exported as `CONFIG_DEFAULTS`)
+- [x] `configWatcher.debounceMs` → `500` (exported as `CONFIG_DEFAULTS`)
 
 **Database Pools** (`src/config/loader.ts`, `src/connections/manager.ts`)
-- [ ] `pool.max` → `10`
-- [ ] `pool.idleTimeout` → `30` (seconds)
-- [ ] `pool.connectionTimeout` → `5` (seconds)
-- [ ] `pool.maxLifetime` — ensure mapped through schema
-- [ ] `readYourWrites.windowSeconds` → `5`
+- [x] `pool.max` → `10`
+- [x] `pool.idleTimeout` → `30` (seconds)
+- [x] `pool.connectionTimeout` → `5` (seconds)
+- [x] `pool.maxLifetime` — mapped through schema (optional, no default)
+- [x] `readYourWrites.windowSeconds` → `5`
 
 **Caching** (`src/sql/cache.ts`, `src/server.ts`)
-- [ ] `queryCache.maxSize` → `1000`
+- [x] `queryCache.maxSize` → `1000`
 
 **Subscriptions** (`src/subscriptions/manager.ts`, `src/server.ts`)
-- [ ] `subscription.debounceMs` → `50`
-- [ ] `subscription.keepAliveMs` → `30000`
+- [x] `subscription.debounceMs` → `50`
+- [x] `subscription.keepAliveMs` → `30000`
 
 **Event Triggers** (`src/events/delivery.ts`, `src/events/cleanup.ts`)
-- [ ] `eventLogRetentionDays` → `7`
-- [ ] `eventDelivery.batchSize` → `100`
-- [ ] `eventCleanup.schedule` → `'0 3 * * *'`
-- [ ] `slowQueryThresholdMs` → `200`
+- [x] `eventLogRetentionDays` → `7`
+- [x] `eventDelivery.batchSize` → `100`
+- [x] `eventCleanup.schedule` → `'0 3 * * *'`
+- [x] `slowQueryThresholdMs` → `200`
 
 **Webhooks & Auth** (`src/shared/webhook.ts`, `src/auth/webhook.ts`, `src/actions/proxy.ts`)
-- [ ] `webhook.timeoutMs` → `30000`
-- [ ] `authWebhook.timeoutMs` → `5000`
-- [ ] `authWebhook.cacheTtlMs` → `0`
-- [ ] `authWebhook.mode` → `'GET'`
-- [ ] `backoff.capSeconds` → `3600`
+- [x] `webhook.timeoutMs` → `30000`
+- [x] `authWebhook.timeoutMs` → `5000` (auth webhook config, schema-level)
+- [x] `authWebhook.cacheTtlMs` → `0` (auth webhook config, schema-level)
+- [x] `authWebhook.mode` → `'GET'`
+- [x] `backoff.capSeconds` → `3600`
 
 **Actions** (`src/actions/async.ts`, `src/actions/proxy.ts`)
-- [ ] `action.timeoutSeconds` → `30`
-- [ ] `asyncAction.retryLimit` → `3`
-- [ ] `asyncAction.retryDelaySeconds` → `10`
-- [ ] `asyncAction.timeoutSeconds` → `120`
+- [x] `action.timeoutSeconds` → `30`
+- [x] `asyncAction.retryLimit` → `3`
+- [x] `asyncAction.retryDelaySeconds` → `10`
+- [x] `asyncAction.timeoutSeconds` → `120`
 
 **JWT** (`src/config/loader.ts`)
-- [ ] `jwt.type` → `'HS256'`
+- [x] `jwt.type` → `'HS256'`
 
 **Job Queue** (`src/shared/pg-boss-manager.ts`, `src/shared/job-queue/`)
-- [ ] `jobQueue.provider` → `'pg-boss'`
-- [ ] `jobQueue.gracefulShutdownMs` → `10000`
-- [ ] `redis.port` → `6379`
+- [x] `jobQueue.provider` → `'pg-boss'`
+- [x] `jobQueue.gracefulShutdownMs` → `10000`
+- [x] `redis.port` → `6379`
 
 **SQL Optimization Thresholds** (`src/sql/where.ts`, `src/sql/insert.ts`)
-- [ ] `sql.arrayAnyThreshold` → `20`
-- [ ] `sql.unnestThreshold` → `500`
-- [ ] `sql.batchChunkSize` → `100`
+- [x] `sql.arrayAnyThreshold` → `20`
+- [x] `sql.unnestThreshold` → `500`
+- [x] `sql.batchChunkSize` → `100`
 
 **REST** (`src/config/loader.ts`)
-- [ ] `rest.defaultLimit` → `20`
-- [ ] `rest.maxLimit` → `100`
-- [ ] `rest.autoGenerate` → `true`
-- [ ] `rest.basePath` → `'/api'`
+- [x] `rest.defaultLimit` → `20`
+- [x] `rest.maxLimit` → `100`
+- [x] `rest.autoGenerate` → `true`
+- [x] `rest.basePath` → `'/api'`
 
 ### Other Improvements
 - [x] Dual connection pool — dedicated session-mode pool for LISTEN/NOTIFY, separate pooled connections for queries/mutations (enables PgBouncer transaction-mode compatibility)
@@ -410,5 +410,5 @@ Move all hardcoded default values to Zod `.default()` in `src/config/schemas.ts`
 | Action transforms | 32 | Pass |
 | Batch operations | 26 | Pass |
 | Action relationships | 13 | Pass |
-| Zod schemas | 228 | Pass |
-| **Total** | **719** | **23 suites, all passing** |
+| Zod schemas | 237 | Pass |
+| **Total** | **728** | **23 suites, all passing** |

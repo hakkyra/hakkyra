@@ -80,6 +80,7 @@ export async function enqueuePendingEvents(
   pool: Pool,
   jobQueue: JobQueue,
   logger: Logger,
+  batchSize: number = 100,
 ): Promise<number> {
   const result = await pool.query<EventLogRow>(
     `SELECT id, trigger_name, table_schema, table_name, operation,
@@ -87,7 +88,8 @@ export async function enqueuePendingEvents(
      FROM hakkyra.event_log
      WHERE status = 'pending' AND next_retry <= now()
      ORDER BY created_at ASC
-     LIMIT 100`,
+     LIMIT $1`,
+    [batchSize],
   );
 
   if (result.rows.length === 0) return 0;

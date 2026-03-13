@@ -66,9 +66,9 @@ function createPool(urlEnv: string, poolConfig?: PoolConfig): PoolInstance {
 
   return new Pool({
     connectionString,
-    max: poolConfig?.max ?? 10,
-    idleTimeoutMillis: (poolConfig?.idleTimeout ?? 30) * 1000,
-    connectionTimeoutMillis: (poolConfig?.connectionTimeout ?? 5) * 1000,
+    max: poolConfig?.max,
+    idleTimeoutMillis: poolConfig ? poolConfig.idleTimeout * 1000 : undefined,
+    connectionTimeoutMillis: poolConfig ? poolConfig.connectionTimeout * 1000 : undefined,
     ...(poolConfig?.maxLifetime != null && {
       maxLifetimeMillis: poolConfig.maxLifetime * 1000,
     }),
@@ -127,7 +127,7 @@ export function createConnectionManager(
   // Read-your-writes consistency tracker (optional)
   let consistencyTracker: ConsistencyTracker | undefined;
   if (config.readYourWrites?.enabled && replicaPools.length > 0) {
-    const windowMs = (config.readYourWrites.windowSeconds ?? 5) * 1000;
+    const windowMs = config.readYourWrites.windowSeconds * 1000;
     consistencyTracker = createConsistencyTracker(windowMs);
   }
 

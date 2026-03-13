@@ -424,6 +424,7 @@ export const RawServerConfigSchema = z
         port: z.number().optional(),
         host: z.string().optional(),
         slow_query_threshold_ms: z.number().optional(),
+        log_level: z.string().optional(),
       })
       .passthrough()
       .optional(),
@@ -522,6 +523,55 @@ export const RawServerConfigSchema = z
         host: z.string().optional(),
         port: z.number().optional(),
         password: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    query_cache: z
+      .object({
+        max_size: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+    subscriptions: z
+      .object({
+        debounce_ms: z.number().optional(),
+        keep_alive_ms: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+    event_delivery: z
+      .object({
+        batch_size: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+    event_cleanup: z
+      .object({
+        schedule: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    webhook: z
+      .object({
+        timeout_ms: z.number().optional(),
+        backoff_cap_seconds: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+    action_defaults: z
+      .object({
+        timeout_seconds: z.number().optional(),
+        async_retry_limit: z.number().optional(),
+        async_retry_delay_seconds: z.number().optional(),
+        async_timeout_seconds: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+    sql: z
+      .object({
+        array_any_threshold: z.number().optional(),
+        unnest_threshold: z.number().optional(),
+        batch_chunk_size: z.number().optional(),
       })
       .passthrough()
       .optional(),

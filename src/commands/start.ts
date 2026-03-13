@@ -61,7 +61,8 @@ export async function startServer(options: StartOptions): Promise<void> {
       configPath: options.configPath,
     });
   } catch (err) {
-    console.error('Failed to create server:', err instanceof Error ? err.message : err);
+    const msg = err instanceof Error ? (err.message || err.stack || String(err)) : String(err);
+    console.error('Failed to create server:', msg);
     process.exit(1);
   }
 

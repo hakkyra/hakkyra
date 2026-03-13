@@ -1438,22 +1438,22 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
       });
     });
 
-    it('rejects missing autoGenerate', () => {
+    it('defaults autoGenerate to true when missing', () => {
       const { autoGenerate, ...rest } = validRest;
-      const err = expectInvalid(RESTConfigSchema, rest);
-      expect(err.issues.some((i) => i.path.includes('autoGenerate'))).toBe(true);
+      const result = expectValid(RESTConfigSchema, rest);
+      expect(result.autoGenerate).toBe(true);
     });
 
-    it('rejects missing basePath', () => {
+    it('defaults basePath to /api when missing', () => {
       const { basePath, ...rest } = validRest;
-      const err = expectInvalid(RESTConfigSchema, rest);
-      expect(err.issues.some((i) => i.path.includes('basePath'))).toBe(true);
+      const result = expectValid(RESTConfigSchema, rest);
+      expect(result.basePath).toBe('/api');
     });
 
-    it('rejects missing pagination', () => {
+    it('defaults pagination when missing', () => {
       const { pagination, ...rest } = validRest;
-      const err = expectInvalid(RESTConfigSchema, rest);
-      expect(err.issues.some((i) => i.path.includes('pagination'))).toBe(true);
+      const result = expectValid(RESTConfigSchema, rest);
+      expect(result.pagination).toEqual({ defaultLimit: 20, maxLimit: 100 });
     });
   });
 
@@ -1544,9 +1544,9 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
       expectInvalid(JobQueueConfigSchema, { provider: 'sidekiq' });
     });
 
-    it('rejects missing provider', () => {
-      const err = expectInvalid(JobQueueConfigSchema, {});
-      expect(err.issues.some((i) => i.path.includes('provider'))).toBe(true);
+    it('defaults provider to pg-boss when missing', () => {
+      const result = expectValid(JobQueueConfigSchema, {});
+      expect(result.provider).toBe('pg-boss');
     });
   });
 
@@ -1822,10 +1822,10 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
       expect(err.issues.some((i) => i.path.includes('version'))).toBe(true);
     });
 
-    it('rejects missing server', () => {
+    it('defaults server when missing', () => {
       const { server, ...rest } = minimalConfig;
-      const err = expectInvalid(HakkyraConfigSchema, rest);
-      expect(err.issues.some((i) => i.path.includes('server'))).toBe(true);
+      const result = expectValid(HakkyraConfigSchema, rest);
+      expect(result.server).toEqual({ port: 3000, host: '0.0.0.0', logLevel: 'info' });
     });
 
     it('rejects missing databases', () => {
@@ -1840,16 +1840,67 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
       expect(err.issues.some((i) => i.path.includes('rest'))).toBe(true);
     });
 
-    it('rejects missing eventLogRetentionDays', () => {
+    it('defaults eventLogRetentionDays to 7 when missing', () => {
       const { eventLogRetentionDays, ...rest } = minimalConfig;
-      const err = expectInvalid(HakkyraConfigSchema, rest);
-      expect(err.issues.some((i) => i.path.includes('eventLogRetentionDays'))).toBe(true);
+      const result = expectValid(HakkyraConfigSchema, rest);
+      expect(result.eventLogRetentionDays).toBe(7);
     });
 
-    it('rejects missing slowQueryThresholdMs', () => {
+    it('defaults slowQueryThresholdMs to 200 when missing', () => {
       const { slowQueryThresholdMs, ...rest } = minimalConfig;
-      const err = expectInvalid(HakkyraConfigSchema, rest);
-      expect(err.issues.some((i) => i.path.includes('slowQueryThresholdMs'))).toBe(true);
+      const result = expectValid(HakkyraConfigSchema, rest);
+      expect(result.slowQueryThresholdMs).toBe(200);
+    });
+
+    it('defaults new configurable sections when missing', () => {
+      const result = expectValid(HakkyraConfigSchema, minimalConfig);
+      expect(result.queryCache).toEqual({ maxSize: 1000 });
+      expect(result.subscriptions).toEqual({ debounceMs: 50, keepAliveMs: 30000 });
+      expect(result.eventDelivery).toEqual({ batchSize: 100 });
+      expect(result.eventCleanup).toEqual({ schedule: '0 3 * * *' });
+      expect(result.webhook).toEqual({ timeoutMs: 30000, backoffCapSeconds: 3600 });
+      expect(result.actionDefaults).toEqual({
+        timeoutSeconds: 30,
+        asyncRetryLimit: 3,
+        asyncRetryDelaySeconds: 10,
+        asyncTimeoutSeconds: 120,
+      });
+      expect(result.sql).toEqual({
+        arrayAnyThreshold: 20,
+        unnestThreshold: 500,
+        batchChunkSize: 100,
+      });
+    });
+
+    it('allows overriding configurable section defaults', () => {
+      const result = expectValid(HakkyraConfigSchema, {
+        ...minimalConfig,
+        queryCache: { maxSize: 2000 },
+        subscriptions: { debounceMs: 100 },
+        sql: { batchChunkSize: 200 },
+      });
+      expect(result.queryCache.maxSize).toBe(2000);
+      expect(result.subscriptions.debounceMs).toBe(100);
+      expect(result.subscriptions.keepAliveMs).toBe(30000); // other field keeps default
+      expect(result.sql.batchChunkSize).toBe(200);
+      expect(result.sql.arrayAnyThreshold).toBe(20); // other field keeps default
+    });
+
+    it('defaults pool config fields', () => {
+      const result = expectValid(PoolConfigSchema, {});
+      expect(result.max).toBe(10);
+      expect(result.idleTimeout).toBe(30);
+      expect(result.connectionTimeout).toBe(5);
+    });
+
+    it('defaults JobQueueConfig gracefulShutdownMs', () => {
+      const result = expectValid(JobQueueConfigSchema, { provider: 'pg-boss' });
+      expect(result.gracefulShutdownMs).toBe(10000);
+    });
+
+    it('defaults RedisConfig port to 6379', () => {
+      const result = expectValid(RedisConfigSchema, {});
+      expect(result.port).toBe(6379);
     });
 
     it('rejects non-number version', () => {

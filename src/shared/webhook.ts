@@ -116,10 +116,11 @@ export async function deliverWebhook(options: WebhookDeliveryOptions): Promise<W
  *
  * @param attempt - The retry attempt number (0-based)
  * @param baseIntervalSec - Base interval in seconds
+ * @param capSeconds - Maximum backoff cap in seconds (default: 3600)
  * @returns Delay in milliseconds
  */
-export function calculateBackoffMs(attempt: number, baseIntervalSec: number): number {
-  // Exponential backoff: base * 2^attempt, capped at 1 hour
-  const delaySec = Math.min(baseIntervalSec * Math.pow(2, attempt), 3600);
+export function calculateBackoffMs(attempt: number, baseIntervalSec: number, capSeconds: number = 3600): number {
+  // Exponential backoff: base * 2^attempt, capped at capSeconds
+  const delaySec = Math.min(baseIntervalSec * Math.pow(2, attempt), capSeconds);
   return delaySec * 1000;
 }

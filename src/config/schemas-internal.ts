@@ -205,12 +205,12 @@ export const RESTEndpointOverrideSchema = z.object({
 });
 
 export const RESTConfigSchema = z.object({
-  autoGenerate: z.boolean(),
-  basePath: z.string(),
+  autoGenerate: z.boolean().default(true),
+  basePath: z.string().default('/api'),
   pagination: z.object({
-    defaultLimit: z.number(),
-    maxLimit: z.number(),
-  }),
+    defaultLimit: z.number().default(20),
+    maxLimit: z.number().default(100),
+  }).default({ defaultLimit: 20, maxLimit: 100 }),
   overrides: z.record(z.string(), z.array(RESTEndpointOverrideSchema)).optional(),
 });
 
@@ -259,7 +259,7 @@ export const APIDocsConfigSchema = z.object({
 export const JobQueueProviderSchema = z.enum(['pg-boss', 'bullmq']);
 
 export const JobQueueConfigSchema = z.object({
-  provider: JobQueueProviderSchema,
+  provider: JobQueueProviderSchema.default('pg-boss'),
   connectionString: z.string().optional(),
   redis: z
     .object({
@@ -269,6 +269,7 @@ export const JobQueueConfigSchema = z.object({
       password: z.string().optional(),
     })
     .optional(),
+  gracefulShutdownMs: z.number().default(10000),
 });
 
 // ---------------------------------------------------------------------------
@@ -278,7 +279,7 @@ export const JobQueueConfigSchema = z.object({
 export const AuthConfigSchema = z.object({
   jwt: z
     .object({
-      type: z.string(),
+      type: z.string().default('HS256'),
       key: z.string().optional(),
       keyEnv: z.string().optional(),
       jwkUrl: z.string().optional(),
@@ -302,7 +303,7 @@ export const AuthConfigSchema = z.object({
     .object({
       url: z.string(),
       urlFromEnv: z.string().optional(),
-      mode: z.enum(['GET', 'POST']),
+      mode: z.enum(['GET', 'POST']).default('GET'),
       forwardHeaders: z.boolean().optional(),
     })
     .optional(),
@@ -315,7 +316,7 @@ export const AuthConfigSchema = z.object({
 export const RedisConfigSchema = z.object({
   url: z.string().optional(),
   host: z.string().optional(),
-  port: z.number().optional(),
+  port: z.number().default(6379),
   password: z.string().optional(),
 });
 
@@ -324,9 +325,9 @@ export const RedisConfigSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const PoolConfigSchema = z.object({
-  max: z.number().optional(),
-  idleTimeout: z.number().optional(),
-  connectionTimeout: z.number().optional(),
+  max: z.number().default(10),
+  idleTimeout: z.number().default(30),
+  connectionTimeout: z.number().default(5),
   maxLifetime: z.number().optional(),
   allowExitOnIdle: z.boolean().optional(),
 });
@@ -351,8 +352,8 @@ export const DatabasesConfigSchema = z.object({
     .optional(),
   readYourWrites: z
     .object({
-      enabled: z.boolean(),
-      windowSeconds: z.number(),
+      enabled: z.boolean().default(false),
+      windowSeconds: z.number().default(5),
     })
     .optional(),
   preparedStatements: z
@@ -386,9 +387,10 @@ export const ComputedFieldConfigSchema = z.object({
 export const HakkyraConfigSchema = z.object({
   version: z.number(),
   server: z.object({
-    port: z.number(),
-    host: z.string(),
-  }),
+    port: z.number().default(3000),
+    host: z.string().default('0.0.0.0'),
+    logLevel: z.string().default('info'),
+  }).default({ port: 3000, host: '0.0.0.0', logLevel: 'info' }),
   auth: AuthConfigSchema,
   databases: DatabasesConfigSchema,
   tables: z.array(z.any()), // TableInfo contains introspection data — not validated
@@ -401,6 +403,44 @@ export const HakkyraConfigSchema = z.object({
   tableAliases: z.record(z.string(), z.string()),
   jobQueue: JobQueueConfigSchema.optional(),
   redis: RedisConfigSchema.optional(),
-  eventLogRetentionDays: z.number(),
-  slowQueryThresholdMs: z.number(),
+  eventLogRetentionDays: z.number().default(7),
+  slowQueryThresholdMs: z.number().default(200),
+  queryCache: z.object({
+    maxSize: z.number().default(1000),
+  }).default({ maxSize: 1000 }),
+  subscriptions: z.object({
+    debounceMs: z.number().default(50),
+    keepAliveMs: z.number().default(30000),
+  }).default({ debounceMs: 50, keepAliveMs: 30000 }),
+  eventDelivery: z.object({
+    batchSize: z.number().default(100),
+  }).default({ batchSize: 100 }),
+  eventCleanup: z.object({
+    schedule: z.string().default('0 3 * * *'),
+  }).default({ schedule: '0 3 * * *' }),
+  webhook: z.object({
+    timeoutMs: z.number().default(30000),
+    backoffCapSeconds: z.number().default(3600),
+  }).default({ timeoutMs: 30000, backoffCapSeconds: 3600 }),
+  actionDefaults: z.object({
+    timeoutSeconds: z.number().default(30),
+    asyncRetryLimit: z.number().default(3),
+    asyncRetryDelaySeconds: z.number().default(10),
+    asyncTimeoutSeconds: z.number().default(120),
+  }).default({ timeoutSeconds: 30, asyncRetryLimit: 3, asyncRetryDelaySeconds: 10, asyncTimeoutSeconds: 120 }),
+  sql: z.object({
+    arrayAnyThreshold: z.number().default(20),
+    unnestThreshold: z.number().default(500),
+    batchChunkSize: z.number().default(100),
+  }).default({ arrayAnyThreshold: 20, unnestThreshold: 500, batchChunkSize: 100 }),
 });
+
+// ---------------------------------------------------------------------------
+// CONFIG_DEFAULTS — file-system / watcher defaults not covered by Zod schemas
+// ---------------------------------------------------------------------------
+
+export const CONFIG_DEFAULTS = {
+  configPath: './hakkyra.yaml',
+  metadataPath: './metadata',
+  configWatcherDebounceMs: 500,
+} as const;

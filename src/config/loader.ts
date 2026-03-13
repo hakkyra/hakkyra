@@ -49,6 +49,14 @@ import {
   RawApiConfigSchema,
   RawServerConfigSchema,
 } from './schemas.js';
+import {
+  HakkyraConfigSchema,
+  PoolConfigSchema as InternalPoolConfigSchema,
+  DatabasesConfigSchema as InternalDatabasesConfigSchema,
+  RESTConfigSchema as InternalRESTConfigSchema,
+  AuthConfigSchema as InternalAuthConfigSchema,
+  JobQueueConfigSchema as InternalJobQueueConfigSchema,
+} from './schemas-internal.js';
 
 const log = pino({ name: 'hakkyra:config' });
 
@@ -123,6 +131,25 @@ function resolveEnv(envVar: string | undefined): string | undefined {
   return value;
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Strip keys whose value is `undefined` so that Zod `.default()` can kick in.
+ * Returns `undefined` when every field is undefined (i.e. an empty object after
+ * stripping), so Zod outer `.default({})` will trigger for the whole section.
+ */
+function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> | undefined {
+  const result: Record<string, unknown> = {};
+  let hasValue = false;
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) {
+      result[k] = v;
+      hasValue = true;
+    }
+  }
+  return hasValue ? (result as Partial<T>) : undefined;
+}
+
 // ─── Main loader ────────────────────────────────────────────────────────────
 
 /**
@@ -156,12 +183,13 @@ export async function loadConfig(
     }
   }
 
-  return {
+  const raw = {
     version,
-    server: {
-      port: serverConfig?.server?.port ?? 3000,
-      host: serverConfig?.server?.host ?? '0.0.0.0',
-    },
+    server: stripUndefined({
+      port: serverConfig?.server?.port,
+      host: serverConfig?.server?.host,
+      logLevel: serverConfig?.server?.log_level,
+    }) ?? {},
     auth: transformAuth(serverConfig),
     databases: transformDatabases(databases, serverConfig),
     tables,
@@ -174,9 +202,39 @@ export async function loadConfig(
     tableAliases,
     jobQueue: transformJobQueueConfig(serverConfig),
     redis: transformRedisConfig(serverConfig),
-    eventLogRetentionDays: serverConfig?.event_log?.retention_days ?? 7,
-    slowQueryThresholdMs: serverConfig?.server?.slow_query_threshold_ms ?? 200,
+    eventLogRetentionDays: serverConfig?.event_log?.retention_days,
+    slowQueryThresholdMs: serverConfig?.server?.slow_query_threshold_ms,
+    queryCache: stripUndefined({
+      maxSize: serverConfig?.query_cache?.max_size,
+    }),
+    subscriptions: stripUndefined({
+      debounceMs: serverConfig?.subscriptions?.debounce_ms,
+      keepAliveMs: serverConfig?.subscriptions?.keep_alive_ms,
+    }),
+    eventDelivery: stripUndefined({
+      batchSize: serverConfig?.event_delivery?.batch_size,
+    }),
+    eventCleanup: stripUndefined({
+      schedule: serverConfig?.event_cleanup?.schedule,
+    }),
+    webhook: stripUndefined({
+      timeoutMs: serverConfig?.webhook?.timeout_ms,
+      backoffCapSeconds: serverConfig?.webhook?.backoff_cap_seconds,
+    }),
+    actionDefaults: stripUndefined({
+      timeoutSeconds: serverConfig?.action_defaults?.timeout_seconds,
+      asyncRetryLimit: serverConfig?.action_defaults?.async_retry_limit,
+      asyncRetryDelaySeconds: serverConfig?.action_defaults?.async_retry_delay_seconds,
+      asyncTimeoutSeconds: serverConfig?.action_defaults?.async_timeout_seconds,
+    }),
+    sql: stripUndefined({
+      arrayAnyThreshold: serverConfig?.sql?.array_any_threshold,
+      unnestThreshold: serverConfig?.sql?.unnest_threshold,
+      batchChunkSize: serverConfig?.sql?.batch_chunk_size,
+    }),
   };
+
+  return HakkyraConfigSchema.parse(raw);
 }
 
 // ─── Version ────────────────────────────────────────────────────────────────
@@ -239,11 +297,11 @@ function transformDatabases(
       replicas.push({
         urlEnv: replicaUrlEnv,
         pool: replica.pool_settings
-          ? {
+          ? InternalPoolConfigSchema.parse(stripUndefined({
               max: replica.pool_settings.max_connections,
               idleTimeout: replica.pool_settings.idle_timeout,
               maxLifetime: replica.pool_settings.connection_lifetime,
-            }
+            }))
           : undefined,
       });
     }
@@ -253,13 +311,13 @@ function transformDatabases(
       replicas.push({
         urlEnv: r.url_from_env ?? 'DATABASE_REPLICA_URL',
         pool: r.pool
-          ? {
+          ? InternalPoolConfigSchema.parse(stripUndefined({
               max: r.pool.max,
               idleTimeout: r.pool.idle_timeout,
               connectionTimeout: r.pool.connection_timeout,
               maxLifetime: r.pool.max_lifetime,
               allowExitOnIdle: r.pool.allow_exit_on_idle,
-            }
+            }))
           : undefined,
       });
     }
@@ -270,29 +328,29 @@ function transformDatabases(
   const sessionConfig = serverConfig?.databases?.session;
   const subRouting = serverConfig?.databases?.subscription_query_routing;
 
-  return {
+  return InternalDatabasesConfigSchema.parse({
     primary: {
       urlEnv: primaryUrlEnv,
-      pool: {
-        max: serverPool?.max ?? pool?.max_connections ?? 10,
-        idleTimeout: serverPool?.idle_timeout ?? pool?.idle_timeout ?? 30,
-        connectionTimeout: serverPool?.connection_timeout ?? 5,
+      pool: stripUndefined({
+        max: serverPool?.max ?? pool?.max_connections,
+        idleTimeout: serverPool?.idle_timeout ?? pool?.idle_timeout,
+        connectionTimeout: serverPool?.connection_timeout,
         maxLifetime: serverPool?.max_lifetime ?? pool?.connection_lifetime,
         allowExitOnIdle: serverPool?.allow_exit_on_idle,
-      },
+      }),
     },
     replicas: replicas.length > 0 ? replicas : undefined,
     session: sessionConfig?.url_from_env
       ? { urlEnv: sessionConfig.url_from_env }
       : undefined,
     readYourWrites: ryw
-      ? { enabled: ryw.enabled ?? false, windowSeconds: ryw.window_seconds ?? 5 }
+      ? stripUndefined({ enabled: ryw.enabled, windowSeconds: ryw.window_seconds })
       : undefined,
     preparedStatements: ps
       ? { enabled: ps.enabled ?? false, maxCached: ps.max_cached }
       : undefined,
     subscriptionQueryRouting: subRouting,
-  };
+  });
 }
 
 // ─── Tables ─────────────────────────────────────────────────────────────────
@@ -655,15 +713,18 @@ async function loadApiConfig(metadataDir: string): Promise<RawApiConfig | null> 
 
 function transformRESTConfig(apiConfig: RawApiConfig | null): RESTConfig {
   const rest = apiConfig?.rest;
-  return {
-    autoGenerate: rest?.auto_generate ?? true,
-    basePath: rest?.base_path ?? '/api',
-    pagination: {
-      defaultLimit: rest?.pagination?.default_limit ?? 20,
-      maxLimit: rest?.pagination?.max_limit ?? 100,
-    },
+  const raw = {
+    ...stripUndefined({
+      autoGenerate: rest?.auto_generate,
+      basePath: rest?.base_path,
+    }),
+    pagination: stripUndefined({
+      defaultLimit: rest?.pagination?.default_limit,
+      maxLimit: rest?.pagination?.max_limit,
+    }),
     overrides: rest?.overrides as RESTConfig['overrides'],
   };
+  return InternalRESTConfigSchema.parse(raw);
 }
 
 function transformCustomQueries(apiConfig: RawApiConfig | null): CustomQueryConfig[] {
@@ -717,38 +778,38 @@ function transformJobQueueConfig(serverConfig: RawServerConfig | null): JobQueue
   const jq = serverConfig?.job_queue;
   if (!jq) return undefined;
 
-  return {
-    provider: jq.provider ?? 'pg-boss',
+  return InternalJobQueueConfigSchema.parse(stripUndefined({
+    provider: jq.provider,
     connectionString: jq.connection_string,
     redis: jq.redis
-      ? {
+      ? stripUndefined({
           url: jq.redis.url,
           host: jq.redis.host,
           port: jq.redis.port,
           password: jq.redis.password,
-        }
+        })
       : undefined,
-  };
+  }));
 }
 
-function transformRedisConfig(serverConfig: RawServerConfig | null): RedisConfig | undefined {
+function transformRedisConfig(serverConfig: RawServerConfig | null) {
   // Priority 1: explicit top-level redis config
   if (serverConfig?.redis) {
-    return {
+    return stripUndefined({
       url: serverConfig.redis.url,
       host: serverConfig.redis.host,
       port: serverConfig.redis.port,
       password: serverConfig.redis.password,
-    };
+    });
   }
   // Priority 2: inherit from job_queue.redis if provider is bullmq
   if (serverConfig?.job_queue?.provider === 'bullmq' && serverConfig.job_queue.redis) {
-    return {
+    return stripUndefined({
       url: serverConfig.job_queue.redis.url,
       host: serverConfig.job_queue.redis.host,
       port: serverConfig.job_queue.redis.port,
       password: serverConfig.job_queue.redis.password,
-    };
+    });
   }
   return undefined;
 }
@@ -757,11 +818,11 @@ function transformAuth(serverConfig: RawServerConfig | null): AuthConfig {
   const auth = serverConfig?.auth;
   if (!auth) return {};
 
-  const result: AuthConfig = {};
+  const raw: Record<string, unknown> = {};
 
   if (auth.jwt) {
-    result.jwt = {
-      type: auth.jwt.type ?? 'HS256',
+    raw.jwt = stripUndefined({
+      type: auth.jwt.type,
       key: auth.jwt.key,
       keyEnv: auth.jwt.key_from_env,
       jwkUrl: auth.jwt.jwk_url,
@@ -769,25 +830,25 @@ function transformAuth(serverConfig: RawServerConfig | null): AuthConfig {
       claimsMap: auth.jwt.claims_map,
       audience: auth.jwt.audience,
       issuer: auth.jwt.issuer,
-    };
+    });
   }
 
   if (auth.admin_secret_from_env) {
-    result.adminSecretEnv = auth.admin_secret_from_env;
+    raw.adminSecretEnv = auth.admin_secret_from_env;
   }
 
   if (auth.unauthorized_role) {
-    result.unauthorizedRole = auth.unauthorized_role;
+    raw.unauthorizedRole = auth.unauthorized_role;
   }
 
   if (auth.webhook) {
-    result.webhook = {
+    raw.webhook = stripUndefined({
       url: auth.webhook.url ?? resolveEnv(auth.webhook.url_from_env) ?? '',
       urlFromEnv: auth.webhook.url_from_env,
-      mode: auth.webhook.mode ?? 'GET',
+      mode: auth.webhook.mode,
       forwardHeaders: auth.webhook.forward_headers,
-    };
+    });
   }
 
-  return result;
+  return InternalAuthConfigSchema.parse(raw);
 }

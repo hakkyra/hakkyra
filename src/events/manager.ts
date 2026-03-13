@@ -38,12 +38,18 @@ export interface EventManager {
  * @param logger - Pino logger instance
  * @returns An EventManager for lifecycle control
  */
+export interface EventTriggerOptions {
+  /** Batch size for fetching pending events (default: 100). */
+  batchSize?: number;
+}
+
 export async function initEventTriggers(
   pool: Pool,
   jobQueue: JobQueue,
   tables: TableInfo[],
   connectionString: string,
   logger: Logger,
+  options?: EventTriggerOptions,
 ): Promise<EventManager> {
   const tablesWithEvents = tables.filter((t) => t.eventTriggers.length > 0);
 
@@ -75,12 +81,14 @@ export async function initEventTriggers(
   // 3. Register job queue workers
   await registerEventWorkers(jobQueue, pool, tables, logger);
 
+  const batchSize = options?.batchSize;
+
   // 4. Start pg-listen subscriber
   const subscriber = createSubscriber({ connectionString });
 
   subscriber.notifications.on('hakkyra_events', async () => {
     try {
-      await enqueuePendingEvents(pool, jobQueue, logger);
+      await enqueuePendingEvents(pool, jobQueue, logger, batchSize);
     } catch (err) {
       logger.error({ err }, 'Error processing event notification');
     }
@@ -95,7 +103,7 @@ export async function initEventTriggers(
   logger.info('Event listener connected');
 
   // 5. Catchup: process any pending events from before startup
-  const catchupCount = await enqueuePendingEvents(pool, jobQueue, logger);
+  const catchupCount = await enqueuePendingEvents(pool, jobQueue, logger, batchSize);
   if (catchupCount > 0) {
     logger.info({ count: catchupCount }, 'Caught up pending events');
   }

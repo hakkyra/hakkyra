@@ -47,5 +47,5 @@ export async function createJobQueue(config: JobQueueConfig): Promise<JobQueue> 
     );
   }
   const { PgBossAdapter } = await import('./pg-boss-adapter.js');
-  return new PgBossAdapter(config.connectionString);
+  return new PgBossAdapter(config.connectionString, config.gracefulShutdownMs);
 }

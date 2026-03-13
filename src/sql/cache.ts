@@ -47,7 +47,7 @@ export function hashQuery(query: string): string {
  * Uses Map insertion order for LRU eviction: on access, entries are
  * moved to the end; on eviction, the first (oldest) entry is removed.
  */
-export function createQueryCache(maxSize: number = 1000): QueryCache {
+export function createQueryCache(maxSize: number): QueryCache {
   const cache = new Map<string, CachedQuery>();
 
   return {

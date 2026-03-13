@@ -19,8 +19,10 @@ import type {
 
 export class PgBossAdapter implements JobQueue {
   private boss: PgBoss;
+  private gracefulShutdownMs: number;
 
-  constructor(connectionString: string) {
+  constructor(connectionString: string, gracefulShutdownMs: number = 10000) {
+    this.gracefulShutdownMs = gracefulShutdownMs;
     this.boss = new PgBoss({
       connectionString,
       schema: 'hakkyra_boss',
@@ -34,7 +36,7 @@ export class PgBossAdapter implements JobQueue {
   }
 
   async stop(): Promise<void> {
-    await this.boss.stop({ graceful: true, timeout: 10000 });
+    await this.boss.stop({ graceful: true, timeout: this.gracefulShutdownMs });
   }
 
   async send<T extends JobData>(queue: string, data: T): Promise<string | null> {

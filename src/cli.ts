@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { startServer } from './commands/start.js';
 import type { StartOptions } from './commands/start.js';
 import { initProject } from './commands/init.js';
+import { CONFIG_DEFAULTS } from './config/schemas-internal.js';
 
 // ─── Version ────────────────────────────────────────────────────────────────
 
@@ -63,8 +64,8 @@ function parseStartArgs(args: string[], forceDevMode: boolean): StartOptions {
   const options: StartOptions = {
     port: 3000,
     host: '0.0.0.0',
-    configPath: './hakkyra.yaml',
-    metadataPath: './metadata',
+    configPath: CONFIG_DEFAULTS.configPath,
+    metadataPath: CONFIG_DEFAULTS.metadataPath,
     devMode: forceDevMode,
   };
 

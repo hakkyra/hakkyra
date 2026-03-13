@@ -65,6 +65,8 @@ function hashResult(data: unknown): string {
 export interface SubscriptionManagerOptions {
   /** Where to route subscription re-queries: 'primary' (default) or 'replica'. */
   queryRouting?: 'primary' | 'replica';
+  /** Debounce interval in milliseconds for batching rapid table changes (default: 50). */
+  debounceMs?: number;
 }
 
 /**
@@ -86,7 +88,7 @@ export function createSubscriptionManager(
   /** Debounce timers per table to batch rapid changes */
   const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  const DEBOUNCE_MS = 50;
+  const DEBOUNCE_MS = options?.debounceMs ?? 50;
 
   function addToTableIndex(tableKey: string, subId: string): void {
     let set = tableIndex.get(tableKey);

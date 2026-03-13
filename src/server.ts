@@ -51,6 +51,7 @@ import { authenticateWsConnection } from './auth/ws-auth.js';
 import { registerInvokeRoute } from './events/invoke.js';
 import { ensureAsyncActionSchema, registerAsyncActionWorkers } from './actions/index.js';
 import { registerAsyncActionStatusRoute } from './actions/rest.js';
+import { CONFIG_DEFAULTS } from './config/schemas-internal.js';
 
 // ─── Permission adapters ─────────────────────────────────────────────────────
 
@@ -164,7 +165,7 @@ export async function createServer(
 
   const server = Fastify({
     logger: {
-      level: process.env['LOG_LEVEL'] ?? 'info',
+      level: process.env['LOG_LEVEL'] ?? config.server.logLevel,
       transport,
     },
   });
@@ -260,7 +261,7 @@ export async function createServer(
   const resolverPermissionLookup = createResolverPermissionLookup(permissionLookup);
 
   // 7c. Create query cache for compiled SQL templates
-  const queryCache = createQueryCache(1000);
+  const queryCache = createQueryCache(config.queryCache.maxSize);
 
   // 7d. Mutable references for services initialized after Mercurius registration.
   // The context closure captures these objects by reference.
@@ -313,7 +314,7 @@ export async function createServer(
       };
     },
     subscription: {
-      keepAlive: 30000,
+      keepAlive: config.subscriptions.keepAliveMs,
       async onConnect(data) {
         // Authenticate the WebSocket connection using connectionParams
         const connectionParams = (data?.payload as Record<string, unknown>) ?? {};
@@ -440,13 +441,15 @@ export async function createServer(
     try {
       // Start job queue (shared by events, crons, and async actions)
       // Determine provider from config (default: pg-boss)
-      const jobQueueConfig = config.jobQueue ?? { provider: 'pg-boss' as const };
+      const jqConf = config.jobQueue;
       jobQueue = await createJobQueue({
-        ...jobQueueConfig,
-        connectionString: jobQueueConfig.connectionString ?? primaryConnectionString,
+        provider: jqConf?.provider ?? 'pg-boss',
+        connectionString: jqConf?.connectionString ?? primaryConnectionString,
+        redis: jqConf?.redis,
+        gracefulShutdownMs: jqConf?.gracefulShutdownMs,
       });
       await jobQueue.start();
-      server.log.info({ provider: jobQueueConfig.provider ?? 'pg-boss' }, 'Job queue started');
+      server.log.info({ provider: jqConf?.provider ?? 'pg-boss' }, 'Job queue started');
     } catch (err) {
       server.log.warn({ err }, 'Job queue initialization failed — continuing without Phase 2 features');
     }
@@ -464,10 +467,13 @@ export async function createServer(
           schemaModel.tables,
           sessionConnectionString,
           log,
+          { batchSize: config.eventDelivery.batchSize },
         );
 
         // Register event log cleanup
-        await registerEventCleanup(jobQueue, primaryPool, config.eventLogRetentionDays, log);
+        await registerEventCleanup(jobQueue, primaryPool, config.eventLogRetentionDays, log, {
+          schedule: config.eventCleanup.schedule,
+        });
       } catch (err) {
         server.log.warn({ err }, 'Event/cron initialization failed — continuing without');
         eventManager = undefined;
@@ -525,6 +531,7 @@ export async function createServer(
       changeListener = createChangeListener(sessionConnectionString);
       subscriptionMgr = createSubscriptionManager(connectionManager, log, {
         queryRouting: config.databases.subscriptionQueryRouting ?? 'primary',
+        debounceMs: config.subscriptions.debounceMs,
       });
 
       // Make the subscription manager available to resolver contexts
@@ -596,7 +603,7 @@ export async function createServer(
     configWatcher = createConfigWatcher({
       metadataDir: options.metadataPath,
       serverConfigPath: options.configPath,
-      debounceMs: 500,
+      debounceMs: CONFIG_DEFAULTS.configWatcherDebounceMs,
     });
 
     configWatcher.on('change', async (files: string[]) => {
