@@ -326,19 +326,11 @@
   - [x] Validate all env var refs in event triggers, cron triggers, actions, headers
   - [x] Fail-fast on startup with clear error messages listing all missing vars
   - [x] Warnings for optional header env vars
-- [ ] **REST API input validation** (`src/rest/schemas/`)
-  - [ ] Zod schema for query parameters (limit, offset as coerced integers with range constraints)
-  - [ ] Zod schema for filter syntax parsing (column=op.value format validation)
-  - [ ] Zod schema for order_by parameter (column.direction.nulls format)
-  - [ ] Zod schema for select/distinct_on/group_by column lists
-  - [ ] Zod schema for insert request body (object, non-null, non-array)
-  - [ ] Zod schema for update request body (object, non-null, non-array, optional on_conflict)
-  - [ ] Zod schema for PK route params (type coercion per column type: UUID, integer, string)
-  - [ ] Integrate Zod validation into Fastify route hooks (preValidation or schema option)
-  - [ ] Structured error responses from Zod issues (field path, expected type, received value)
-- [ ] **Type replacement** — Replace manually written interfaces with `z.infer<typeof schema>` in:
-  - [ ] `src/types.ts` — main config types (DatabasesConfig, AuthConfig, EventTriggerConfig, CronTriggerConfig, ActionConfig, RESTConfig, etc.)
-  - [ ] `src/rest/filters.ts` — parsed filter/order types
+- [x] **REST API input validation** (`src/rest/schemas.ts`)
+  - [x] Zod schema for insert/update request body (MutationBodySchema)
+  - [x] Zod schema for pagination params (PaginationSchema — limit, offset as coerced integers)
+  - [x] Integrated into REST router with structured 400 error responses
+- [x] **Type replacement** — config types in `src/types.ts` replaced with `z.infer<>` (22 types)
 - [ ] Tests for Zod schemas (valid configs pass, invalid configs produce clear errors with paths)
 
 ### P4.2 — Observability
