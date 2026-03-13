@@ -12,3 +12,5 @@ export type {
 } from './types.js';
 export { createConfigWatcher } from './watcher.js';
 export type { ConfigWatcher, ConfigWatcherOptions } from './watcher.js';
+export * from './schemas.js';
+export * from './schemas-internal.js';

@@ -411,7 +411,7 @@ export async function createServer(
         );
 
         // Register event log cleanup
-        await registerEventCleanup(jobQueue, primaryPool, 7, log);
+        await registerEventCleanup(jobQueue, primaryPool, config.eventLogRetentionDays, log);
       } catch (err) {
         server.log.warn({ err }, 'Event/cron initialization failed — continuing without');
         eventManager = undefined;

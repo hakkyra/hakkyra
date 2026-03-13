@@ -432,6 +432,8 @@ export interface HakkyraConfig {
   tableAliases: Record<string, string>;
   /** Job queue backend configuration (default: pg-boss). */
   jobQueue?: JobQueueConfig;
+  /** Number of days to retain delivered events in the event_log table (default: 7). */
+  eventLogRetentionDays: number;
 }
 
 // ─── Job Queue Configuration ─────────────────────────────────────────────────

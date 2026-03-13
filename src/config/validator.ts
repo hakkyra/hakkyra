@@ -53,6 +53,7 @@ export function validateConfig(config: HakkyraConfig): ValidationResult {
   validateCronTriggers(config, errors, warnings);
   validateREST(config, errors);
   validateCustomQueries(config, errors);
+  validateEventLogRetention(config, errors);
 
   return {
     valid: errors.length === 0,
@@ -424,5 +425,20 @@ function validateCustomQueries(config: HakkyraConfig, errors: ValidationError[])
         message: `Custom query "${query.name}" has invalid type: "${query.type}". Must be "query" or "mutation".`,
       });
     }
+  }
+}
+
+function validateEventLogRetention(config: HakkyraConfig, errors: ValidationError[]): void {
+  if (config.eventLogRetentionDays < 1) {
+    errors.push({
+      path: 'eventLogRetentionDays',
+      message: `Event log retention must be at least 1 day, got ${config.eventLogRetentionDays}.`,
+    });
+  }
+  if (!Number.isInteger(config.eventLogRetentionDays)) {
+    errors.push({
+      path: 'eventLogRetentionDays',
+      message: `Event log retention must be a whole number of days, got ${config.eventLogRetentionDays}.`,
+    });
   }
 }

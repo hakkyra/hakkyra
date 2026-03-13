@@ -289,8 +289,8 @@
 
 ---
 
-## Phase 3 — Remaining Minor
-- [ ] Configurable event_log retention period (currently hardcoded to 7 days in server.ts)
+## Phase 3 — Remaining Minor — COMPLETE
+- [x] Configurable event_log retention period (`event_log.retention_days` in server config, defaults to 7)
 
 ---
 
@@ -301,25 +301,24 @@
 - [ ] `hakkyra init` — scaffold project with example config
 - [ ] `hakkyra dev` — alias for `--dev` with introspection watch
 - [ ] `hakkyra start` — production start
-- [ ] `hakkyra metadata apply` — apply YAML config (install triggers, validate)
 
 ### P4.1.5 — Zod Validation & Inferred Types
-- [ ] Add `zod` dependency, remove unused `ajv` dependency
-- [ ] **Config schemas** (`src/config/schemas/`)
-  - [ ] Zod schema for `DatabasesConfig` (pool settings, URL env refs, replica config, prepared statements, read-your-writes)
-  - [ ] Zod schema for `AuthConfig` (JWT algorithm enum, key/keyEnv, JWKS URL, claims namespace/map, webhook config, admin secret)
-  - [ ] Zod schema for `TableConfig` (permissions per role per operation, relationships, computed fields, column presets)
-  - [ ] Zod schema for `BoolExp` (recursive: `_and`/`_or`/`_not`/`_exists`, column operators with discriminated values)
-  - [ ] Zod schema for `EventTriggerConfig` (operations enum, columns, webhook URL/env, retry config, headers)
-  - [ ] Zod schema for `CronTriggerConfig` (cron expression regex, webhook URL/env, payload, retry config, headers)
-  - [ ] Zod schema for `ActionConfig` (kind enum, handler URL/env, permissions, request/response transforms)
-  - [ ] Zod schema for `RESTConfig` (pagination limits, endpoint overrides, default_order)
-  - [ ] Zod schema for `CustomQueryConfig` (name, sql, type enum, params, output columns)
-  - [ ] Zod schema for `JobQueueConfig` (provider enum, Redis URL)
-  - [ ] Zod schema for `ServerConfig` (port range, host, dev mode)
-  - [ ] Top-level `HakkyraConfig` schema composing all above
-  - [ ] Replace manual `validateConfig()` in `src/config/validator.ts` with Zod `.parse()` / `.safeParse()`
-  - [ ] Replace raw config types in `src/config/types.ts` with `z.infer<>` from schemas
+- [x] Add `zod` dependency, remove unused `ajv` dependency
+- [x] **Config schemas** (`src/config/schemas.ts`, `src/config/schemas-internal.ts`)
+  - [x] Zod schema for `DatabasesConfig` (pool settings, URL env refs, replica config, prepared statements, read-your-writes)
+  - [x] Zod schema for `AuthConfig` (JWT algorithm enum, key/keyEnv, JWKS URL, claims namespace/map, webhook config, admin secret)
+  - [x] Zod schema for `TableConfig` (permissions per role per operation, relationships, computed fields, column presets)
+  - [x] BoolExp uses `z.record(z.string(), z.unknown())` — validated by existing validator logic
+  - [x] Zod schema for `EventTriggerConfig` (operations enum, columns, webhook URL/env, retry config, headers)
+  - [x] Zod schema for `CronTriggerConfig` (cron expression regex, webhook URL/env, payload, retry config, headers)
+  - [x] Zod schema for `ActionConfig` (kind enum, handler URL/env, permissions, request/response transforms)
+  - [x] Zod schema for `RESTConfig` (pagination limits, endpoint overrides, default_order)
+  - [x] Zod schema for `CustomQueryConfig` (name, sql, type enum, params, output columns)
+  - [x] Zod schema for `JobQueueConfig` (provider enum, Redis URL)
+  - [x] Zod schema for `ServerConfig` (port range, host, dev mode)
+  - [x] Top-level `HakkyraConfig` schema composing all above
+  - [x] Zod `.parse()` at YAML loading boundaries in `src/config/loader.ts`
+  - [x] Replace raw config types in `src/config/types.ts` with `z.infer<>` from schemas
 - [ ] **Environment variable validation** (`src/config/env.ts`)
   - [ ] Zod schema for required env vars (DATABASE_URL, JWT key, admin secret)
   - [ ] Zod schema for optional env vars (LOG_LEVEL, NODE_ENV) with defaults
@@ -338,7 +337,6 @@
   - [ ] Structured error responses from Zod issues (field path, expected type, received value)
 - [ ] **Type replacement** — Replace manually written interfaces with `z.infer<typeof schema>` in:
   - [ ] `src/types.ts` — main config types (DatabasesConfig, AuthConfig, EventTriggerConfig, CronTriggerConfig, ActionConfig, RESTConfig, etc.)
-  - [ ] `src/config/types.ts` — raw YAML types (RawDatabaseEntry, RawTableYaml, RawPermissionEntry, etc.)
   - [ ] `src/rest/filters.ts` — parsed filter/order types
 - [ ] Tests for Zod schemas (valid configs pass, invalid configs produce clear errors with paths)
 

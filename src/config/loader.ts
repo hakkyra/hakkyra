@@ -37,6 +37,17 @@ import type {
   RawDatabaseEntry,
 } from './types.js';
 import { IncludeRef } from './types.js';
+import {
+  RawVersionYamlSchema,
+  RawDatabaseEntrySchema,
+  RawDatabasesYamlSchema,
+  RawTableYamlSchema,
+  RawActionSchema,
+  RawActionsYamlSchema,
+  RawCronTriggerSchema,
+  RawApiConfigSchema,
+  RawServerConfigSchema,
+} from './schemas.js';
 
 const log = pino({ name: 'hakkyra:config' });
 
@@ -161,6 +172,7 @@ export async function loadConfig(
     apiDocs: transformDocsConfig(apiConfig),
     tableAliases,
     jobQueue: transformJobQueueConfig(serverConfig),
+    eventLogRetentionDays: serverConfig?.event_log?.retention_days ?? 7,
   };
 }
 
@@ -169,7 +181,8 @@ export async function loadConfig(
 async function loadVersion(metadataDir: string): Promise<number> {
   const raw = await readYamlIfExists(path.join(metadataDir, 'version.yaml'));
   if (raw && typeof raw === 'object' && 'version' in raw) {
-    return (raw as { version: number }).version;
+    const parsed = RawVersionYamlSchema.parse(raw);
+    return parsed.version;
   }
   log.warn('version.yaml not found or invalid, defaulting to version 3');
   return 3;
@@ -183,10 +196,11 @@ async function loadDatabases(metadataDir: string): Promise<RawDatabaseEntry[]> {
   if (!raw) return [];
 
   if (Array.isArray(raw)) {
-    return raw as RawDatabaseEntry[];
+    return raw.map((entry) => RawDatabaseEntrySchema.parse(entry));
   }
   if (typeof raw === 'object' && raw !== null && 'databases' in raw) {
-    return ((raw as { databases?: RawDatabaseEntry[] }).databases) ?? [];
+    const parsed = RawDatabasesYamlSchema.parse(raw);
+    return parsed.databases ?? [];
   }
   return [];
 }
@@ -294,7 +308,7 @@ async function loadAllTables(metadataDir: string): Promise<TableInfo[]> {
 
     for (const rawTable of rawTables) {
       if (!rawTable || typeof rawTable !== 'object') continue;
-      const tableConfig = rawTable as RawTableYaml;
+      const tableConfig = RawTableYamlSchema.parse(rawTable);
       if (!tableConfig.table) continue;
       tables.push(transformTable(tableConfig));
     }
@@ -481,9 +495,10 @@ async function loadActions(metadataDir: string): Promise<ActionConfig[]> {
 
   let rawActions: RawAction[] = [];
   if (Array.isArray(raw)) {
-    rawActions = raw as RawAction[];
+    rawActions = raw.map((entry) => RawActionSchema.parse(entry));
   } else if (typeof raw === 'object' && raw !== null && 'actions' in raw) {
-    rawActions = ((raw as { actions?: RawAction[] }).actions) ?? [];
+    const parsed = RawActionsYamlSchema.parse(raw);
+    rawActions = parsed.actions ?? [];
   }
 
   return rawActions.map(transformAction);
@@ -564,7 +579,7 @@ async function loadCronTriggers(metadataDir: string): Promise<CronTriggerConfig[
   const raw = await readYamlIfExists(cronPath);
   if (!raw || !Array.isArray(raw)) return [];
 
-  return (raw as RawCronTrigger[]).map(transformCronTrigger);
+  return raw.map((entry) => RawCronTriggerSchema.parse(entry)).map(transformCronTrigger);
 }
 
 function transformCronTrigger(raw: RawCronTrigger): CronTriggerConfig {
@@ -600,7 +615,7 @@ async function loadApiConfig(metadataDir: string): Promise<RawApiConfig | null> 
   }
   if (!raw || typeof raw !== 'object') return null;
 
-  const config = raw as RawApiConfig;
+  const config = RawApiConfigSchema.parse(raw);
   const knownFields = new Set([
     'table_aliases',
     'custom_queries',
@@ -666,7 +681,7 @@ async function loadServerConfig(configPath?: string): Promise<RawServerConfig | 
       const fullPath = path.resolve(p);
       if (await fileExists(fullPath)) {
         const raw = await readYaml(fullPath);
-        return raw as RawServerConfig;
+        return RawServerConfigSchema.parse(raw);
       }
     }
     return null;
@@ -676,7 +691,7 @@ async function loadServerConfig(configPath?: string): Promise<RawServerConfig | 
     log.warn({ path: configPath }, 'Server config file not found');
     return null;
   }
-  return raw as RawServerConfig;
+  return RawServerConfigSchema.parse(raw);
 }
 
 function transformJobQueueConfig(serverConfig: RawServerConfig | null): JobQueueConfig | undefined {
