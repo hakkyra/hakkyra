@@ -11,7 +11,7 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 - **Permissions** — row-level and column-level security per role, compiled to SQL at startup
 - **Authentication** — JWT (HS256, RS256, ES256, Ed25519), JWKS auto-rotation, webhook auth
 - **Relationships** — object and array relationships resolved in a single SQL query
-- **Subscriptions** — real-time updates via WebSocket (graphql-ws protocol) with LISTEN/NOTIFY
+- **Subscriptions** — real-time updates via WebSocket (graphql-ws protocol) with LISTEN/NOTIFY + Redis pub/sub fanout for multi-instance deployments
 - **Event triggers** — capture INSERT/UPDATE/DELETE changes and deliver webhooks with retry
 - **Cron triggers** — scheduled webhook invocations via pg-boss
 - **Custom queries** — hand-written SQL overrides registered as GraphQL operations
@@ -24,7 +24,7 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 ### Prerequisites
 
 - Node.js >= 20
-- PostgreSQL 17 (or compatible)
+- PostgreSQL 17+
 
 ### Install and Run
 
@@ -81,6 +81,7 @@ databases:
   read_your_writes:
     enabled: true
     window_seconds: 5
+  subscription_query_routing: primary  # "primary" (default) or "replica"
 ```
 
 ### 2. Metadata directory (Hasura-compatible)
@@ -230,6 +231,34 @@ custom_queries:
             _eq: X-Hasura-User-Id
 ```
 
+## Subscriptions
+
+Real-time GraphQL subscriptions use a **LISTEN/NOTIFY + re-query + hash-diff** approach:
+
+1. PostgreSQL triggers fire `NOTIFY` on the `hakkyra_changes` channel when tracked tables change (INSERT/UPDATE/DELETE)
+2. The server receives the notification via `pg-listen` and re-runs affected subscription queries
+3. Results are hashed (SHA-256) and only pushed to the client if the data actually changed
+
+### Multi-Instance Fanout (Redis Pub/Sub)
+
+When running multiple Hakkyra instances behind a load balancer, only one instance receives each PostgreSQL notification. To solve this, an optional **Redis pub/sub fanout bridge** republishes notifications to the `hakkyra:sub:changes` Redis channel so all instances can re-query their local subscription clients.
+
+Each instance stamps messages with a UUID so it skips its own messages (already handled locally). Requires `ioredis` as an optional dependency — without Redis configured, subscriptions work in single-instance mode.
+
+### Query Routing
+
+By default, subscription re-queries run against the **primary** database to avoid stale reads from replication lag. Since LISTEN/NOTIFY fires on the primary, a replica may not have replicated the change by the time the re-query executes, causing the update to be silently missed.
+
+This is configurable via `databases.subscription_query_routing`:
+
+```yaml
+databases:
+  subscription_query_routing: primary  # default — correct, hits primary
+  # subscription_query_routing: replica  # routes to read replicas
+```
+
+Set to `replica` if your replication lag is consistently low and you want to offload subscription queries from the primary.
+
 ## Event Triggers
 
 Capture database changes and deliver webhooks with at-least-once semantics:
@@ -317,13 +346,14 @@ All queries — GraphQL and REST — compile to a single parameterized SQL state
 | PostgreSQL | pg (node-postgres) |
 | Job Queue | pg-boss (default) or BullMQ (optional, requires Redis) |
 | DB Notifications | pg-listen |
+| Redis Pub/Sub | ioredis (optional) |
 | Config | js-yaml with `!include` support |
 
 ## Development
 
 ```bash
 npm install
-docker compose up -d        # start PostgreSQL
+docker compose up -d        # start PostgreSQL 17
 npm test                    # run tests (250 tests, 9 suites)
 npm run typecheck           # type-check without emitting
 npm run build               # compile TypeScript

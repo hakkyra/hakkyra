@@ -53,6 +53,7 @@ import {
   JobQueueProviderSchema,
   JobQueueConfigSchema,
   AuthConfigSchema,
+  RedisConfigSchema,
   PoolConfigSchema,
   DatabasesConfigSchema,
   ComputedFieldConfigSchema,
@@ -941,6 +942,41 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
       });
       expect(err.issues.length).toBeGreaterThan(0);
     });
+
+    it('accepts databases with session config', () => {
+      expectValid(RawServerConfigSchema, {
+        databases: {
+          primary: { url_from_env: 'DATABASE_URL' },
+          session: { url_from_env: 'DATABASE_SESSION_URL' },
+        },
+      });
+    });
+
+    it('accepts databases without session config', () => {
+      expectValid(RawServerConfigSchema, {
+        databases: {
+          primary: { url_from_env: 'DATABASE_URL' },
+        },
+      });
+    });
+
+    it('accepts top-level redis config with url', () => {
+      expectValid(RawServerConfigSchema, {
+        redis: { url: 'redis://localhost:6379' },
+      });
+    });
+
+    it('accepts top-level redis config with host/port/password', () => {
+      expectValid(RawServerConfigSchema, {
+        redis: { host: 'redis.internal', port: 6380, password: 'secret' },
+      });
+    });
+
+    it('accepts empty redis config (all fields optional)', () => {
+      expectValid(RawServerConfigSchema, {
+        redis: {},
+      });
+    });
   });
 });
 
@@ -1628,6 +1664,34 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
       });
     });
 
+    it('accepts databases config with session connection', () => {
+      expectValid(DatabasesConfigSchema, {
+        primary: { urlEnv: 'DATABASE_URL' },
+        session: { urlEnv: 'DATABASE_SESSION_URL' },
+      });
+    });
+
+    it('accepts full databases config with session', () => {
+      expectValid(DatabasesConfigSchema, {
+        primary: {
+          urlEnv: 'DATABASE_URL',
+          pool: { max: 10 },
+        },
+        replicas: [{ urlEnv: 'REPLICA_URL' }],
+        session: { urlEnv: 'DATABASE_SESSION_URL' },
+        readYourWrites: { enabled: true, windowSeconds: 5 },
+        preparedStatements: { enabled: true, maxCached: 200 },
+      });
+    });
+
+    it('rejects session without urlEnv', () => {
+      const err = expectInvalid(DatabasesConfigSchema, {
+        primary: { urlEnv: 'DATABASE_URL' },
+        session: {},
+      });
+      expect(err.issues.some((i) => i.path.includes('urlEnv'))).toBe(true);
+    });
+
     it('rejects missing primary', () => {
       const err = expectInvalid(DatabasesConfigSchema, {});
       expect(err.issues.some((i) => i.path.includes('primary'))).toBe(true);
@@ -1636,6 +1700,27 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
     it('rejects primary without urlEnv', () => {
       const err = expectInvalid(DatabasesConfigSchema, { primary: {} });
       expect(err.issues.some((i) => i.path.includes('urlEnv'))).toBe(true);
+    });
+
+    it('accepts subscriptionQueryRouting: primary', () => {
+      expectValid(DatabasesConfigSchema, {
+        primary: { urlEnv: 'DATABASE_URL' },
+        subscriptionQueryRouting: 'primary',
+      });
+    });
+
+    it('accepts subscriptionQueryRouting: replica', () => {
+      expectValid(DatabasesConfigSchema, {
+        primary: { urlEnv: 'DATABASE_URL' },
+        subscriptionQueryRouting: 'replica',
+      });
+    });
+
+    it('rejects invalid subscriptionQueryRouting value', () => {
+      expectInvalid(DatabasesConfigSchema, {
+        primary: { urlEnv: 'DATABASE_URL' },
+        subscriptionQueryRouting: 'invalid',
+      });
     });
   });
 
@@ -1665,6 +1750,30 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
     });
   });
 
+  // ─── RedisConfigSchema ─────────────────────────────────────────────────────
+
+  describe('RedisConfigSchema', () => {
+    it('accepts empty object (all optional)', () => {
+      expectValid(RedisConfigSchema, {});
+    });
+
+    it('accepts url only', () => {
+      expectValid(RedisConfigSchema, { url: 'redis://localhost:6379' });
+    });
+
+    it('accepts host/port/password', () => {
+      expectValid(RedisConfigSchema, { host: 'redis.internal', port: 6380, password: 'secret' });
+    });
+
+    it('rejects non-string url', () => {
+      expectInvalid(RedisConfigSchema, { url: 123 });
+    });
+
+    it('rejects non-number port', () => {
+      expectInvalid(RedisConfigSchema, { port: 'abc' });
+    });
+  });
+
   // ─── HakkyraConfigSchema ───────────────────────────────────────────────────
 
   describe('HakkyraConfigSchema', () => {
@@ -1691,6 +1800,13 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
     it('accepts a minimal valid HakkyraConfig', () => {
       const result = expectValid(HakkyraConfigSchema, minimalConfig);
       expect(result.version).toBe(3);
+    });
+
+    it('accepts with optional redis', () => {
+      expectValid(HakkyraConfigSchema, {
+        ...minimalConfig,
+        redis: { url: 'redis://localhost:6379' },
+      });
     });
 
     it('accepts with optional jobQueue', () => {

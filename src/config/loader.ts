@@ -21,6 +21,7 @@ import type {
   AuthConfig,
   DatabasesConfig,
   JobQueueConfig,
+  RedisConfig,
   BoolExp,
   ComputedFieldConfig,
 } from '../types.js';
@@ -172,6 +173,7 @@ export async function loadConfig(
     apiDocs: transformDocsConfig(apiConfig),
     tableAliases,
     jobQueue: transformJobQueueConfig(serverConfig),
+    redis: transformRedisConfig(serverConfig),
     eventLogRetentionDays: serverConfig?.event_log?.retention_days ?? 7,
     slowQueryThresholdMs: serverConfig?.server?.slow_query_threshold_ms ?? 200,
   };
@@ -265,6 +267,8 @@ function transformDatabases(
 
   const ryw = serverConfig?.databases?.read_your_writes;
   const ps = serverConfig?.databases?.prepared_statements;
+  const sessionConfig = serverConfig?.databases?.session;
+  const subRouting = serverConfig?.databases?.subscription_query_routing;
 
   return {
     primary: {
@@ -278,12 +282,16 @@ function transformDatabases(
       },
     },
     replicas: replicas.length > 0 ? replicas : undefined,
+    session: sessionConfig?.url_from_env
+      ? { urlEnv: sessionConfig.url_from_env }
+      : undefined,
     readYourWrites: ryw
       ? { enabled: ryw.enabled ?? false, windowSeconds: ryw.window_seconds ?? 5 }
       : undefined,
     preparedStatements: ps
       ? { enabled: ps.enabled ?? false, maxCached: ps.max_cached }
       : undefined,
+    subscriptionQueryRouting: subRouting,
   };
 }
 
@@ -721,6 +729,28 @@ function transformJobQueueConfig(serverConfig: RawServerConfig | null): JobQueue
         }
       : undefined,
   };
+}
+
+function transformRedisConfig(serverConfig: RawServerConfig | null): RedisConfig | undefined {
+  // Priority 1: explicit top-level redis config
+  if (serverConfig?.redis) {
+    return {
+      url: serverConfig.redis.url,
+      host: serverConfig.redis.host,
+      port: serverConfig.redis.port,
+      password: serverConfig.redis.password,
+    };
+  }
+  // Priority 2: inherit from job_queue.redis if provider is bullmq
+  if (serverConfig?.job_queue?.provider === 'bullmq' && serverConfig.job_queue.redis) {
+    return {
+      url: serverConfig.job_queue.redis.url,
+      host: serverConfig.job_queue.redis.host,
+      port: serverConfig.job_queue.redis.port,
+      password: serverConfig.job_queue.redis.password,
+    };
+  }
+  return undefined;
 }
 
 function transformAuth(serverConfig: RawServerConfig | null): AuthConfig {

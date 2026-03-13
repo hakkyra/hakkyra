@@ -28,6 +28,7 @@ import {
   JobQueueProviderSchema,
   JobQueueConfigSchema,
   AuthConfigSchema,
+  RedisConfigSchema,
   DatabasesConfigSchema,
   PoolConfigSchema,
   ComputedFieldConfigSchema,
@@ -322,6 +323,8 @@ export type AuthConfig = z.infer<typeof AuthConfigSchema>;
 export type DatabasesConfig = z.infer<typeof DatabasesConfigSchema>;
 
 export type PoolConfig = z.infer<typeof PoolConfigSchema>;
+
+export type RedisConfig = z.infer<typeof RedisConfigSchema>;
 
 // ─── Utility types ──────────────────────────────────────────────────────────
 

@@ -39,6 +39,14 @@ export interface ConnectionManager {
   healthCheck(): Promise<boolean>;
   /** Gracefully close all pool connections. */
   shutdown(): Promise<void>;
+  /**
+   * Get the connection string for LISTEN/NOTIFY operations.
+   * Returns the dedicated session connection string if configured,
+   * otherwise falls back to the primary connection string.
+   * This enables PgBouncer transaction-mode compatibility by routing
+   * LISTEN/NOTIFY through a separate session-mode connection.
+   */
+  getSessionConnectionString(): string;
 }
 
 // ─── Pool creation helpers ───────────────────────────────────────────────────
@@ -89,6 +97,12 @@ export function createConnectionManager(
 
   // Primary pool (always required)
   const primaryPool = createPool(config.primary.urlEnv, config.primary.pool);
+
+  // Session connection string for LISTEN/NOTIFY (separate from pool for PgBouncer compat)
+  // Falls back to primary connection string when not configured
+  const sessionConnectionString = config.session
+    ? resolveConnectionString(config.session.urlEnv)
+    : resolveConnectionString(config.primary.urlEnv);
 
   // Prepared statement manager (optional)
   const psConfig = config.preparedStatements;
@@ -207,6 +221,10 @@ export function createConnectionManager(
       consistencyTracker?.destroy();
       const endPromises = allPools.map((pool) => pool.end());
       await Promise.all(endPromises);
+    },
+
+    getSessionConnectionString(): string {
+      return sessionConnectionString;
     },
   };
 }

@@ -62,13 +62,21 @@ function hashResult(data: unknown): string {
 
 // ─── Factory ───────────────────────────────────────────────────────────────
 
+export interface SubscriptionManagerOptions {
+  /** Where to route subscription re-queries: 'primary' (default) or 'replica'. */
+  queryRouting?: 'primary' | 'replica';
+}
+
 /**
  * Create a subscription manager.
  */
 export function createSubscriptionManager(
   connectionManager: ConnectionManager,
   logger: Logger,
+  options?: SubscriptionManagerOptions,
 ): SubscriptionManager {
+  const queryIntent: 'read' | 'write' =
+    (options?.queryRouting ?? 'primary') === 'primary' ? 'write' : 'read';
   /** All active subscriptions by ID */
   const subscriptions = new Map<string, SubscriptionEntry>();
 
@@ -104,7 +112,7 @@ export function createSubscriptionManager(
       entry.query.sql,
       entry.query.params,
       entry.session,
-      'read',
+      queryIntent,
     );
     // Return the raw row data — the resolver will format it
     const data = (result.rows[0] as Record<string, unknown> | undefined)?.data;

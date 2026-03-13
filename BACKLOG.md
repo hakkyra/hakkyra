@@ -8,7 +8,7 @@
 - [x] Install core dependencies (fastify, mercurius, pg, jose, pg-boss, pg-listen, pino)
 - [x] Create directory structure
 - [x] Define shared type definitions (src/types.ts)
-- [x] PostgreSQL 17 (docker-compose)
+- [x] PostgreSQL 17+ minimum (docker-compose)
 
 ### P1.2 — Configuration Loader (`src/config/`)
 - [x] Define TypeScript types for all config structures (Hasura-compatible metadata format + extensions)
@@ -263,7 +263,7 @@
 
 ---
 
-## Phase 4: Polish & Production — IN PROGRESS
+## Phase 4: Polish & Production — COMPLETE
 
 ### P4.1 — CLI Tool — COMPLETE
 - [x] `hakkyra start` — production start (`src/commands/start.ts`)
@@ -297,15 +297,90 @@
   - [x] `CREATE OR REPLACE FUNCTION` for event trigger functions (no data lock)
   - [x] Orphan cleanup: auto-remove triggers for tables removed from YAML
 - [x] Connection pool tuning (`maxLifetime`, `allowExitOnIdle`, fix `connection_lifetime` mapping)
-- [ ] Memory profiling for subscription-heavy workloads
 
 ### P4.4 — Developer Experience
 - [x] Docker image + docker-compose for quick start (`Dockerfile`, `docker-compose.quickstart.yml`)
 - [x] GitHub Actions CI template (`.github/workflows/ci.yml`)
 
+### P4.5 — Multi-Instance & PgBouncer Support — COMPLETE
+- [x] Dual connection pool — dedicated session connection for LISTEN/NOTIFY (`databases.session.url_from_env`)
+  - [x] `ConnectionManager.getSessionConnectionString()` with fallback to primary
+  - [x] Config schemas (raw YAML + internal Zod) with session field
+  - [x] Server wiring: event triggers + subscription listener use session connection
+- [x] Redis pub/sub fanout for multi-instance subscriptions (`src/subscriptions/redis-fanout.ts`)
+  - [x] `RedisFanoutBridge` with publish/subscribe via ioredis (optional dependency)
+  - [x] Instance ID deduplication (skip own messages)
+  - [x] Graceful fallback to single-instance mode without Redis
+  - [x] Top-level `redis` config with auto-inherit from `job_queue.redis`
+  - [x] Zod schema tests (228 tests, up from 214)
+
 ## Improvements
-- [ ] Dual connection pool — dedicated session-mode pool for LISTEN/NOTIFY, separate pooled connections for queries/mutations (enables PgBouncer transaction-mode compatibility)
-- [ ] Redis pub/sub fanout for multi-instance subscriptions
+
+### Centralize Magic Defaults into Zod Schemas
+Move all hardcoded default values to Zod `.default()` in `src/config/schemas.ts` / `schemas-internal.ts` so they are configurable, documented in one place, and validated at load time.
+
+**Server & CLI** (`src/cli.ts`, `src/config/loader.ts`, `src/server.ts`)
+- [ ] `server.port` → `3000`
+- [ ] `server.host` → `'0.0.0.0'`
+- [ ] `server.logLevel` → `'info'`
+- [ ] `configPath` → `'./hakkyra.yaml'`, `metadataPath` → `'./metadata'`
+- [ ] `configWatcher.debounceMs` → `500`
+
+**Database Pools** (`src/config/loader.ts`, `src/connections/manager.ts`)
+- [ ] `pool.max` → `10`
+- [ ] `pool.idleTimeout` → `30` (seconds)
+- [ ] `pool.connectionTimeout` → `5` (seconds)
+- [ ] `pool.maxLifetime` — ensure mapped through schema
+- [ ] `readYourWrites.windowSeconds` → `5`
+
+**Caching** (`src/sql/cache.ts`, `src/server.ts`)
+- [ ] `queryCache.maxSize` → `1000`
+
+**Subscriptions** (`src/subscriptions/manager.ts`, `src/server.ts`)
+- [ ] `subscription.debounceMs` → `50`
+- [ ] `subscription.keepAliveMs` → `30000`
+
+**Event Triggers** (`src/events/delivery.ts`, `src/events/cleanup.ts`)
+- [ ] `eventLogRetentionDays` → `7`
+- [ ] `eventDelivery.batchSize` → `100`
+- [ ] `eventCleanup.schedule` → `'0 3 * * *'`
+- [ ] `slowQueryThresholdMs` → `200`
+
+**Webhooks & Auth** (`src/shared/webhook.ts`, `src/auth/webhook.ts`, `src/actions/proxy.ts`)
+- [ ] `webhook.timeoutMs` → `30000`
+- [ ] `authWebhook.timeoutMs` → `5000`
+- [ ] `authWebhook.cacheTtlMs` → `0`
+- [ ] `authWebhook.mode` → `'GET'`
+- [ ] `backoff.capSeconds` → `3600`
+
+**Actions** (`src/actions/async.ts`, `src/actions/proxy.ts`)
+- [ ] `action.timeoutSeconds` → `30`
+- [ ] `asyncAction.retryLimit` → `3`
+- [ ] `asyncAction.retryDelaySeconds` → `10`
+- [ ] `asyncAction.timeoutSeconds` → `120`
+
+**JWT** (`src/config/loader.ts`)
+- [ ] `jwt.type` → `'HS256'`
+
+**Job Queue** (`src/shared/pg-boss-manager.ts`, `src/shared/job-queue/`)
+- [ ] `jobQueue.provider` → `'pg-boss'`
+- [ ] `jobQueue.gracefulShutdownMs` → `10000`
+- [ ] `redis.port` → `6379`
+
+**SQL Optimization Thresholds** (`src/sql/where.ts`, `src/sql/insert.ts`)
+- [ ] `sql.arrayAnyThreshold` → `20`
+- [ ] `sql.unnestThreshold` → `500`
+- [ ] `sql.batchChunkSize` → `100`
+
+**REST** (`src/config/loader.ts`)
+- [ ] `rest.defaultLimit` → `20`
+- [ ] `rest.maxLimit` → `100`
+- [ ] `rest.autoGenerate` → `true`
+- [ ] `rest.basePath` → `'/api'`
+
+### Other Improvements
+- [x] Dual connection pool — dedicated session-mode pool for LISTEN/NOTIFY, separate pooled connections for queries/mutations (enables PgBouncer transaction-mode compatibility)
+- [x] Redis pub/sub fanout for multi-instance subscriptions
 
 ---
 
@@ -335,5 +410,5 @@
 | Action transforms | 32 | Pass |
 | Batch operations | 26 | Pass |
 | Action relationships | 13 | Pass |
-| Zod schemas | 214 | Pass |
-| **Total** | **705** | **23 suites, all passing** |
+| Zod schemas | 228 | Pass |
+| **Total** | **719** | **23 suites, all passing** |

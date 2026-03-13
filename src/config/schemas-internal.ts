@@ -309,6 +309,17 @@ export const AuthConfigSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// RedisConfig
+// ---------------------------------------------------------------------------
+
+export const RedisConfigSchema = z.object({
+  url: z.string().optional(),
+  host: z.string().optional(),
+  port: z.number().optional(),
+  password: z.string().optional(),
+});
+
+// ---------------------------------------------------------------------------
 // DatabasesConfig / PoolConfig
 // ---------------------------------------------------------------------------
 
@@ -333,6 +344,11 @@ export const DatabasesConfigSchema = z.object({
       }),
     )
     .optional(),
+  session: z
+    .object({
+      urlEnv: z.string(),
+    })
+    .optional(),
   readYourWrites: z
     .object({
       enabled: z.boolean(),
@@ -345,6 +361,7 @@ export const DatabasesConfigSchema = z.object({
       maxCached: z.number().optional(),
     })
     .optional(),
+  subscriptionQueryRouting: z.enum(['primary', 'replica']).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -383,6 +400,7 @@ export const HakkyraConfigSchema = z.object({
   apiDocs: APIDocsConfigSchema,
   tableAliases: z.record(z.string(), z.string()),
   jobQueue: JobQueueConfigSchema.optional(),
+  redis: RedisConfigSchema.optional(),
   eventLogRetentionDays: z.number(),
   slowQueryThresholdMs: z.number(),
 });

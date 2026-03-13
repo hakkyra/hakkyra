@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine  # PostgreSQL 17+ required
     ports:
       - "5433:5432"
     environment:

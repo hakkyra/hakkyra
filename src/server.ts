@@ -44,6 +44,8 @@ import { createChangeListener } from './subscriptions/listener.js';
 import type { ChangeListener } from './subscriptions/listener.js';
 import { createSubscriptionManager } from './subscriptions/manager.js';
 import type { SubscriptionManager } from './subscriptions/manager.js';
+import { createRedisFanoutBridge } from './subscriptions/redis-fanout.js';
+import type { RedisFanoutBridge } from './subscriptions/redis-fanout.js';
 import type { ResolverPermissionLookup } from './schema/resolvers.js';
 import { authenticateWsConnection } from './auth/ws-auth.js';
 import { registerInvokeRoute } from './events/invoke.js';
@@ -417,14 +419,18 @@ export async function createServer(
 
   // ── Phase 2: job queue, events, crons, subscriptions ────────────────
 
-  // Resolve the primary database connection string for job queue and pg-listen
+  // Resolve the primary database connection string for job queue
   const primaryUrlEnv = config.databases.primary.urlEnv;
   const primaryConnectionString = process.env[primaryUrlEnv] ?? '';
+
+  // Session connection string for LISTEN/NOTIFY (separate from pool for PgBouncer compat)
+  const sessionConnectionString = connectionManager.getSessionConnectionString();
 
   let jobQueue: JobQueue | undefined;
   let eventManager: EventManager | undefined;
   let changeListener: ChangeListener | undefined;
   let subscriptionMgr: SubscriptionManager | undefined;
+  let redisFanout: RedisFanoutBridge | undefined;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const log = server.log as any;
@@ -456,7 +462,7 @@ export async function createServer(
           primaryPool,
           jobQueue,
           schemaModel.tables,
-          primaryConnectionString,
+          sessionConnectionString,
           log,
         );
 
@@ -516,17 +522,59 @@ export async function createServer(
       );
 
       // Create change listener for subscriptions
-      changeListener = createChangeListener(primaryConnectionString);
-      subscriptionMgr = createSubscriptionManager(connectionManager, log);
+      changeListener = createChangeListener(sessionConnectionString);
+      subscriptionMgr = createSubscriptionManager(connectionManager, log, {
+        queryRouting: config.databases.subscriptionQueryRouting ?? 'primary',
+      });
 
       // Make the subscription manager available to resolver contexts
       subscriptionRef.manager = subscriptionMgr;
 
-      changeListener.onTableChange((notification) => {
-        subscriptionMgr!.handleChange(notification).catch((err) => {
-          server.log.error({ err }, 'Error handling subscription change');
+      // Set up the notification pipeline
+      if (config.redis) {
+        // Multi-instance mode: PG NOTIFY -> local handler + Redis publish
+        //                      Redis SUB -> remote handler
+        try {
+          redisFanout = await createRedisFanoutBridge(config.redis, log);
+
+          // PG notifications: handle locally AND publish to Redis
+          changeListener.onTableChange((notification) => {
+            subscriptionMgr!.handleChange(notification).catch((err) => {
+              server.log.error({ err }, 'Error handling subscription change');
+            });
+            redisFanout!.publish(notification).catch((err) => {
+              server.log.error({ err }, 'Error publishing to Redis fanout');
+            });
+          });
+
+          // Remote notifications from Redis: handle locally
+          redisFanout.onRemoteChange((notification) => {
+            subscriptionMgr!.handleChange(notification).catch((err) => {
+              server.log.error({ err }, 'Error handling remote subscription change');
+            });
+          });
+
+          await redisFanout.start();
+          server.log.info('Multi-instance subscription fanout via Redis enabled');
+        } catch (err) {
+          server.log.warn({ err }, 'Redis fanout initialization failed — falling back to single-instance mode');
+          redisFanout = undefined;
+
+          // Fall back to single-instance wiring
+          changeListener.onTableChange((notification) => {
+            subscriptionMgr!.handleChange(notification).catch((err2) => {
+              server.log.error({ err: err2 }, 'Error handling subscription change');
+            });
+          });
+        }
+      } else {
+        // Single-instance mode: PG NOTIFY -> local handler only (existing behavior)
+        changeListener.onTableChange((notification) => {
+          subscriptionMgr!.handleChange(notification).catch((err) => {
+            server.log.error({ err }, 'Error handling subscription change');
+          });
         });
-      });
+      }
 
       await changeListener.start();
       server.log.info('Subscription change listener started');
@@ -635,6 +683,7 @@ export async function createServer(
     server.log.info({ signal }, 'Received shutdown signal');
     try {
       configWatcher?.stop();
+      await redisFanout?.stop();
       await changeListener?.stop();
       await eventManager?.stop();
       await jobQueue?.stop();

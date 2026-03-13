@@ -492,6 +492,12 @@ export const RawServerConfigSchema = z
       .object({
         primary: DbConnectionSchema.optional(),
         replicas: z.array(DbConnectionSchema).optional(),
+        session: z
+          .object({
+            url_from_env: z.string().optional(),
+          })
+          .passthrough()
+          .optional(),
         read_your_writes: z
           .object({
             enabled: z.boolean().optional(),
@@ -506,6 +512,16 @@ export const RawServerConfigSchema = z
           })
           .passthrough()
           .optional(),
+        subscription_query_routing: z.enum(['primary', 'replica']).optional(),
+      })
+      .passthrough()
+      .optional(),
+    redis: z
+      .object({
+        url: z.string().optional(),
+        host: z.string().optional(),
+        port: z.number().optional(),
+        password: z.string().optional(),
       })
       .passthrough()
       .optional(),
