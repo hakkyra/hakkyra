@@ -238,8 +238,6 @@
 ---
 
 ## Phase 2 — Remaining Work
-
-### Nice to have
 - [ ] Redis pub/sub fanout for multi-instance subscriptions
 
 ### Bug Fixes (completed during Phase 2 testing)
@@ -267,11 +265,19 @@
 - [x] Dev mode hot reload includes action schema regeneration
 - [x] Mock webhook server extended with per-path handlers and custom response bodies
 
+### P3.1.5 — Job Queue Abstraction (`src/shared/job-queue/`)
+- [x] JobQueue interface abstracting pg-boss
+- [x] PgBossAdapter (wraps existing pg-boss usage)
+- [x] BullMQAdapter (optional, requires Redis, uses dynamic imports)
+- [x] Factory function with config-driven provider selection
+- [x] All event/cron consumers refactored to use JobQueue interface
+- [x] Config support: `job_queue.provider: 'pg-boss' | 'bullmq'`
+
 ### P3.2 — Advanced SQL Features
 - [ ] GROUP BY support in aggregations
 - [ ] Distinct queries
-- [ ] Computed fields (from PG functions)
-- [ ] ON CONFLICT (upsert) for inserts
+- [x] Computed fields (from PG functions) — config, schema, SQL, resolvers, permissions, 17 tests
+- [x] ON CONFLICT (upsert) for inserts — constraint/column enums, WHERE on DO UPDATE, REST support, 22 tests
 - [ ] Returning nested relationships after mutations
 - [ ] Batch operations optimization
 - [ ] Prepared statement caching
@@ -290,7 +296,6 @@
 - [ ] `hakkyra init` — scaffold project with example config
 - [ ] `hakkyra dev` — alias for `--dev` with introspection watch
 - [ ] `hakkyra start` — production start
-- [ ] `hakkyra metadata export` — dump current DB as YAML metadata (Hasura-compatible format)
 - [ ] `hakkyra metadata apply` — apply YAML config (install triggers, validate)
 - [ ] `hakkyra console` — interactive GraphQL playground
 

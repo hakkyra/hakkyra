@@ -93,7 +93,7 @@ function getArgumentValue(
  * Resolve a GraphQL ValueNode into a plain JS value.
  */
 function resolveValueNode(
-  valueNode: { kind: string; value?: unknown; values?: unknown[]; fields?: unknown[]; name?: { value: string } },
+  valueNode: { kind: string; value?: unknown; values?: readonly unknown[]; fields?: readonly unknown[]; name?: { value: string } },
   variableValues: Record<string, unknown>,
 ): unknown {
   switch (valueNode.kind) {
