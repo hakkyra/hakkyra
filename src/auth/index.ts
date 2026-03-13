@@ -14,3 +14,5 @@ export type { WebhookAuthenticator, WebhookAuthConfig } from './webhook.js';
 export { extractSessionVariables } from './claims.js';
 
 export { createAuthHook } from './middleware.js';
+
+export { authenticateWsConnection } from './ws-auth.js';

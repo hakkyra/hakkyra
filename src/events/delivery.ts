@@ -17,7 +17,7 @@ import {
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
-interface EventLogRow {
+export interface EventLogRow {
   id: string;
   trigger_name: string;
   table_schema: string;
@@ -34,7 +34,7 @@ interface EventLogRow {
 /**
  * Build a Hasura-compatible event trigger webhook payload.
  */
-function buildEventPayload(event: EventLogRow): unknown {
+export function buildEventPayload(event: EventLogRow): unknown {
   return {
     id: event.id,
     event: {
@@ -101,7 +101,7 @@ export async function enqueuePendingEvents(
 
   // Enqueue each event into pg-boss
   for (const event of result.rows) {
-    await boss.send(`event:${event.trigger_name}`, {
+    await boss.send(`event/${event.trigger_name}`, {
       eventId: event.id,
       payload: buildEventPayload(event),
     });
@@ -125,7 +125,7 @@ export async function registerEventWorkers(
   const triggerLookup = buildTriggerLookup(tables);
 
   for (const [triggerName, { trigger }] of triggerLookup) {
-    const queueName = `event:${triggerName}`;
+    const queueName = `event/${triggerName}`;
 
     // Configure the queue with retry settings
     await boss.createQueue(queueName, {

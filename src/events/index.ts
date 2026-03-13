@@ -7,7 +7,10 @@
 
 export { ensureEventSchema } from './schema.js';
 export { installEventTriggers, removeEventTriggers } from './triggers.js';
-export { enqueuePendingEvents, registerEventWorkers } from './delivery.js';
+export { enqueuePendingEvents, registerEventWorkers, buildEventPayload } from './delivery.js';
+export type { EventLogRow } from './delivery.js';
 export { initEventTriggers } from './manager.js';
 export type { EventManager } from './manager.js';
 export { registerEventCleanup } from './cleanup.js';
+export { registerInvokeRoute } from './invoke.js';
+export type { InvokeRouteDeps } from './invoke.js';

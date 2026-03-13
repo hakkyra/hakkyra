@@ -45,6 +45,8 @@ import type { ChangeListener } from './subscriptions/listener.js';
 import { createSubscriptionManager } from './subscriptions/manager.js';
 import type { SubscriptionManager } from './subscriptions/manager.js';
 import type { ResolverPermissionLookup } from './schema/resolvers.js';
+import { authenticateWsConnection } from './auth/ws-auth.js';
+import { registerInvokeRoute } from './events/invoke.js';
 
 // ─── Permission adapters ─────────────────────────────────────────────────────
 
@@ -173,13 +175,13 @@ export async function createServer(
   const sdl = printSchema(graphqlSchema);
   const cjsSchema = cjsGraphql.buildSchema(sdl);
 
-  // Copy resolvers from our ESM schema to the CJS schema
+  // Copy resolvers and subscribe functions from our ESM schema to the CJS schema
   const esmTypeMap = graphqlSchema.getTypeMap();
   const cjsTypeMap = cjsSchema.getTypeMap();
   for (const [typeName, cjsType] of Object.entries(cjsTypeMap)) {
     const esmType = esmTypeMap[typeName];
     if (!esmType) continue;
-    // Copy field resolvers for object types
+    // Copy field resolvers and subscribe functions for object types
     if ('getFields' in cjsType && 'getFields' in esmType) {
       const cjsFields = (cjsType as import('graphql').GraphQLObjectType).getFields();
       const esmFields = (esmType as import('graphql').GraphQLObjectType).getFields();
@@ -187,6 +189,12 @@ export async function createServer(
         const esmField = esmFields[fieldName];
         if (esmField?.resolve) {
           cjsField.resolve = esmField.resolve as typeof cjsField.resolve;
+        }
+        // Copy subscribe functions (needed for subscription fields)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if ((esmField as any)?.subscribe) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (cjsField as any).subscribe = (esmField as any).subscribe;
         }
       }
     }
@@ -219,6 +227,11 @@ export async function createServer(
   // 7c. Create query cache for compiled SQL templates
   const queryCache = createQueryCache(1000);
 
+  // 7d. Mutable reference to the subscription manager so we can set it
+  // after Mercurius is registered (subscription infra starts later).
+  // The context closure captures this object by reference.
+  const subscriptionRef: { manager: SubscriptionManager | undefined } = { manager: undefined };
+
   await server.register(mercurius, {
     schema: cjsSchema,
     graphiql: process.env['NODE_ENV'] !== 'production',
@@ -244,7 +257,49 @@ export async function createServer(
         permissionLookup: resolverPermissionLookup,
         tables: schemaModel.tables,
         queryCache,
+        subscriptionManager: subscriptionRef.manager,
       };
+    },
+    subscription: {
+      keepAlive: 30000,
+      async onConnect(data) {
+        // Authenticate the WebSocket connection using connectionParams
+        const connectionParams = (data?.payload as Record<string, unknown>) ?? {};
+        const session = await authenticateWsConnection(connectionParams, config.auth);
+        if (!session) {
+          // Returning false / throwing rejects the connection
+          throw new Error('WebSocket authentication failed');
+        }
+        // Store session on the context for the subscription context function
+        return { session };
+      },
+      context(_connection, context) {
+        // Build ResolverContext for subscription operations.
+        // The session was set by onConnect and is available via context.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const connectResult = (context as any)?._connectionInit ?? (context as any);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const session = connectResult?.session ?? (context as any)?.session;
+        const auth = session ?? {
+          role: 'anonymous',
+          allowedRoles: [],
+          isAdmin: false,
+          claims: {},
+        };
+        return {
+          auth,
+          queryWithSession: (
+            sql: string,
+            params: unknown[],
+            sess: typeof auth,
+            intent: 'read' | 'write',
+          ) => connectionManager.queryWithSession(sql, params, sess, intent),
+          permissionLookup: resolverPermissionLookup,
+          tables: schemaModel.tables,
+          queryCache,
+          subscriptionManager: subscriptionRef.manager,
+        };
+      },
     },
   });
 
@@ -337,6 +392,13 @@ export async function createServer(
       eventManager = undefined;
     }
 
+    // ── Manual event invocation route ─────────────────────────────────────
+    registerInvokeRoute(server as any, {
+      pool: primaryPool,
+      boss: pgBossManager?.boss,
+      tables: schemaModel.tables,
+    });
+
     try {
       // Install subscription notification triggers
       await installSubscriptionTriggers(primaryPool, schemaModel.tables);
@@ -345,6 +407,9 @@ export async function createServer(
       // Create change listener for subscriptions
       changeListener = createChangeListener(primaryConnectionString);
       subscriptionMgr = createSubscriptionManager(connectionManager, log);
+
+      // Make the subscription manager available to resolver contexts
+      subscriptionRef.manager = subscriptionMgr;
 
       changeListener.onTableChange((notification) => {
         subscriptionMgr!.handleChange(notification).catch((err) => {
@@ -387,7 +452,7 @@ export async function createServer(
         const newSdl = printSchema(newSchema);
         const newCjsSchema = cjsGraphql.buildSchema(newSdl);
 
-        // Copy resolvers from new ESM schema to new CJS schema
+        // Copy resolvers and subscribe functions from new ESM schema to new CJS schema
         const newEsmTypeMap = newSchema.getTypeMap();
         const newCjsTypeMap = newCjsSchema.getTypeMap();
         for (const [typeName, newCjsType] of Object.entries(newCjsTypeMap)) {
@@ -400,6 +465,11 @@ export async function createServer(
               const esmField = esmFields[fieldName];
               if (esmField?.resolve) {
                 cjsField.resolve = esmField.resolve as typeof cjsField.resolve;
+              }
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              if ((esmField as any)?.subscribe) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (cjsField as any).subscribe = (esmField as any).subscribe;
               }
             }
           }

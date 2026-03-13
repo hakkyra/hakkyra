@@ -23,7 +23,7 @@ export async function registerEventCleanup(
   retentionDays: number = 7,
   logger: Logger,
 ): Promise<void> {
-  const queueName = 'hakkyra:cleanup_events';
+  const queueName = 'hakkyra/cleanup_events';
 
   // Schedule daily cleanup at 3 AM
   await boss.schedule(queueName, '0 3 * * *', { retentionDays });

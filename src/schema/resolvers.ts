@@ -17,6 +17,7 @@ import type {
   CompiledPermission,
 } from '../types.js';
 import type { QueryCache } from '../sql/cache.js';
+import type { SubscriptionManager } from '../subscriptions/manager.js';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../sql/select.js';
 import type { OrderByItem, AggregateSelection } from '../sql/select.js';
 import { compileInsertOne, compileInsert } from '../sql/insert.js';
@@ -51,6 +52,9 @@ export interface ResolverContext {
 
   /** Query cache for compiled SQL templates. */
   queryCache?: QueryCache;
+
+  /** Subscription manager for real-time subscriptions (available when subscriptions are enabled). */
+  subscriptionManager?: SubscriptionManager;
 }
 
 /**

@@ -51,6 +51,10 @@ import {
   makeDeleteByPkResolver,
 } from './resolvers.js';
 import type { ResolverContext } from './resolvers.js';
+import {
+  makeSubscriptionSelectSubscribe,
+  makeSubscriptionSelectByPkSubscribe,
+} from './subscription-resolvers.js';
 import { buildCustomQueryFields } from './custom-queries.js';
 
 // ─── Root Field Naming ──────────────────────────────────────────────────────
@@ -393,10 +397,9 @@ export function generateSchema(model: SchemaModel): GraphQLSchema {
       type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
       args: subSelectArgs,
       description: `Subscribe to rows from ${table.schema}.${table.name}`,
-      // Subscription resolvers are handled by the subscription plugin (graphql-ws)
-      // The resolve function returns the payload as-is
+      // The resolve function returns the yielded payload as-is
       resolve: (payload: unknown) => payload,
-      subscribe: makeSelectResolver(table),
+      subscribe: makeSubscriptionSelectSubscribe(table),
     };
 
     // subscribe to select_by_pk
@@ -417,7 +420,7 @@ export function generateSchema(model: SchemaModel): GraphQLSchema {
         args: pkArgs,
         description: `Subscribe to a single row from ${table.schema}.${table.name} by primary key`,
         resolve: (payload: unknown) => payload,
-        subscribe: makeSelectByPkResolver(table),
+        subscribe: makeSubscriptionSelectByPkSubscribe(table),
       };
     }
   }

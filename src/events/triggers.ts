@@ -30,7 +30,7 @@ function generateTriggerFunctionSQL(
   const blocks: string[] = [];
 
   // Session vars capture
-  blocks.push(`  _session_vars := current_setting('hasura.user', true)::jsonb;`);
+  blocks.push(`  _session_vars := NULLIF(current_setting('hasura.user', true), '')::jsonb;`);
 
   // INSERT triggers
   if (insertTriggers.length > 0) {
