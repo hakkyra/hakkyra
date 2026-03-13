@@ -54,7 +54,7 @@ export class BullMQAdapter implements JobQueue {
   async start(): Promise<void> {
     // Dynamically import BullMQ — will throw a clear error if not installed
     try {
-      // @ts-expect-error — bullmq is an optional dependency, may not be installed
+      // @ts-ignore — bullmq is an optional dependency, may not be installed
       this.bullmq = await import('bullmq');
     } catch {
       throw new Error(
