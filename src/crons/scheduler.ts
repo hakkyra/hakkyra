@@ -21,7 +21,7 @@ export async function registerCronTriggers(
   triggers: CronTriggerConfig[],
 ): Promise<void> {
   for (const trigger of triggers) {
-    const queueName = `cron:${trigger.name}`;
+    const queueName = `cron/${trigger.name}`;
     const options: ScheduleOptions = {};
 
     // Configure retry from trigger config

@@ -39,7 +39,7 @@ import { initCronTriggers } from './crons/index.js';
 import { initEventTriggers } from './events/manager.js';
 import type { EventManager } from './events/manager.js';
 import { registerEventCleanup } from './events/cleanup.js';
-import { installSubscriptionTriggers } from './subscriptions/triggers.js';
+import { reconcileTriggers, buildDesiredSubscriptionTriggers } from './shared/trigger-reconciler.js';
 import { createChangeListener } from './subscriptions/listener.js';
 import type { ChangeListener } from './subscriptions/listener.js';
 import { createSubscriptionManager } from './subscriptions/manager.js';
@@ -497,10 +497,23 @@ export async function createServer(
 
     try {
 
-      // Install subscription notification triggers
-      await installSubscriptionTriggers(primaryPool, schemaModel.tables);
-
-      server.log.info('Subscription triggers installed');
+      // Reconcile subscription triggers (diff-based)
+      const desiredSubTriggers = buildDesiredSubscriptionTriggers(schemaModel.tables);
+      const subReconcile = await reconcileTriggers(
+        primaryPool,
+        desiredSubTriggers,
+        server.log as any,
+        { triggerPrefix: 'hakkyra_notify_' },
+      );
+      server.log.info(
+        {
+          created: subReconcile.created.length,
+          dropped: subReconcile.dropped.length,
+          replaced: subReconcile.replaced.length,
+          unchanged: subReconcile.unchanged.length,
+        },
+        'Subscription triggers reconciled',
+      );
 
       // Create change listener for subscriptions
       changeListener = createChangeListener(primaryConnectionString);

@@ -173,7 +173,7 @@
 
 ### P1.12 — Test Infrastructure
 - [x] Docker Compose with PostgreSQL 17
-- [x] Test fixtures: 15 tables + 1 materialized view + 5 enums + 3 computed fields
+- [x] Test fixtures: 18 tables + 1 materialized view + 5 enums + 3 computed fields
 - [x] YAML metadata in Hasura-compatible format (19 table configs, 5 roles, 3 inherited roles)
 - [x] Event triggers, cron triggers, actions, REST endpoints, query collections
 - [x] Seed data: fixture data for all tracked tables
@@ -281,38 +281,31 @@
 - [x] Config types in `src/types.ts` → `z.infer<>` (22 types)
 - [x] Environment variable validation (`src/config/env.ts`) — fail-fast on missing vars
 - [x] REST input validation (`src/rest/schemas.ts`) — body + pagination Zod schemas
-- [ ] Tests for Zod schemas (valid configs pass, invalid configs produce clear errors)
+- [x] Tests for Zod schemas (valid configs pass, invalid configs produce clear errors) — 214 tests
 
 ### P4.2 — Observability
 - [x] Structured logging with pino (Fastify logger, connection manager)
 - [x] Request/response logging (onResponse hook: method, URL, status, time, role, GraphQL op)
 - [x] Slow query detection (`slow_query_threshold_ms`, default 200ms)
-- [ ] OpenTelemetry tracing integration
-- [ ] Query performance metrics export
 
 ### P4.3 — Performance
 - [x] Query plan caching (LRU cache for compiled SQL templates)
-- [ ] Trigger reconciliation — diff-based startup instead of DROP+CREATE all
-  - [ ] Query existing hakkyra triggers from pg_trigger/pg_proc in single query
-  - [ ] Diff desired (YAML) vs actual (DB) trigger sets
-  - [ ] Only CREATE new triggers, DROP orphaned triggers, skip unchanged
-  - [ ] `CREATE OR REPLACE FUNCTION` for event trigger functions (no data lock)
-  - [ ] Orphan cleanup: auto-remove triggers for tables removed from YAML
-- [ ] Connection pool tuning
+- [x] Trigger reconciliation — diff-based startup instead of DROP+CREATE all (`src/shared/trigger-reconciler.ts`)
+  - [x] Query existing hakkyra triggers from pg_trigger/pg_proc in single query
+  - [x] Diff desired (YAML) vs actual (DB) trigger sets
+  - [x] Only CREATE new triggers, DROP orphaned triggers, skip unchanged
+  - [x] `CREATE OR REPLACE FUNCTION` for event trigger functions (no data lock)
+  - [x] Orphan cleanup: auto-remove triggers for tables removed from YAML
+- [x] Connection pool tuning (`maxLifetime`, `allowExitOnIdle`, fix `connection_lifetime` mapping)
 - [ ] Memory profiling for subscription-heavy workloads
 
 ### P4.4 — Developer Experience
-- [ ] TypeScript type generation for the API (client-side types)
-- [ ] Example projects (todo app, e-commerce)
-- [ ] Docker image + docker-compose for quick start
-- [ ] GitHub Actions CI template
+- [x] Docker image + docker-compose for quick start (`Dockerfile`, `docker-compose.quickstart.yml`)
+- [x] GitHub Actions CI template (`.github/workflows/ci.yml`)
 
----
-
-## Cross-cutting / Future
+## Improvements
+- [ ] Dual connection pool — dedicated session-mode pool for LISTEN/NOTIFY, separate pooled connections for queries/mutations (enables PgBouncer transaction-mode compatibility)
 - [ ] Redis pub/sub fanout for multi-instance subscriptions
-- [ ] Doc regeneration on config/schema change
-- [ ] OpenTelemetry tracing (spans for HTTP, GraphQL, SQL, webhooks)
 
 ---
 
@@ -342,4 +335,5 @@
 | Action transforms | 32 | Pass |
 | Batch operations | 26 | Pass |
 | Action relationships | 13 | Pass |
-| **Total** | **491** | **22 suites, all passing** |
+| Zod schemas | 214 | Pass |
+| **Total** | **705** | **23 suites, all passing** |

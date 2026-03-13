@@ -3,11 +3,6 @@
  *
  * Uses real PostgreSQL (from docker-compose), a dedicated pg-boss instance,
  * and a mock webhook HTTP server to verify end-to-end cron trigger behavior.
- *
- * Note: The production code uses `cron:` as a queue name prefix, but pg-boss v12
- * disallows colons in queue names. The scheduler registration test verifies the
- * arguments via spyOn, while the worker/delivery tests use valid queue names
- * with the same handler logic to exercise the full pipeline.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
@@ -289,7 +284,7 @@ describe('Cron Triggers', () => {
 
       // First trigger
       expect(scheduleSpy).toHaveBeenCalledWith(
-        'cron:test_trigger_a',
+        'cron/test_trigger_a',
         '*/5 * * * *',
         { payload: { action: 'a' } },
         {},
@@ -297,7 +292,7 @@ describe('Cron Triggers', () => {
 
       // Second trigger (no payload => null)
       expect(scheduleSpy).toHaveBeenCalledWith(
-        'cron:test_trigger_b',
+        'cron/test_trigger_b',
         '0 3 * * *',
         { payload: null },
         {},
@@ -324,7 +319,7 @@ describe('Cron Triggers', () => {
 
       expect(scheduleSpy).toHaveBeenCalledTimes(1);
       expect(scheduleSpy).toHaveBeenCalledWith(
-        'cron:retry_test',
+        'cron/retry_test',
         '0 * * * *',
         { payload: null },
         {
@@ -355,8 +350,8 @@ describe('Cron Triggers', () => {
       await registerCronWorkers(boss, triggers, logger);
 
       expect(workSpy).toHaveBeenCalledTimes(2);
-      expect(workSpy.mock.calls[0][0]).toBe('cron:worker_a');
-      expect(workSpy.mock.calls[1][0]).toBe('cron:worker_b');
+      expect(workSpy.mock.calls[0][0]).toBe('cron/worker_a');
+      expect(workSpy.mock.calls[1][0]).toBe('cron/worker_b');
     });
   });
 

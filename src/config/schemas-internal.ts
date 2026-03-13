@@ -316,6 +316,8 @@ export const PoolConfigSchema = z.object({
   max: z.number().optional(),
   idleTimeout: z.number().optional(),
   connectionTimeout: z.number().optional(),
+  maxLifetime: z.number().optional(),
+  allowExitOnIdle: z.boolean().optional(),
 });
 
 export const DatabasesConfigSchema = z.object({

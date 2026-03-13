@@ -10,19 +10,35 @@ import type { Pool } from 'pg';
 import type { TableInfo, EventTriggerConfig } from '../types.js';
 import { quoteIdentifier } from '../sql/utils.js';
 
+// ─── Types ─────────────────────────────────────────────────────────────────
+
+export interface GeneratedEventTrigger {
+  triggerName: string;
+  functionName: string;
+  functionSchema: string;
+  events: string;
+  functionBody: string;
+  createFunctionSQL: string;
+  createTriggerSQL: string;
+}
+
 // ─── Trigger SQL generation ────────────────────────────────────────────────
 
 /**
- * Generate the trigger function SQL for a specific table.
+ * Generate structured event trigger SQL for a specific table.
  *
- * The function checks each configured event trigger and writes matching
- * events to hakkyra.event_log, then fires NOTIFY hakkyra_events.
+ * Returns the function body, CREATE FUNCTION, and CREATE TRIGGER
+ * SQL separately so the trigger reconciler can diff and selectively apply.
  */
-function generateTriggerFunctionSQL(
+export function generateEventTriggerSQL(
   table: TableInfo,
   triggers: EventTriggerConfig[],
-): string {
-  const funcName = `hakkyra.event_trigger_${table.schema}_${table.name}`;
+): GeneratedEventTrigger {
+  const funcSchema = 'hakkyra';
+  const funcName = `event_trigger_${table.schema}_${table.name}`;
+  const triggerName = `hakkyra_event_${table.schema}_${table.name}`;
+  const tableRef = `${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
+
   const insertTriggers = triggers.filter((t) => t.definition.insert);
   const updateTriggers = triggers.filter((t) => t.definition.update);
   const deleteTriggers = triggers.filter((t) => t.definition.delete);
@@ -86,27 +102,52 @@ function generateTriggerFunctionSQL(
   if (insertTriggers.length > 0) ops.push('INSERT');
   if (updateTriggers.length > 0) ops.push('UPDATE');
   if (deleteTriggers.length > 0) ops.push('DELETE');
+  const events = ops.join(' OR ');
 
-  const functionSQL = `
-CREATE OR REPLACE FUNCTION ${funcName}() RETURNS trigger AS $$
+  const functionBody = `
+  _session_vars := NULLIF(current_setting('hasura.user', true), '')::jsonb;
+${blocks.slice(1).join('\n')}
+  RETURN COALESCE(NEW, OLD);`.trim();
+
+  const createFunctionSQL = `
+CREATE OR REPLACE FUNCTION ${funcSchema}.${funcName}() RETURNS trigger AS $$
 DECLARE
   _session_vars JSONB;
 BEGIN
 ${blocks.join('\n')}
   RETURN COALESCE(NEW, OLD);
 END;
-$$ LANGUAGE plpgsql;
-`;
+$$ LANGUAGE plpgsql;`;
 
-  const triggerSQL = `
-DROP TRIGGER IF EXISTS hakkyra_event_${table.schema}_${table.name} ON ${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)};
-CREATE TRIGGER hakkyra_event_${table.schema}_${table.name}
-  AFTER ${ops.join(' OR ')} ON ${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}
+  const createTriggerSQL = `
+CREATE TRIGGER ${triggerName}
+  AFTER ${events} ON ${tableRef}
   FOR EACH ROW
-  EXECUTE FUNCTION ${funcName}();
-`;
+  EXECUTE FUNCTION ${funcSchema}.${funcName}();`;
 
-  return functionSQL + triggerSQL;
+  return {
+    triggerName,
+    functionName: funcName,
+    functionSchema: funcSchema,
+    events,
+    functionBody,
+    createFunctionSQL,
+    createTriggerSQL,
+  };
+}
+
+/**
+ * Generate combined SQL for backward compatibility.
+ */
+function generateTriggerFunctionSQL(
+  table: TableInfo,
+  triggers: EventTriggerConfig[],
+): string {
+  const gen = generateEventTriggerSQL(table, triggers);
+  const tableRef = `${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
+  return `${gen.createFunctionSQL}
+DROP TRIGGER IF EXISTS ${gen.triggerName} ON ${tableRef};
+${gen.createTriggerSQL}`;
 }
 
 /**

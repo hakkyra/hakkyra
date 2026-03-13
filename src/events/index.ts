@@ -6,7 +6,8 @@
  */
 
 export { ensureEventSchema } from './schema.js';
-export { installEventTriggers, removeEventTriggers } from './triggers.js';
+export { installEventTriggers, removeEventTriggers, generateEventTriggerSQL } from './triggers.js';
+export type { GeneratedEventTrigger } from './triggers.js';
 export { enqueuePendingEvents, registerEventWorkers, buildEventPayload } from './delivery.js';
 export type { EventLogRow } from './delivery.js';
 export { initEventTriggers } from './manager.js';

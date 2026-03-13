@@ -61,6 +61,12 @@ function createPool(urlEnv: string, poolConfig?: PoolConfig): PoolInstance {
     max: poolConfig?.max ?? 10,
     idleTimeoutMillis: (poolConfig?.idleTimeout ?? 30) * 1000,
     connectionTimeoutMillis: (poolConfig?.connectionTimeout ?? 5) * 1000,
+    ...(poolConfig?.maxLifetime != null && {
+      maxLifetimeMillis: poolConfig.maxLifetime * 1000,
+    }),
+    ...(poolConfig?.allowExitOnIdle != null && {
+      allowExitOnIdle: poolConfig.allowExitOnIdle,
+    }),
   });
 }
 
@@ -154,7 +160,7 @@ export function createConnectionManager(
         const sessionJson = JSON.stringify(session.claims);
         await client.query(`SELECT set_config('hasura.user', $1, true)`, [sessionJson]);
         if (session.userId) {
-          await client.query(`SELECT set_config('hakkyra.player_id', $1, true)`, [session.userId]);
+          await client.query(`SELECT set_config('hakkyra.user_id', $1, true)`, [session.userId]);
         }
         await client.query(`SELECT set_config('hakkyra.role', $1, true)`, [session.role]);
 

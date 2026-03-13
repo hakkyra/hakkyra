@@ -41,7 +41,7 @@ export async function registerCronWorkers(
   logger: Logger,
 ): Promise<void> {
   for (const trigger of triggers) {
-    const queueName = `cron:${trigger.name}`;
+    const queueName = `cron/${trigger.name}`;
 
     await jobQueue.work<Record<string, unknown>>(queueName, async (jobs: Job<Record<string, unknown>>[]) => {
       for (const job of jobs) {

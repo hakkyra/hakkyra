@@ -5,7 +5,13 @@
  * LISTEN/NOTIFY + re-query + hash-diff approach.
  */
 
-export { installSubscriptionTriggers, removeSubscriptionTriggers } from './triggers.js';
+export {
+  installSubscriptionTriggers,
+  removeSubscriptionTriggers,
+  SUBSCRIPTION_FUNCTION_BODY,
+  SUBSCRIPTION_FUNCTION_SQL,
+  generateSubscriptionTriggerSQL,
+} from './triggers.js';
 export { createChangeListener } from './listener.js';
 export type { ChangeListener, ChangeNotification } from './listener.js';
 export { createSubscriptionManager } from './manager.js';

@@ -240,7 +240,7 @@ function transformDatabases(
           ? {
               max: replica.pool_settings.max_connections,
               idleTimeout: replica.pool_settings.idle_timeout,
-              connectionTimeout: replica.pool_settings.connection_lifetime,
+              maxLifetime: replica.pool_settings.connection_lifetime,
             }
           : undefined,
       });
@@ -250,7 +250,15 @@ function transformDatabases(
     for (const r of serverConfig.databases.replicas) {
       replicas.push({
         urlEnv: r.url_from_env ?? 'DATABASE_REPLICA_URL',
-        pool: r.pool,
+        pool: r.pool
+          ? {
+              max: r.pool.max,
+              idleTimeout: r.pool.idle_timeout,
+              connectionTimeout: r.pool.connection_timeout,
+              maxLifetime: r.pool.max_lifetime,
+              allowExitOnIdle: r.pool.allow_exit_on_idle,
+            }
+          : undefined,
       });
     }
   }
@@ -264,7 +272,9 @@ function transformDatabases(
       pool: {
         max: serverPool?.max ?? pool?.max_connections ?? 10,
         idleTimeout: serverPool?.idle_timeout ?? pool?.idle_timeout ?? 30,
-        connectionTimeout: serverPool?.connection_timeout ?? pool?.connection_lifetime ?? 5,
+        connectionTimeout: serverPool?.connection_timeout ?? 5,
+        maxLifetime: serverPool?.max_lifetime ?? pool?.connection_lifetime,
+        allowExitOnIdle: serverPool?.allow_exit_on_idle,
       },
     },
     replicas: replicas.length > 0 ? replicas : undefined,

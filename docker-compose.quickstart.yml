@@ -1,0 +1,38 @@
+# Quick start: run Hakkyra + PostgreSQL locally
+#   docker compose -f docker-compose.quickstart.yml up
+#
+# Place your metadata in ./metadata/ and hakkyra.yaml in the project root.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: hakkyra
+      POSTGRES_USER: hakkyra
+      POSTGRES_PASSWORD: hakkyra
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hakkyra -d hakkyra"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  hakkyra:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://hakkyra:hakkyra@postgres:5432/hakkyra
+      HAKKYRA_ADMIN_SECRET: admin-secret
+    volumes:
+      - ./metadata:/app/metadata:ro
+      - ./hakkyra.yaml:/app/hakkyra.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

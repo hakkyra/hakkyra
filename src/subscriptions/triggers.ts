@@ -11,10 +11,20 @@ import type { TableInfo } from '../types.js';
 import { quoteIdentifier } from '../sql/utils.js';
 
 /**
- * SQL for the generic change notification function.
- * Fires pg_notify with a JSON payload identifying the changed table.
+ * Raw PL/pgSQL body of hakkyra.notify_change() (without CREATE FUNCTION wrapper).
  */
-const NOTIFY_FUNCTION_SQL = `
+export const SUBSCRIPTION_FUNCTION_BODY = `
+  PERFORM pg_notify('hakkyra_changes', json_build_object(
+    'table', TG_TABLE_NAME,
+    'schema', TG_TABLE_SCHEMA,
+    'op', TG_OP
+  )::text);
+  RETURN COALESCE(NEW, OLD);`.trim();
+
+/**
+ * Full CREATE OR REPLACE FUNCTION SQL for the shared notification function.
+ */
+export const SUBSCRIPTION_FUNCTION_SQL = `
 CREATE OR REPLACE FUNCTION hakkyra.notify_change() RETURNS trigger AS $$
 BEGIN
   PERFORM pg_notify('hakkyra_changes', json_build_object(
@@ -24,8 +34,30 @@ BEGIN
   )::text);
   RETURN COALESCE(NEW, OLD);
 END;
-$$ LANGUAGE plpgsql;
-`;
+$$ LANGUAGE plpgsql;`;
+
+/**
+ * Generate the CREATE TRIGGER SQL for a single subscription trigger.
+ */
+export function generateSubscriptionTriggerSQL(table: TableInfo): {
+  triggerName: string;
+  createTriggerSQL: string;
+  events: string;
+} {
+  const tableRef = `${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
+  const triggerName = `hakkyra_notify_${table.schema}_${table.name}`;
+  const events = 'INSERT OR UPDATE OR DELETE';
+  const createTriggerSQL = `
+CREATE TRIGGER ${triggerName}
+  AFTER ${events} ON ${tableRef}
+  FOR EACH ROW
+  EXECUTE FUNCTION hakkyra.notify_change();`;
+
+  return { triggerName, createTriggerSQL, events };
+}
+
+// Keep for backward compatibility
+const NOTIFY_FUNCTION_SQL = SUBSCRIPTION_FUNCTION_SQL;
 
 /**
  * Install subscription notification triggers on all tracked tables.

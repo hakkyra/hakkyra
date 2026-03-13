@@ -33,6 +33,7 @@ const ReadReplicaPoolSettingsSchema = z
     max_connections: z.number().optional(),
     idle_timeout: z.number().optional(),
     connection_lifetime: z.number().optional(),
+    retries: z.number().optional(),
   })
   .passthrough();
 
@@ -404,6 +405,8 @@ const DbPoolSchema = z
     max: z.number().optional(),
     idle_timeout: z.number().optional(),
     connection_timeout: z.number().optional(),
+    max_lifetime: z.number().optional(),
+    allow_exit_on_idle: z.boolean().optional(),
   })
   .passthrough();
 

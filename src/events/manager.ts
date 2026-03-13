@@ -15,8 +15,9 @@ import createSubscriber from 'pg-listen';
 import type { TableInfo } from '../types.js';
 import type { JobQueue } from '../shared/job-queue/types.js';
 import { ensureEventSchema } from './schema.js';
-import { installEventTriggers, removeEventTriggers } from './triggers.js';
+import { removeEventTriggers } from './triggers.js';
 import { enqueuePendingEvents, registerEventWorkers } from './delivery.js';
+import { reconcileTriggers, buildDesiredEventTriggers } from '../shared/trigger-reconciler.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -55,11 +56,20 @@ export async function initEventTriggers(
   await ensureEventSchema(pool);
   logger.info('Event log schema ready');
 
-  // 2. Install PG triggers
-  await installEventTriggers(pool, tablesWithEvents);
+  // 2. Reconcile PG triggers (diff-based: only create/drop/replace what changed)
+  const desiredEventTriggers = buildDesiredEventTriggers(tablesWithEvents);
+  const reconcileResult = await reconcileTriggers(pool, desiredEventTriggers, logger, {
+    triggerPrefix: 'hakkyra_event_',
+  });
   logger.info(
-    { tables: tablesWithEvents.map((t) => `${t.schema}.${t.name}`) },
-    'Event triggers installed',
+    {
+      tables: tablesWithEvents.map((t) => `${t.schema}.${t.name}`),
+      created: reconcileResult.created.length,
+      dropped: reconcileResult.dropped.length,
+      replaced: reconcileResult.replaced.length,
+      unchanged: reconcileResult.unchanged.length,
+    },
+    'Event triggers reconciled',
   );
 
   // 3. Register job queue workers
