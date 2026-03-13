@@ -21,6 +21,8 @@ import { parseRESTFilters } from './filters.js';
 import type { ParsedRESTQuery, OrderByClause } from './filters.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from '../sql/utils.js';
 import { compileWhere } from '../sql/where.js';
+import { compileSelectAggregate } from '../sql/select.js';
+import type { AggregateSelection } from '../sql/select.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -542,10 +544,12 @@ export function registerRESTRoutes(
     if (table.primaryKey.length === 0) {
       // Skip tables without a primary key — we can only list them
       registerListRoute(fastify, table, basePath, config, deps, selectOverride);
+      registerAggregateRoute(fastify, table, basePath, config, deps);
       continue;
     }
 
     registerListRoute(fastify, table, basePath, config, deps, selectOverride);
+    registerAggregateRoute(fastify, table, basePath, config, deps);
     registerGetByPKRoute(fastify, table, basePath, config, deps, selectByPkOverride);
     registerInsertRoute(fastify, table, basePath, config, deps, insertOverride);
     registerUpdateRoute(fastify, table, basePath, config, deps, updateOverride);
@@ -601,6 +605,112 @@ function registerListRoute(
     }
   });
 }
+
+function registerAggregateRoute(
+  fastify: FastifyInstance,
+  table: TableInfo,
+  basePath: string,
+  config: RESTConfig,
+  deps: RESTRouterDeps,
+): void {
+  const urlName = getURLName(table);
+  const path = `${basePath}/${urlName}/aggregate`;
+
+  fastify.get(path, async (request: FastifyRequest, reply: FastifyReply) => {
+    const session = request.session;
+    if (!session) {
+      sendUnauthorized(reply, 'Authentication required');
+      return;
+    }
+
+    if (!checkPermission(table, 'select', session)) {
+      sendForbidden(reply, `No select permission on "${table.name}" for role "${session.role}"`);
+      return;
+    }
+
+    // Check aggregation permission for non-admin roles
+    if (!session.isAdmin) {
+      const selectPerm = table.permissions.select[session.role];
+      if (selectPerm && !selectPerm.allowAggregations) {
+        sendForbidden(reply, `Aggregations not allowed for role "${session.role}" on "${table.name}"`);
+        return;
+      }
+    }
+
+    try {
+      const queryParams = request.query as Record<string, string>;
+      const parsed = parseRESTFilters(queryParams);
+      const permission = session.isAdmin ? undefined : deps.getPermission(table, session.role);
+
+      // Parse group_by parameter
+      const groupByParam = queryParams['group_by'];
+      let groupBy: string[] | undefined;
+      if (groupByParam) {
+        const selectPerm = permission?.select;
+        const allowedColumns = selectPerm?.columns === '*'
+          ? table.columns.map((c) => c.name)
+          : (selectPerm?.columns ?? table.columns.map((c) => c.name));
+
+        groupBy = groupByParam.split(',')
+          .map((s) => s.trim())
+          .filter((col) => allowedColumns.includes(col));
+        if (groupBy.length === 0) groupBy = undefined;
+      }
+
+      // Build aggregate selection
+      const aggregate: AggregateSelection = { count: {} };
+
+      // Add numeric column aggregates
+      const numericCols = table.columns
+        .filter((c) => NUMERIC_PG_TYPES_REST.has(c.udtName))
+        .map((c) => c.name);
+      if (numericCols.length > 0) {
+        aggregate.sum = numericCols;
+        aggregate.avg = numericCols;
+        aggregate.min = numericCols;
+        aggregate.max = numericCols;
+      }
+
+      const compiled = compileSelectAggregate({
+        table,
+        where: parsed.where,
+        aggregate,
+        groupBy,
+        permission: permission?.select ? {
+          filter: permission.select.filter,
+          columns: permission.select.columns,
+          limit: permission.select.limit,
+        } : undefined,
+        session,
+      });
+
+      const pool = deps.getPool('read');
+      const result = await pool.query(compiled.sql, compiled.params);
+
+      const row = result.rows[0] as Record<string, unknown> | undefined;
+
+      if (groupBy) {
+        // Return grouped aggregates
+        const groupedData = row?.groupedAggregates as Record<string, unknown>[] ?? [];
+        void reply.code(200).send(groupedData);
+      } else {
+        // Return standard aggregate
+        void reply.code(200).send({
+          aggregate: row?.aggregate ?? { count: 0 },
+        });
+      }
+    } catch (err) {
+      request.log.error({ err, table: table.name }, 'Error in aggregate query');
+      sendBadRequest(reply, err instanceof Error ? err.message : 'Query failed');
+    }
+  });
+}
+
+/** Numeric PG types for REST aggregate detection. */
+const NUMERIC_PG_TYPES_REST = new Set([
+  'int2', 'int4', 'int8', 'serial', 'serial4', 'serial8', 'bigserial',
+  'float4', 'float8', 'numeric', 'oid',
+]);
 
 function registerGetByPKRoute(
   fastify: FastifyInstance,

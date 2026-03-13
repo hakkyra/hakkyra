@@ -12,6 +12,7 @@
 import type { GraphQLFieldResolver } from 'graphql';
 import type {
   TableInfo,
+  ColumnInfo,
   SessionVariables,
   BoolExp,
   CompiledPermission,
@@ -220,6 +221,18 @@ function resolveLimit(userLimit?: number, permLimit?: number): number | undefine
     return Math.min(userLimit, permLimit);
   }
   return userLimit ?? permLimit;
+}
+
+/**
+ * Check if a column is a numeric type (for aggregate sum/avg).
+ */
+const NUMERIC_PG_TYPES = new Set([
+  'int2', 'int4', 'int8', 'serial', 'serial4', 'serial8', 'bigserial',
+  'float4', 'float8', 'numeric', 'oid',
+]);
+
+function isNumericColumn(column: ColumnInfo): boolean {
+  return NUMERIC_PG_TYPES.has(column.udtName);
 }
 
 /**
@@ -474,9 +487,116 @@ export function makeSelectAggregateResolver(
     const orderBy = remapOrderBy(args.orderBy as Array<Record<string, string>> | undefined, columnMap);
     const limit = resolveLimit(args.limit as number | undefined, perm?.limit);
 
-    // Build aggregate selection — request count + nodes
+    // Extract groupBy — enum values resolve to PG column names directly
+    const rawGroupBy = args.groupBy as string[] | undefined;
+    let groupBy: string[] | undefined;
+    if (rawGroupBy && rawGroupBy.length > 0) {
+      // Filter groupBy columns against permitted columns
+      const allowedColumns = perm?.columns === '*'
+        ? table.columns.map((c) => c.name)
+        : (perm?.columns ?? table.columns.map((c) => c.name));
+      groupBy = rawGroupBy.filter((col) => allowedColumns.includes(col));
+      if (groupBy.length === 0) groupBy = undefined;
+    }
+
+    // Build aggregate selection — request count + sum/avg/min/max for numeric columns
     const aggregate: AggregateSelection = { count: {} };
 
+    // When groupBy is present, also request sum/avg for numeric columns
+    if (groupBy) {
+      const numericCols = table.columns
+        .filter((c) => isNumericColumn(c))
+        .map((c) => c.name);
+      if (numericCols.length > 0) {
+        aggregate.sum = numericCols;
+        aggregate.avg = numericCols;
+        aggregate.min = numericCols;
+        aggregate.max = numericCols;
+      }
+    }
+
+    if (groupBy) {
+      // Grouped aggregate path
+      const compiled = compileSelectAggregate({
+        table,
+        where,
+        aggregate,
+        groupBy,
+        permission: perm ? {
+          filter: perm.filter,
+          columns: perm.columns,
+          limit: perm.limit,
+        } : undefined,
+        session: auth,
+      });
+
+      const result = await queryWithSession(compiled.sql, compiled.params, auth, 'read');
+
+      const row = result.rows[0] as Record<string, unknown> | undefined;
+      if (!row) {
+        return { aggregate: { count: 0 }, nodes: [], groupedAggregates: [] };
+      }
+
+      const groupedData = row.groupedAggregates as Record<string, unknown>[] | undefined;
+
+      // Remap keys from snake_case to camelCase
+      const remappedGroups = (groupedData ?? []).map((group) => {
+        const keys = group.keys as Record<string, unknown> | undefined;
+        const remappedKeys: Record<string, unknown> = {};
+        if (keys) {
+          for (const [k, v] of Object.entries(keys)) {
+            remappedKeys[toCamelCase(k)] = v;
+          }
+        }
+
+        const result: Record<string, unknown> = { keys: remappedKeys };
+
+        // Pass through aggregate fields (count, sum, avg, min, max)
+        if ('count' in group) result.count = group.count;
+        if (group.sum) {
+          const sumObj = group.sum as Record<string, unknown>;
+          const remapped: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(sumObj)) {
+            remapped[toCamelCase(k)] = v;
+          }
+          result.sum = remapped;
+        }
+        if (group.avg) {
+          const avgObj = group.avg as Record<string, unknown>;
+          const remapped: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(avgObj)) {
+            remapped[toCamelCase(k)] = v;
+          }
+          result.avg = remapped;
+        }
+        if (group.min) {
+          const minObj = group.min as Record<string, unknown>;
+          const remapped: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(minObj)) {
+            remapped[toCamelCase(k)] = v;
+          }
+          result.min = remapped;
+        }
+        if (group.max) {
+          const maxObj = group.max as Record<string, unknown>;
+          const remapped: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(maxObj)) {
+            remapped[toCamelCase(k)] = v;
+          }
+          result.max = remapped;
+        }
+
+        return result;
+      });
+
+      return {
+        aggregate: { count: 0 },
+        nodes: [],
+        groupedAggregates: remappedGroups,
+      };
+    }
+
+    // Standard (non-grouped) aggregate path
     const compiled = compileSelectAggregate({
       table,
       where,

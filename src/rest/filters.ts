@@ -175,7 +175,7 @@ function parseSelect(selectStr: string): string[] {
 // ─── Main parser ─────────────────────────────────────────────────────────────
 
 /** Reserved query parameter names that are not column filters. */
-const RESERVED_PARAMS = new Set(['order', 'limit', 'offset', 'select', 'distinct_on']);
+const RESERVED_PARAMS = new Set(['order', 'limit', 'offset', 'select', 'distinct_on', 'group_by']);
 
 /**
  * Parse query string parameters into a structured REST query.

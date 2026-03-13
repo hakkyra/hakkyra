@@ -247,6 +247,10 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     };
     aggArgs['limit'] = { type: GraphQLInt };
     aggArgs['offset'] = { type: GraphQLInt };
+    aggArgs['groupBy'] = {
+      type: new GraphQLList(new GraphQLNonNull(mutInputs.selectColumnEnum)),
+      description: 'Group results by columns. When used, populates the groupedAggregates field.',
+    };
 
     queryFields[names.selectAggregate] = {
       type: new GraphQLNonNull(mutInputs.selectAggregateFields),

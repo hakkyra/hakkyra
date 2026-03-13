@@ -101,6 +101,8 @@ export interface SelectAggregateOptions {
     limit?: number;
     offset?: number;
   };
+  /** Optional: GROUP BY columns for grouped aggregates. */
+  groupBy?: string[];
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -635,6 +637,96 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
       aggFields.push(`'${fn}', json_build_object(${fnFields})`);
     }
   }
+
+  // ── GROUP BY path ──────────────────────────────────────────────────────
+  if (opts.groupBy && opts.groupBy.length > 0) {
+    // Filter groupBy columns against permissions
+    const allowedGroupByCols = opts.groupBy.filter((col) => {
+      const tableCol = opts.table.columns.find((c) => c.name === col);
+      if (!tableCol) return false;
+      if (!opts.permission?.columns) return true;
+      if (opts.permission.columns === '*') return true;
+      return opts.permission.columns.includes(col);
+    });
+
+    if (allowedGroupByCols.length > 0) {
+      // GROUP BY column references
+      const groupByRefs = allowedGroupByCols.map(
+        (c) => `${quoteIdentifier(alias)}.${quoteIdentifier(c)}`,
+      ).join(', ');
+
+      // Inner query: GROUP BY with aggregate functions, producing one row per group
+      const innerAggFields: string[] = [];
+
+      // Include group-by columns in inner SELECT
+      for (const col of allowedGroupByCols) {
+        innerAggFields.push(`${quoteIdentifier(alias)}.${quoteIdentifier(col)}`);
+      }
+
+      // Include aggregate expressions
+      if (agg.count !== undefined) {
+        if (agg.count.columns && agg.count.columns.length > 0) {
+          const colRefs = agg.count.columns.map(
+            (c) => `${quoteIdentifier(alias)}.${quoteIdentifier(c)}`,
+          ).join(', ');
+          const distinct = agg.count.distinct ? 'DISTINCT ' : '';
+          innerAggFields.push(`count(${distinct}${colRefs}) AS "_count_"`);
+        } else {
+          innerAggFields.push(`count(*) AS "_count_"`);
+        }
+      }
+
+      for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
+        const fieldCols = agg[fn];
+        if (fieldCols && fieldCols.length > 0) {
+          for (const c of fieldCols) {
+            innerAggFields.push(
+              `${fn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)}) AS "_${fn}_${c}_"`,
+            );
+          }
+        }
+      }
+
+      const innerSql = [
+        `SELECT ${innerAggFields.join(', ')}`,
+        `FROM ${tableRef} ${quoteIdentifier(alias)}`,
+        whereClause ? whereClause.trim() : null,
+        `GROUP BY ${groupByRefs}`,
+      ].filter(Boolean).join('\n');
+
+      // Outer query: wrap each group row into a JSON object
+      const groupedAlias = '"_g_"';
+      const outerJsonParts: string[] = [];
+
+      // keys object
+      const outerKeysFields = allowedGroupByCols.map(
+        (c) => `'${c}', ${groupedAlias}.${quoteIdentifier(c)}`,
+      ).join(', ');
+      outerJsonParts.push(`'keys', json_build_object(${outerKeysFields})`);
+
+      // count
+      if (agg.count !== undefined) {
+        outerJsonParts.push(`'count', ${groupedAlias}."_count_"`);
+      }
+
+      // sum, avg, min, max
+      for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
+        const fieldCols = agg[fn];
+        if (fieldCols && fieldCols.length > 0) {
+          const fnParts = fieldCols.map(
+            (c) => `'${c}', ${groupedAlias}."_${fn}_${c}_"`,
+          ).join(', ');
+          outerJsonParts.push(`'${fn}', json_build_object(${fnParts})`);
+        }
+      }
+
+      const outerSql = `SELECT coalesce(json_agg(json_build_object(${outerJsonParts.join(', ')})), '[]'::json) AS "groupedAggregates" FROM (${innerSql}) ${groupedAlias}`;
+
+      return { sql: outerSql, params: params.getParams() };
+    }
+  }
+
+  // ── Standard (non-grouped) aggregate path ────────────────────────────
 
   // Build the main SELECT
   const selectParts: string[] = [];

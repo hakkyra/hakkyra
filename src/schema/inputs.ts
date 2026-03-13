@@ -402,7 +402,39 @@ export function buildMutationInputTypes(
     },
   });
 
-  // ── SelectAggregate wrapper (aggregate + nodes) ───────────────────────
+  // ── GroupByKeys ─────────────────────────────────────────────────────────
+  const groupByKeys = new GraphQLObjectType({
+    name: `${typeName}GroupByKeys`,
+    description: `Group-by key columns for ${typeName}.`,
+    fields: () => {
+      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
+      for (const column of table.columns) {
+        const fieldName = toCamelCase(column.name);
+        const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
+        fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
+      }
+      return fields;
+    },
+  });
+
+  // ── GroupedAggregate ────────────────────────────────────────────────────
+  const groupedAggregate = new GraphQLObjectType({
+    name: `${typeName}GroupedAggregate`,
+    description: `A single grouped aggregate result for ${typeName}.`,
+    fields: {
+      keys: {
+        type: new GraphQLNonNull(groupByKeys),
+        description: 'The values of the grouped columns.',
+      },
+      count: { type: GraphQLInt },
+      sum: { type: sumFields },
+      avg: { type: avgFields },
+      min: { type: minFields },
+      max: { type: maxFields },
+    },
+  });
+
+  // ── SelectAggregate wrapper (aggregate + nodes + groupedAggregates) ───
   const selectAggregateFields = new GraphQLObjectType({
     name: `${typeName}Aggregate`,
     description: `Aggregated selection for ${typeName}.`,
@@ -412,6 +444,10 @@ export function buildMutationInputTypes(
         type: new GraphQLNonNull(
           new GraphQLList(new GraphQLNonNull(objectType)),
         ),
+      },
+      groupedAggregates: {
+        type: new GraphQLList(new GraphQLNonNull(groupedAggregate)),
+        description: 'Per-group aggregates. Only populated when groupBy argument is used.',
       },
     },
   });
