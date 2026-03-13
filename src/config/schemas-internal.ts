@@ -379,4 +379,5 @@ export const HakkyraConfigSchema = z.object({
   tableAliases: z.record(z.string(), z.string()),
   jobQueue: JobQueueConfigSchema.optional(),
   eventLogRetentionDays: z.number(),
+  slowQueryThresholdMs: z.number(),
 });

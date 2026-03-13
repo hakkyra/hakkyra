@@ -173,6 +173,7 @@ export async function loadConfig(
     tableAliases,
     jobQueue: transformJobQueueConfig(serverConfig),
     eventLogRetentionDays: serverConfig?.event_log?.retention_days ?? 7,
+    slowQueryThresholdMs: serverConfig?.server?.slow_query_threshold_ms ?? 200,
   };
 }
 

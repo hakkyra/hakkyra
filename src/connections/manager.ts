@@ -7,6 +7,7 @@
  */
 
 import pg from 'pg';
+import pino from 'pino';
 import type { DatabasesConfig, PoolConfig, SessionVariables } from '../types.js';
 import { createConsistencyTracker } from './consistency.js';
 import type { ConsistencyTracker } from './consistency.js';
@@ -15,6 +16,8 @@ import type { PreparedStatementManager } from './prepared-statements.js';
 
 const { Pool } = pg;
 type PoolInstance = InstanceType<typeof pg.Pool>;
+
+const defaultLogger = pino({ name: 'hakkyra:connections' });
 
 // ─── ConnectionManager interface ─────────────────────────────────────────────
 
@@ -72,7 +75,12 @@ function createPool(urlEnv: string, poolConfig?: PoolConfig): PoolInstance {
  * - `healthCheck()` — validates connectivity for all pools
  * - `shutdown()` — gracefully ends all connections
  */
-export function createConnectionManager(config: DatabasesConfig): ConnectionManager {
+export function createConnectionManager(
+  config: DatabasesConfig,
+  logger?: pino.Logger,
+): ConnectionManager {
+  const log = logger ?? defaultLogger;
+
   // Primary pool (always required)
   const primaryPool = createPool(config.primary.urlEnv, config.primary.pool);
 
@@ -91,9 +99,7 @@ export function createConnectionManager(config: DatabasesConfig): ConnectionMana
         replicaPools.push(createPool(replica.urlEnv, replica.pool));
       } catch (err) {
         // If a replica env var is missing, log and skip rather than failing startup
-        console.warn(
-          `[hakkyra:connections] Skipping replica: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        log.warn({ err }, 'Skipping replica due to configuration error');
       }
     }
   }

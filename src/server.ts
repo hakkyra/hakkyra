@@ -167,6 +167,34 @@ export async function createServer(
     },
   });
 
+  const slowQueryThresholdMs = config.slowQueryThresholdMs;
+
+  // ── Request logging hook ────────────────────────────────────────────────
+  server.addHook('onResponse', (request, reply, done) => {
+    const logData: Record<string, unknown> = {
+      method: request.method,
+      url: request.url,
+      statusCode: reply.statusCode,
+      responseTimeMs: reply.elapsedTime,
+    };
+
+    // Extract GraphQL operation name if available
+    if (request.url.startsWith('/graphql') && request.body && typeof request.body === 'object') {
+      const body = request.body as Record<string, unknown>;
+      if (typeof body.operationName === 'string') {
+        logData.operationName = body.operationName;
+      }
+    }
+
+    // Include role from session variables if available
+    if (request.session?.role) {
+      logData.role = request.session.role;
+    }
+
+    server.log.info(logData, 'request completed');
+    done();
+  });
+
   // 7. Register auth middleware (must be BEFORE Mercurius so preHandler runs)
   await server.register(createAuthHook(config.auth));
 
@@ -256,12 +284,23 @@ export async function createServer(
       };
       return {
         auth,
-        queryWithSession: (
+        queryWithSession: async (
           sql: string,
           params: unknown[],
           session: typeof auth,
           intent: 'read' | 'write',
-        ) => connectionManager.queryWithSession(sql, params, session, intent),
+        ) => {
+          const start = performance.now();
+          const result = await connectionManager.queryWithSession(sql, params, session, intent);
+          const durationMs = performance.now() - start;
+          if (slowQueryThresholdMs > 0 && durationMs > slowQueryThresholdMs) {
+            server.log.warn(
+              { durationMs: Math.round(durationMs * 100) / 100, sql: sql.slice(0, 200), paramCount: params.length },
+              'Slow query detected',
+            );
+          }
+          return result;
+        },
         permissionLookup: resolverPermissionLookup,
         tables: schemaModel.tables,
         functions: schemaModel.functions,
@@ -299,12 +338,23 @@ export async function createServer(
         };
         return {
           auth,
-          queryWithSession: (
+          queryWithSession: async (
             sql: string,
             params: unknown[],
             sess: typeof auth,
             intent: 'read' | 'write',
-          ) => connectionManager.queryWithSession(sql, params, sess, intent),
+          ) => {
+            const start = performance.now();
+            const result = await connectionManager.queryWithSession(sql, params, sess, intent);
+            const durationMs = performance.now() - start;
+            if (slowQueryThresholdMs > 0 && durationMs > slowQueryThresholdMs) {
+              server.log.warn(
+                { durationMs: Math.round(durationMs * 100) / 100, sql: sql.slice(0, 200), paramCount: params.length },
+                'Slow query detected',
+              );
+            }
+            return result;
+          },
           permissionLookup: resolverPermissionLookup,
           tables: schemaModel.tables,
           functions: schemaModel.functions,

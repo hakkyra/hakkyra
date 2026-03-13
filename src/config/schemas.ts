@@ -420,6 +420,7 @@ export const RawServerConfigSchema = z
       .object({
         port: z.number().optional(),
         host: z.string().optional(),
+        slow_query_threshold_ms: z.number().optional(),
       })
       .passthrough()
       .optional(),

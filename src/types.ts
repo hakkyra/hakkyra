@@ -434,6 +434,8 @@ export interface HakkyraConfig {
   jobQueue?: JobQueueConfig;
   /** Number of days to retain delivered events in the event_log table (default: 7). */
   eventLogRetentionDays: number;
+  /** Threshold in ms for slow query warnings. 0 to disable (default: 200). */
+  slowQueryThresholdMs: number;
 }
 
 // ─── Job Queue Configuration ─────────────────────────────────────────────────

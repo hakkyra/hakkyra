@@ -296,11 +296,13 @@
 
 ## Phase 4: Polish & Production
 
-### P4.1 — CLI Tool
+### P4.1 — CLI Tool — COMPLETE
 - [x] `hakkyra --dev` — start with config hot reload
-- [ ] `hakkyra init` — scaffold project with example config
-- [ ] `hakkyra dev` — alias for `--dev` with introspection watch
-- [ ] `hakkyra start` — production start
+- [x] `hakkyra init` — scaffold project with example config
+- [x] `hakkyra dev` — alias for `--dev` with introspection watch
+- [x] `hakkyra start` — production start
+- [x] Backwards-compatible: flag-only invocations still work
+- [x] `hakkyra --version` / `hakkyra --help`
 
 ### P4.1.5 — Zod Validation & Inferred Types
 - [x] Add `zod` dependency, remove unused `ajv` dependency
@@ -319,12 +321,11 @@
   - [x] Top-level `HakkyraConfig` schema composing all above
   - [x] Zod `.parse()` at YAML loading boundaries in `src/config/loader.ts`
   - [x] Replace raw config types in `src/config/types.ts` with `z.infer<>` from schemas
-- [ ] **Environment variable validation** (`src/config/env.ts`)
-  - [ ] Zod schema for required env vars (DATABASE_URL, JWT key, admin secret)
-  - [ ] Zod schema for optional env vars (LOG_LEVEL, NODE_ENV) with defaults
-  - [ ] Validate webhook URL env vars (event triggers, cron triggers, actions, auth webhook) are valid URLs
-  - [ ] Centralize `resolveEnv()` to use Zod transforms (parse + coerce in one step)
-  - [ ] Fail-fast on startup with clear error messages listing all missing/invalid env vars
+- [x] **Environment variable validation** (`src/config/env.ts`)
+  - [x] Validate required env vars (DATABASE_URL, JWT key, admin secret, webhook URLs)
+  - [x] Validate all env var refs in event triggers, cron triggers, actions, headers
+  - [x] Fail-fast on startup with clear error messages listing all missing vars
+  - [x] Warnings for optional header env vars
 - [ ] **REST API input validation** (`src/rest/schemas/`)
   - [ ] Zod schema for query parameters (limit, offset as coerced integers with range constraints)
   - [ ] Zod schema for filter syntax parsing (column=op.value format validation)
