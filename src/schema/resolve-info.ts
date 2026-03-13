@@ -435,6 +435,49 @@ function parseSelectionSet(
 }
 
 /**
+ * Parse the "returning" sub-selection from a mutation response's resolve info.
+ *
+ * Bulk mutations (insert, update, delete) return a MutationResponse with shape:
+ *   insertUsers { affectedRows returning { id name articles { ... } } }
+ *
+ * This function finds the "returning" field and parses its sub-selections
+ * to detect relationship fields, enabling nested relationship data in mutation
+ * responses.
+ */
+export function parseReturningInfo(
+  info: GraphQLResolveInfo,
+  table: TableInfo,
+  allTables: TableInfo[],
+  permissionLookup: ResolverPermissionLookup,
+  session: SessionVariables,
+): ParsedSelection | null {
+  const fieldNode = info.fieldNodes[0];
+  if (!fieldNode.selectionSet) return null;
+
+  const variableValues = info.variableValues as Record<string, unknown>;
+
+  // Find the "returning" field in the mutation response selection
+  for (const selection of fieldNode.selectionSet.selections) {
+    if (selection.kind === 'Field' && selection.name.value === 'returning') {
+      if (!selection.selectionSet) return null;
+
+      return parseSelectionSet(
+        selection.selectionSet.selections,
+        selection,
+        table,
+        allTables,
+        permissionLookup,
+        session,
+        variableValues,
+        info.fragments,
+      );
+    }
+  }
+
+  return null;
+}
+
+/**
  * Parse the "nodes" sub-selection from an aggregate query's resolve info.
  *
  * The aggregate query has a shape like:

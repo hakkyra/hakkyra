@@ -18,6 +18,8 @@ import type {
 } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
+import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
+import type { RelationshipSelection } from './select.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,6 +31,8 @@ export interface UpdateByPkOptions {
   _set: Record<string, unknown>;
   /** Columns to return in the response */
   returningColumns: string[];
+  /** Relationships to include in the RETURNING clause */
+  returningRelationships?: RelationshipSelection[];
   permission?: {
     filter: CompiledFilter;
     check?: CompiledFilter;
@@ -46,6 +50,8 @@ export interface UpdateOptions {
   _set: Record<string, unknown>;
   /** Columns to return in the response */
   returningColumns: string[];
+  /** Relationships to include in the RETURNING clause */
+  returningRelationships?: RelationshipSelection[];
   permission?: {
     filter: CompiledFilter;
     check?: CompiledFilter;
@@ -129,6 +135,34 @@ function buildSetClause(
   return assignments.join(', ');
 }
 
+// ─── Returning Fields Builder ────────────────────────────────────────────────
+
+/**
+ * Build json_build_object fields for the RETURNING clause, including
+ * relationship subqueries when requested.
+ */
+function buildReturningFields(
+  table: TableInfo,
+  returningColumns: string[],
+  alias: string,
+  params: ParamCollector,
+  session: SessionVariables,
+  relationships?: RelationshipSelection[],
+): string {
+  const tableColumnNames = new Set(table.columns.map((c) => c.name));
+  const validReturning = returningColumns.filter((c) => tableColumnNames.has(c));
+
+  if (relationships && relationships.length > 0) {
+    const columns = filterColumns(validReturning, table);
+    const aliasCounter = new AliasCounter();
+    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter);
+  }
+
+  return validReturning.map(
+    (c) => `'${c}', ${quoteIdentifier(alias)}.${quoteIdentifier(c)}`,
+  ).join(', ');
+}
+
 // ─── UPDATE BY PK ────────────────────────────────────────────────────────────
 
 /**
@@ -173,26 +207,31 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
 
   const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
 
-  // Build RETURNING
-  const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
-  const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
+  const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
 
-  // Post-update check via CTE
-  if (opts.permission?.check) {
-    const returningFields = validReturning.map(
-      (c) => `'${c}', "_updated".${quoteIdentifier(c)}`,
-    ).join(', ');
-
-    const checkResult = opts.permission.check.toSQL(
-      opts.session,
-      params.getOffset(),
+  // CTE needed for post-update check OR relationships in RETURNING
+  if (opts.permission?.check || hasRelationships) {
+    const returningFields = buildReturningFields(
+      opts.table,
+      opts.returningColumns,
       '_updated',
+      params,
+      opts.session,
+      opts.returningRelationships,
     );
-    for (const p of checkResult.params) {
-      params.add(p);
-    }
 
-    const checkWhere = checkResult.sql ? ` WHERE ${checkResult.sql}` : '';
+    let checkWhere = '';
+    if (opts.permission?.check) {
+      const checkResult = opts.permission.check.toSQL(
+        opts.session,
+        params.getOffset(),
+        '_updated',
+      );
+      for (const p of checkResult.params) {
+        params.add(p);
+      }
+      checkWhere = checkResult.sql ? ` WHERE ${checkResult.sql}` : '';
+    }
 
     const sql = [
       `WITH "_updated" AS (`,
@@ -209,7 +248,9 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
     return { sql, params: params.getParams() };
   }
 
-  // Simple update without post-check
+  // Simple update without post-check or relationships
+  const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
+  const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
     (c) => `'${c}', ${quoteIdentifier(c)}`,
   ).join(', ');
@@ -270,26 +311,31 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
 
   const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
 
-  // Build RETURNING
-  const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
-  const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
+  const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
 
-  // Post-update check via CTE
-  if (opts.permission?.check) {
-    const returningFields = validReturning.map(
-      (c) => `'${c}', "_updated".${quoteIdentifier(c)}`,
-    ).join(', ');
-
-    const checkResult = opts.permission.check.toSQL(
-      opts.session,
-      params.getOffset(),
+  // CTE needed for post-update check OR relationships in RETURNING
+  if (opts.permission?.check || hasRelationships) {
+    const returningFields = buildReturningFields(
+      opts.table,
+      opts.returningColumns,
       '_updated',
+      params,
+      opts.session,
+      opts.returningRelationships,
     );
-    for (const p of checkResult.params) {
-      params.add(p);
-    }
 
-    const checkWhere = checkResult.sql ? ` WHERE ${checkResult.sql}` : '';
+    let checkWhere = '';
+    if (opts.permission?.check) {
+      const checkResult = opts.permission.check.toSQL(
+        opts.session,
+        params.getOffset(),
+        '_updated',
+      );
+      for (const p of checkResult.params) {
+        params.add(p);
+      }
+      checkWhere = checkResult.sql ? ` WHERE ${checkResult.sql}` : '';
+    }
 
     const sql = [
       `WITH "_updated" AS (`,
@@ -306,7 +352,9 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
     return { sql, params: params.getParams() };
   }
 
-  // Simple update without post-check
+  // Simple update without post-check or relationships
+  const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
+  const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
     (c) => `'${c}', ${quoteIdentifier(c)}`,
   ).join(', ');
