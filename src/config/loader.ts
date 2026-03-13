@@ -18,10 +18,12 @@ import type {
   AuthConfig,
   DatabasesConfig,
   BoolExp,
+  ComputedFieldConfig,
 } from '../types.js';
 import type {
   RawTableYaml,
   RawRelationship,
+  RawComputedField,
   RawEventTrigger,
   RawHeader,
   RawAction,
@@ -308,6 +310,7 @@ function transformTable(raw: RawTableYaml): TableInfo {
 
   const permissions = transformPermissions(raw);
   const eventTriggers = (raw.event_triggers ?? []).map(transformEventTrigger);
+  const computedFields = (raw.computed_fields ?? []).map(transformComputedField);
 
   let customRootFields: CustomRootFields | undefined;
   if (raw.configuration?.custom_root_fields) {
@@ -327,6 +330,20 @@ function transformTable(raw: RawTableYaml): TableInfo {
     permissions,
     eventTriggers,
     customRootFields,
+    computedFields: computedFields.length > 0 ? computedFields : undefined,
+  };
+}
+
+function transformComputedField(raw: RawComputedField): ComputedFieldConfig {
+  return {
+    name: raw.name,
+    function: {
+      name: raw.definition.function.name,
+      schema: raw.definition.function.schema ?? 'public',
+    },
+    tableArgument: raw.definition.table_argument,
+    sessionArgument: raw.definition.session_argument,
+    comment: raw.comment,
   };
 }
 

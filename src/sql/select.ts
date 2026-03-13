@@ -11,6 +11,8 @@ import type {
   ColumnInfo,
   CompiledFilter,
   CompiledQuery,
+  ComputedFieldConfig,
+  FunctionInfo,
   RelationshipConfig,
   SessionVariables,
   TableInfo,
@@ -26,6 +28,11 @@ export interface OrderByItem {
   nulls?: 'first' | 'last';
 }
 
+export interface ComputedFieldSelection {
+  config: ComputedFieldConfig;
+  functionInfo: FunctionInfo;
+}
+
 export interface RelationshipSelection {
   relationship: RelationshipConfig;
   remoteTable: TableInfo;
@@ -35,6 +42,7 @@ export interface RelationshipSelection {
   limit?: number;
   offset?: number;
   relationships?: RelationshipSelection[];
+  computedFields?: ComputedFieldSelection[];
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -58,6 +66,7 @@ export interface SelectOptions {
   limit?: number;
   offset?: number;
   relationships?: RelationshipSelection[];
+  computedFields?: ComputedFieldSelection[];
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -71,6 +80,7 @@ export interface SelectByPkOptions {
   pkValues: Record<string, unknown>;
   columns: string[];
   relationships?: RelationshipSelection[];
+  computedFields?: ComputedFieldSelection[];
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -156,7 +166,8 @@ function compileOrderBy(orderBy: OrderByItem[], alias: string): string {
 // ─── json_build_object Fields ────────────────────────────────────────────────
 
 /**
- * Build the json_build_object argument list for selected columns and relationships.
+ * Build the json_build_object argument list for selected columns, computed fields,
+ * and relationships.
  */
 function buildJsonFields(
   columns: ColumnInfo[],
@@ -165,12 +176,23 @@ function buildJsonFields(
   params: ParamCollector,
   session: SessionVariables,
   aliasCounter: AliasCounter,
+  computedFields?: ComputedFieldSelection[],
 ): string {
   const fields: string[] = [];
 
   // Scalar columns
   for (const col of columns) {
     fields.push(`'${col.name}', ${quoteIdentifier(alias)}.${quoteIdentifier(col.name)}`);
+  }
+
+  // Computed fields — call PG function with table row as argument
+  if (computedFields) {
+    for (const cf of computedFields) {
+      const fnSchema = cf.config.function.schema ?? 'public';
+      const fnName = cf.config.function.name;
+      const funcRef = `${quoteIdentifier(fnSchema)}.${quoteIdentifier(fnName)}`;
+      fields.push(`'${cf.config.name}', ${funcRef}(${quoteIdentifier(alias)})`);
+    }
   }
 
   // Relationship subqueries
@@ -225,6 +247,7 @@ function buildRelationshipSubquery(
     params,
     session,
     aliasCounter,
+    relSel.computedFields,
   );
 
   // Build the join condition from the relationship mapping
@@ -366,6 +389,7 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
     params,
     opts.session,
     aliasCounter,
+    opts.computedFields,
   );
 
   // Build WHERE clause
@@ -455,6 +479,7 @@ export function compileSelectByPk(opts: SelectByPkOptions): CompiledQuery {
     params,
     opts.session,
     aliasCounter,
+    opts.computedFields,
   );
 
   // Build WHERE for PK columns

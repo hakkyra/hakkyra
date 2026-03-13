@@ -272,6 +272,7 @@ export function mergeSchemaModel(
       permissions: configTable?.permissions ?? emptyPermissions(),
       eventTriggers: configTable?.eventTriggers ?? [],
       customRootFields: configTable?.customRootFields,
+      computedFields: configTable?.computedFields,
     };
 
     mergedTables.push(tableInfo);

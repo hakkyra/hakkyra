@@ -11,6 +11,14 @@ configuration:
     created_at: createdAt
     updated_at: updatedAt
 
+computed_fields:
+  - name: total
+    definition:
+      function:
+        name: account_total
+        schema: public
+    comment: "Total of balance + credit_balance"
+
 object_relationships:
   - name: client
     using:

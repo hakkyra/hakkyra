@@ -18,6 +18,14 @@ configuration:
     created_at: createdAt
     updated_at: updatedAt
 
+computed_fields:
+  - name: outcome
+    definition:
+      function:
+        name: client_service_outcome
+        schema: public
+    comment: "Computed outcome status"
+
 object_relationships:
   - name: client
     using:

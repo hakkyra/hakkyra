@@ -32,6 +32,8 @@ export interface ParsedSelection {
   columns: string[];
   /** Nested relationship selections */
   relationships: RelationshipSelection[];
+  /** Computed field names requested */
+  computedFields?: string[];
 }
 
 // ─── camelCase → snake_case column map ───────────────────────────────────────
@@ -56,6 +58,19 @@ function relationshipMap(table: TableInfo): Map<string, TableInfo['relationships
     map.set(rel.name, rel);
   }
   return map;
+}
+
+/**
+ * Build a set of computed field camelCase names for quick lookup.
+ */
+function computedFieldCamelNames(table: TableInfo): Set<string> {
+  const set = new Set<string>();
+  if (table.computedFields) {
+    for (const cf of table.computedFields) {
+      set.add(toCamelCase(cf.name));
+    }
+  }
+  return set;
 }
 
 // ─── Argument Parsing ────────────────────────────────────────────────────────
@@ -247,8 +262,10 @@ function parseSelectionSet(
 ): ParsedSelection {
   const colMap = camelToColumnMap(table);
   const relMap = relationshipMap(table);
+  const cfNames = computedFieldCamelNames(table);
   const columnSet = new Set<string>();
   const relationships: RelationshipSelection[] = [];
+  const computedFieldSet = new Set<string>();
 
   for (const selection of selections) {
     if (selection.kind === 'Field') {
@@ -256,6 +273,16 @@ function parseSelectionSet(
 
       // Skip __typename introspection field
       if (fieldName === '__typename') continue;
+
+      // Check if it's a computed field
+      if (cfNames.has(fieldName)) {
+        // Find the original computed field name (snake_case)
+        const cf = table.computedFields?.find((c) => toCamelCase(c.name) === fieldName);
+        if (cf) {
+          computedFieldSet.add(cf.name);
+        }
+        continue;
+      }
 
       // Check if it's a relationship
       const rel = relMap.get(fieldName);
@@ -364,6 +391,11 @@ function parseSelectionSet(
           columnSet.add(col);
         }
         relationships.push(...fragmentResult.relationships);
+        if (fragmentResult.computedFields) {
+          for (const cf of fragmentResult.computedFields) {
+            computedFieldSet.add(cf);
+          }
+        }
       }
     } else if (selection.kind === 'InlineFragment') {
       // Handle inline fragments
@@ -382,6 +414,11 @@ function parseSelectionSet(
         columnSet.add(col);
       }
       relationships.push(...fragmentResult.relationships);
+      if (fragmentResult.computedFields) {
+        for (const cf of fragmentResult.computedFields) {
+          computedFieldSet.add(cf);
+        }
+      }
     }
   }
 
@@ -393,6 +430,7 @@ function parseSelectionSet(
   return {
     columns: Array.from(columnSet),
     relationships,
+    computedFields: computedFieldSet.size > 0 ? Array.from(computedFieldSet) : undefined,
   };
 }
 

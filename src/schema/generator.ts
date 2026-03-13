@@ -134,7 +134,7 @@ export interface GenerateSchemaOptions {
 }
 
 export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptions): GraphQLSchema {
-  const { tables, enums, customQueries } = model;
+  const { tables, enums, functions, customQueries } = model;
 
   // ── Step 1: Initialize registries ──────────────────────────────────────
   const typeRegistry: TypeRegistry = new Map();
@@ -158,6 +158,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       enumNames,
       filterTypes,
       orderByTypes,
+      functions,
     );
     typeRegistry.set(key, objectType);
   }

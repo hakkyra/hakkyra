@@ -56,11 +56,25 @@ export interface RawTableYaml {
   };
   object_relationships?: RawRelationship[];
   array_relationships?: RawRelationship[];
+  computed_fields?: RawComputedField[];
   select_permissions?: RawPermissionEntry<RawSelectPermission>[];
   insert_permissions?: RawPermissionEntry<RawInsertPermission>[];
   update_permissions?: RawPermissionEntry<RawUpdatePermission>[];
   delete_permissions?: RawPermissionEntry<RawDeletePermission>[];
   event_triggers?: RawEventTrigger[];
+}
+
+export interface RawComputedField {
+  name: string;
+  definition: {
+    function: {
+      name: string;
+      schema?: string;
+    };
+    table_argument?: string;
+    session_argument?: string;
+  };
+  comment?: string;
 }
 
 export interface RawRelationship {
