@@ -8,6 +8,8 @@
 
 import pg from 'pg';
 import type { DatabasesConfig, PoolConfig, SessionVariables } from '../types.js';
+import { createConsistencyTracker } from './consistency.js';
+import type { ConsistencyTracker } from './consistency.js';
 import { createPreparedStatementManager } from './prepared-statements.js';
 import type { PreparedStatementManager } from './prepared-statements.js';
 
@@ -96,17 +98,28 @@ export function createConnectionManager(config: DatabasesConfig): ConnectionMana
     }
   }
 
+  // Read-your-writes consistency tracker (optional)
+  let consistencyTracker: ConsistencyTracker | undefined;
+  if (config.readYourWrites?.enabled && replicaPools.length > 0) {
+    const windowMs = (config.readYourWrites.windowSeconds ?? 5) * 1000;
+    consistencyTracker = createConsistencyTracker(windowMs);
+  }
+
   // Round-robin index for read routing
   let readIndex = 0;
 
   // All pools for health checks and shutdown
   const allPools = [primaryPool, ...replicaPools];
 
-  function selectPool(intent: 'read' | 'write'): PoolInstance {
+  function selectPool(intent: 'read' | 'write', userId?: string): PoolInstance {
     if (intent === 'write') {
       return primaryPool;
     }
     if (replicaPools.length === 0) {
+      return primaryPool;
+    }
+    // Read-your-writes: route to primary if user recently performed a mutation
+    if (userId && consistencyTracker?.shouldReadFromPrimary(userId)) {
       return primaryPool;
     }
     const pool = replicaPools[readIndex % replicaPools.length];
@@ -125,7 +138,7 @@ export function createConnectionManager(config: DatabasesConfig): ConnectionMana
       session: SessionVariables,
       intent: 'read' | 'write',
     ): Promise<{ rows: unknown[]; rowCount: number }> {
-      const pool = selectPool(intent);
+      const pool = selectPool(intent, session.userId);
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
@@ -143,6 +156,13 @@ export function createConnectionManager(config: DatabasesConfig): ConnectionMana
           ? await client.query(stmtManager.prepare(sql, params))
           : await client.query(sql, params);
         await client.query('COMMIT');
+
+        // Read-your-writes: after a successful write, mark the user so
+        // subsequent reads within the window go to primary
+        if (intent === 'write' && session.userId && consistencyTracker) {
+          consistencyTracker.markMutation(session.userId);
+        }
+
         return { rows: result.rows as unknown[], rowCount: result.rowCount ?? 0 };
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {
@@ -172,6 +192,7 @@ export function createConnectionManager(config: DatabasesConfig): ConnectionMana
     },
 
     async shutdown(): Promise<void> {
+      consistencyTracker?.destroy();
       const endPromises = allPools.map((pool) => pool.end());
       await Promise.all(endPromises);
     },
