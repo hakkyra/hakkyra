@@ -11,6 +11,7 @@ import {
   resolveWebhookUrl,
   resolveWebhookHeaders,
 } from '../shared/webhook.js';
+import { applyRequestTransform, applyResponseTransform } from './transform.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -92,9 +93,33 @@ export async function executeAction(options: ActionExecutionOptions): Promise<Ac
     }
   }
 
+  // Apply request transform if configured
+  let finalUrl = url;
+  let finalMethod = 'POST';
+  let finalBody: unknown = payload;
+  let finalHeaders = headers;
+
+  if (action.requestTransform) {
+    const transformed = applyRequestTransform(
+      action.requestTransform,
+      { url, method: 'POST', body: payload, headers },
+      { sessionVariables, baseUrl: url },
+    );
+    finalUrl = transformed.url;
+    finalMethod = transformed.method;
+    finalBody = transformed.body;
+    finalHeaders = transformed.headers;
+  }
+
   // Deliver webhook
   const timeoutMs = (action.definition.timeout ?? 30) * 1000;
-  const result = await deliverWebhook({ url, headers, payload, timeoutMs });
+  const result = await deliverWebhook({
+    url: finalUrl,
+    method: finalMethod,
+    headers: finalHeaders,
+    payload: finalBody,
+    timeoutMs,
+  });
 
   if (!result.success) {
     // Try to parse error from response body
@@ -117,7 +142,17 @@ export async function executeAction(options: ActionExecutionOptions): Promise<Ac
 
   // Parse successful response
   try {
-    const data = result.body ? JSON.parse(result.body) : null;
+    let data = result.body ? JSON.parse(result.body) : null;
+
+    // Apply response transform if configured
+    if (action.responseTransform) {
+      data = applyResponseTransform(
+        action.responseTransform,
+        data,
+        { sessionVariables },
+      );
+    }
+
     return { success: true, data };
   } catch {
     return {

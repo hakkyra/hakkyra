@@ -10,6 +10,8 @@ import type {
   EventTriggerConfig,
   WebhookHeader,
   ActionConfig,
+  RequestTransform,
+  ResponseTransform,
   CronTriggerConfig,
   CustomRootFields,
   RESTConfig,
@@ -489,6 +491,26 @@ async function loadActions(metadataDir: string): Promise<ActionConfig[]> {
 function transformAction(raw: RawAction): ActionConfig {
   const handler = raw.definition.handler ?? resolveEnv(raw.definition.handler_from_env) ?? '';
 
+  let requestTransform: RequestTransform | undefined;
+  if (raw.definition.request_transform) {
+    const rt = raw.definition.request_transform;
+    requestTransform = {
+      method: rt.method,
+      url: rt.url,
+      body: rt.body,
+      contentType: rt.content_type,
+      queryParams: rt.query_params,
+      headers: rt.headers,
+    };
+  }
+
+  let responseTransform: ResponseTransform | undefined;
+  if (raw.definition.response_transform) {
+    responseTransform = {
+      body: raw.definition.response_transform.body,
+    };
+  }
+
   return {
     name: raw.name,
     definition: {
@@ -500,6 +522,8 @@ function transformAction(raw: RawAction): ActionConfig {
       headers: raw.definition.headers?.map(transformHeader),
       timeout: raw.definition.timeout,
     },
+    requestTransform,
+    responseTransform,
     permissions: raw.permissions,
     comment: raw.comment,
   };

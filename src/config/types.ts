@@ -169,6 +169,17 @@ export interface RawAction {
     type?: string;
     arguments?: unknown[];
     output_type?: string;
+    request_transform?: {
+      method?: string;
+      url?: string;
+      body?: string | Record<string, unknown>;
+      content_type?: string;
+      query_params?: Record<string, string>;
+      headers?: Record<string, string>;
+    };
+    response_transform?: {
+      body?: string | Record<string, unknown>;
+    };
   };
   permissions?: { role: string }[];
   comment?: string;

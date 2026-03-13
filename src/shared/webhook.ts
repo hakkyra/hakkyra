@@ -11,6 +11,7 @@ import type { WebhookHeader } from '../types.js';
 
 export interface WebhookDeliveryOptions {
   url: string;
+  method?: string;
   headers?: Record<string, string>;
   payload: unknown;
   timeoutMs?: number;
@@ -68,6 +69,7 @@ export function resolveWebhookHeaders(headers?: WebhookHeader[]): Record<string,
 export async function deliverWebhook(options: WebhookDeliveryOptions): Promise<WebhookDeliveryResult> {
   const {
     url,
+    method = 'POST',
     headers = {},
     payload,
     timeoutMs = 30000,
@@ -77,7 +79,7 @@ export async function deliverWebhook(options: WebhookDeliveryOptions): Promise<W
 
   try {
     const response = await fetch(url, {
-      method: 'POST',
+      method,
       headers: {
         'Content-Type': 'application/json',
         ...headers,

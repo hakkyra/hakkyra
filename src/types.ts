@@ -262,6 +262,19 @@ export interface CronTriggerConfig {
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
+export interface RequestTransform {
+  method?: string;
+  url?: string;
+  body?: string | Record<string, unknown>;
+  contentType?: string;
+  queryParams?: Record<string, string>;
+  headers?: Record<string, string>;
+}
+
+export interface ResponseTransform {
+  body?: string | Record<string, unknown>;
+}
+
 export interface ActionConfig {
   name: string;
   definition: {
@@ -273,6 +286,8 @@ export interface ActionConfig {
     headers?: WebhookHeader[];
     timeout?: number;
   };
+  requestTransform?: RequestTransform;
+  responseTransform?: ResponseTransform;
   permissions?: { role: string }[];
   comment?: string;
 }
