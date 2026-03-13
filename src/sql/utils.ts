@@ -56,6 +56,16 @@ export class ParamCollector {
     return `(${placeholders.join(', ')})`;
   }
 
+  /**
+   * Add an array as a single parameter value.
+   * Returns the `$N` placeholder string.
+   * Useful for `= ANY($N)` pattern which is more efficient than `IN ($1, $2, ...)`
+   * for large value lists, using only 1 parameter instead of N.
+   */
+  addArray(values: unknown[]): string {
+    return this.add(values);
+  }
+
   /** Returns all collected parameter values in order. */
   getParams(): unknown[] {
     return this.params;

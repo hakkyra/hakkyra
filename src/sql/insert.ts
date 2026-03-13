@@ -6,6 +6,8 @@
  * - Column presets (inject session-variable-based default values)
  * - Post-insert check constraints via CTE validation
  * - RETURNING clause shaped as json_build_object for GraphQL response
+ * - Automatic chunking for large batches to respect PostgreSQL parameter limits
+ * - UNNEST optimization for very large homogeneous inserts (500+ rows)
  */
 
 import type {
@@ -19,6 +21,17 @@ import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
 import type { RelationshipSelection } from './select.js';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+/** PostgreSQL hard limit on parameters per query. */
+export const PG_MAX_PARAMS = 65535;
+
+/** Default chunk size for batched inserts. */
+export const DEFAULT_BATCH_CHUNK_SIZE = 100;
+
+/** Threshold above which UNNEST optimization is used instead of multi-row VALUES. */
+export const UNNEST_THRESHOLD = 500;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -56,6 +69,10 @@ export interface InsertOptions {
     presets?: Record<string, string>;
   };
   session: SessionVariables;
+  /** Override default chunk size for large batches. */
+  chunkSize?: number;
+  /** Override UNNEST threshold (set to Infinity to disable UNNEST). */
+  unnestThreshold?: number;
 }
 
 export interface OnConflictClause {
@@ -282,39 +299,158 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
   return { sql, params: params.getParams() };
 }
 
-// ─── BULK INSERT ─────────────────────────────────────────────────────────────
+// ─── UNNEST Optimization ──────────────────────────────────────────────────
 
 /**
- * Compile a bulk INSERT for multiple rows.
- *
- * All objects must be normalized to the same column set (union of all keys).
- * Missing columns are filled with DEFAULT.
+ * Map a PostgreSQL udt_name to the PG cast type used in UNNEST.
+ * Falls back to 'text' for unknown types.
  */
-export function compileInsert(opts: InsertOptions): CompiledQuery {
+function pgCastType(udtName: string): string {
+  const castMap: Record<string, string> = {
+    int2: 'int2',
+    int4: 'int4',
+    int8: 'int8',
+    float4: 'float4',
+    float8: 'float8',
+    numeric: 'numeric',
+    bool: 'boolean',
+    text: 'text',
+    varchar: 'text',
+    char: 'text',
+    name: 'text',
+    uuid: 'uuid',
+    json: 'json',
+    jsonb: 'jsonb',
+    date: 'date',
+    time: 'time',
+    timetz: 'timetz',
+    timestamp: 'timestamp',
+    timestamptz: 'timestamptz',
+    interval: 'interval',
+    bytea: 'bytea',
+    inet: 'inet',
+    cidr: 'cidr',
+    macaddr: 'macaddr',
+  };
+  return castMap[udtName] ?? 'text';
+}
+
+/**
+ * Check if all objects have the same set of columns (homogeneous).
+ * UNNEST requires all rows to provide the same columns.
+ */
+function isHomogeneous(objects: Record<string, unknown>[], columnNames: string[]): boolean {
+  for (const obj of objects) {
+    for (const col of columnNames) {
+      if (!(col in obj)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Compile a bulk INSERT using the UNNEST optimization.
+ *
+ * Uses: INSERT INTO ... SELECT * FROM UNNEST($1::type[], $2::type[], ...)
+ * This is more efficient than multi-row VALUES for large datasets (500+ rows)
+ * because it uses only N parameters (one per column) instead of N*M parameters.
+ */
+function compileInsertUnnest(
+  opts: InsertOptions,
+  preparedObjects: Record<string, unknown>[],
+  columnNames: string[],
+): CompiledQuery {
   const params = new ParamCollector();
   const tableRef = quoteTableRef(opts.table.schema, opts.table.name);
 
-  if (opts.objects.length === 0) {
-    throw new Error(`No objects to insert into "${opts.table.schema}"."${opts.table.name}"`);
+  const quotedColumns = columnNames.map(quoteIdentifier).join(', ');
+
+  // Build column arrays and UNNEST expressions
+  const unnestParts: string[] = [];
+  for (const col of columnNames) {
+    const colInfo = opts.table.columns.find((c) => c.name === col);
+    const castType = colInfo ? pgCastType(colInfo.udtName) : 'text';
+    const values = preparedObjects.map((obj) => obj[col]);
+    const placeholder = params.add(values);
+    unnestParts.push(`${placeholder}::${castType}[]`);
   }
 
-  // Prepare all objects
-  const preparedObjects = opts.objects.map((obj) =>
-    prepareInsertData(obj, opts.table, opts.permission, opts.session),
-  );
+  // Build ON CONFLICT clause
+  const onConflictClause = opts.onConflict
+    ? buildOnConflictSQL(opts.onConflict, params, opts.table, opts.session)
+    : '';
 
-  // Collect the union of all column names (order matters for consistency)
-  const columnSet = new Set<string>();
-  for (const obj of preparedObjects) {
-    for (const col of Object.keys(obj)) {
-      columnSet.add(col);
+  const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
+
+  if (opts.permission?.check || hasRelationships) {
+    const returningFields = buildReturningFields(
+      opts.table,
+      opts.returningColumns,
+      '_inserted',
+      params,
+      opts.session,
+      opts.returningRelationships,
+    );
+
+    let checkWhere = '';
+    if (opts.permission?.check) {
+      const checkResult = opts.permission.check.toSQL(
+        opts.session,
+        params.getOffset(),
+        '_inserted',
+      );
+      for (const p of checkResult.params) {
+        params.add(p);
+      }
+      checkWhere = checkResult.sql ? ` WHERE ${checkResult.sql}` : '';
     }
-  }
-  const columnNames = [...columnSet];
 
-  if (columnNames.length === 0) {
-    throw new Error(`No columns to insert into "${opts.table.schema}"."${opts.table.name}"`);
+    const sql = [
+      `WITH "_inserted" AS (`,
+      `  INSERT INTO ${tableRef} (${quotedColumns})`,
+      `  SELECT * FROM UNNEST(${unnestParts.join(', ')})${onConflictClause}`,
+      `  RETURNING *`,
+      `)`,
+      `SELECT coalesce(json_agg(json_build_object(${returningFields})), '[]'::json) AS "data"`,
+      `FROM "_inserted"`,
+      checkWhere ? checkWhere : null,
+    ].filter(Boolean).join('\n');
+
+    return { sql, params: params.getParams() };
   }
+
+  // Simple UNNEST insert without check or relationships
+  const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
+  const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
+  const simpleReturningFields = validReturning.map(
+    (c) => `'${c}', ${quoteIdentifier(c)}`,
+  ).join(', ');
+
+  const returningClause = validReturning.length > 0
+    ? `\nRETURNING json_build_object(${simpleReturningFields}) AS "data"`
+    : '';
+
+  const sql = [
+    `INSERT INTO ${tableRef} (${quotedColumns})`,
+    `SELECT * FROM UNNEST(${unnestParts.join(', ')})`,
+  ].join('\n') + onConflictClause + returningClause;
+
+  return { sql, params: params.getParams() };
+}
+
+// ─── BULK INSERT ─────────────────────────────────────────────────────────
+
+/**
+ * Compile a single-chunk bulk INSERT using multi-row VALUES.
+ * This is the internal workhorse used by compileInsert for each chunk.
+ */
+function compileInsertChunk(
+  opts: InsertOptions,
+  preparedObjects: Record<string, unknown>[],
+  columnNames: string[],
+): CompiledQuery {
+  const params = new ParamCollector();
+  const tableRef = quoteTableRef(opts.table.schema, opts.table.name);
 
   const quotedColumns = columnNames.map(quoteIdentifier).join(', ');
 
@@ -391,4 +527,131 @@ export function compileInsert(opts: InsertOptions): CompiledQuery {
   ].join('\n') + onConflictClause + returningClause;
 
   return { sql, params: params.getParams() };
+}
+
+/**
+ * Calculate the maximum number of rows per chunk to stay within PG_MAX_PARAMS.
+ */
+function calculateChunkSize(numColumns: number, requestedChunkSize: number): number {
+  if (numColumns === 0) return requestedChunkSize;
+  const maxRowsByParams = Math.floor(PG_MAX_PARAMS / numColumns);
+  return Math.min(requestedChunkSize, maxRowsByParams);
+}
+
+/**
+ * Compile a bulk INSERT for multiple rows.
+ *
+ * Optimizations:
+ * - Automatic chunking when approaching PostgreSQL's 65535 parameter limit
+ * - UNNEST optimization for large homogeneous batches (500+ rows, configurable)
+ *
+ * All objects must be normalized to the same column set (union of all keys).
+ * Missing columns are filled with DEFAULT.
+ *
+ * When chunking is needed (batch too large for a single query), returns the
+ * first chunk query. For multi-chunk execution, use compileInsertBatch.
+ */
+export function compileInsert(opts: InsertOptions): CompiledQuery {
+  if (opts.objects.length === 0) {
+    throw new Error(`No objects to insert into "${opts.table.schema}"."${opts.table.name}"`);
+  }
+
+  // Prepare all objects
+  const preparedObjects = opts.objects.map((obj) =>
+    prepareInsertData(obj, opts.table, opts.permission, opts.session),
+  );
+
+  // Collect the union of all column names (order matters for consistency)
+  const columnSet = new Set<string>();
+  for (const obj of preparedObjects) {
+    for (const col of Object.keys(obj)) {
+      columnSet.add(col);
+    }
+  }
+  const columnNames = [...columnSet];
+
+  if (columnNames.length === 0) {
+    throw new Error(`No columns to insert into "${opts.table.schema}"."${opts.table.name}"`);
+  }
+
+  const unnestThreshold = opts.unnestThreshold ?? UNNEST_THRESHOLD;
+
+  // UNNEST optimization for large homogeneous inserts
+  if (
+    preparedObjects.length >= unnestThreshold &&
+    isHomogeneous(preparedObjects, columnNames)
+  ) {
+    return compileInsertUnnest(opts, preparedObjects, columnNames);
+  }
+
+  // For single-query path, check if we need chunking
+  const totalParams = preparedObjects.length * columnNames.length;
+  if (totalParams <= PG_MAX_PARAMS) {
+    // Fits in a single query
+    return compileInsertChunk(opts, preparedObjects, columnNames);
+  }
+
+  // Too many params — compile just the first valid chunk.
+  // The caller should use compileInsertBatch for multi-chunk execution.
+  const chunkSize = calculateChunkSize(columnNames.length, opts.chunkSize ?? DEFAULT_BATCH_CHUNK_SIZE);
+  const chunk = preparedObjects.slice(0, chunkSize);
+  return compileInsertChunk(opts, chunk, columnNames);
+}
+
+/**
+ * Compile a bulk INSERT into multiple chunked queries.
+ *
+ * Returns an array of CompiledQuery objects, each staying within PostgreSQL's
+ * parameter limit. The caller should execute them sequentially within a
+ * transaction.
+ *
+ * Uses UNNEST optimization for large homogeneous batches when applicable.
+ */
+export function compileInsertBatch(opts: InsertOptions): CompiledQuery[] {
+  if (opts.objects.length === 0) {
+    throw new Error(`No objects to insert into "${opts.table.schema}"."${opts.table.name}"`);
+  }
+
+  // Prepare all objects
+  const preparedObjects = opts.objects.map((obj) =>
+    prepareInsertData(obj, opts.table, opts.permission, opts.session),
+  );
+
+  // Collect the union of all column names
+  const columnSet = new Set<string>();
+  for (const obj of preparedObjects) {
+    for (const col of Object.keys(obj)) {
+      columnSet.add(col);
+    }
+  }
+  const columnNames = [...columnSet];
+
+  if (columnNames.length === 0) {
+    throw new Error(`No columns to insert into "${opts.table.schema}"."${opts.table.name}"`);
+  }
+
+  const unnestThreshold = opts.unnestThreshold ?? UNNEST_THRESHOLD;
+
+  // UNNEST optimization — uses only N params (one per column, as arrays),
+  // so a single query can handle any batch size
+  if (
+    preparedObjects.length >= unnestThreshold &&
+    isHomogeneous(preparedObjects, columnNames)
+  ) {
+    return [compileInsertUnnest(opts, preparedObjects, columnNames)];
+  }
+
+  // Calculate chunk size
+  const chunkSize = calculateChunkSize(
+    columnNames.length,
+    opts.chunkSize ?? DEFAULT_BATCH_CHUNK_SIZE,
+  );
+
+  const queries: CompiledQuery[] = [];
+  for (let i = 0; i < preparedObjects.length; i += chunkSize) {
+    const chunk = preparedObjects.slice(i, i + chunkSize);
+    queries.push(compileInsertChunk(opts, chunk, columnNames));
+  }
+
+  return queries;
 }

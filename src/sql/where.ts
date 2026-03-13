@@ -8,6 +8,12 @@
 import type { BoolExp, ColumnOperators, ExistsExp, SessionVariables } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 
+/**
+ * Threshold above which _in / _nin operators use = ANY($1) / != ALL($1)
+ * array syntax instead of IN ($1, $2, ...) to reduce parameter count.
+ */
+export const ARRAY_ANY_THRESHOLD = 20;
+
 // ─── Session Variable Resolution ─────────────────────────────────────────────
 
 /**
@@ -93,6 +99,10 @@ function compileColumnOperators(
     if (values.length === 0) {
       // IN with empty list => always false
       clauses.push('FALSE');
+    } else if (values.length > ARRAY_ANY_THRESHOLD) {
+      // For large IN lists, use = ANY($1) with a single array parameter
+      // instead of IN ($1, $2, ...) to reduce parameter count
+      clauses.push(`${columnRef} = ANY(${params.addArray(values)})`);
     } else {
       clauses.push(`${columnRef} IN ${params.addMany(values)}`);
     }
@@ -103,6 +113,9 @@ function compileColumnOperators(
     if (values.length === 0) {
       // NOT IN with empty list => always true (no-op)
       clauses.push('TRUE');
+    } else if (values.length > ARRAY_ANY_THRESHOLD) {
+      // For large NOT IN lists, use != ALL($1) with a single array parameter
+      clauses.push(`${columnRef} != ALL(${params.addArray(values)})`);
     } else {
       clauses.push(`${columnRef} NOT IN ${params.addMany(values)}`);
     }

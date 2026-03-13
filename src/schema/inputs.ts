@@ -190,6 +190,7 @@ export interface MutationInputTypes {
   constraintEnum: GraphQLEnumType | null;
   updateColumnEnum: GraphQLEnumType;
   selectColumnEnum: GraphQLEnumType;
+  updateManyInput: GraphQLInputObjectType | null;
 }
 
 // ─── Builder ────────────────────────────────────────────────────────────────
@@ -452,6 +453,19 @@ export function buildMutationInputTypes(
     },
   });
 
+  // ── UpdateManyInput ──────────────────────────────────────────────────
+  let updateManyInput: GraphQLInputObjectType | null = null;
+  if (filterType) {
+    updateManyInput = new GraphQLInputObjectType({
+      name: `${typeName}UpdateManyInput`,
+      description: `Input type for updating multiple rows with different values in ${typeName}. Each entry specifies a WHERE clause and SET values.`,
+      fields: () => ({
+        where: { type: new GraphQLNonNull(filterType) },
+        _set: { type: new GraphQLNonNull(setInput) },
+      }),
+    });
+  }
+
   // ── MutationResponse ──────────────────────────────────────────────────
   const mutationResponse = new GraphQLObjectType({
     name: `${typeName}MutationResponse`,
@@ -482,5 +496,6 @@ export function buildMutationInputTypes(
     constraintEnum,
     updateColumnEnum,
     selectColumnEnum,
+    updateManyInput,
   };
 }

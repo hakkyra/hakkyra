@@ -48,6 +48,7 @@ import {
   makeInsertOneResolver,
   makeUpdateResolver,
   makeUpdateByPkResolver,
+  makeUpdateManyResolver,
   makeDeleteResolver,
   makeDeleteByPkResolver,
 } from './resolvers.js';
@@ -71,6 +72,7 @@ interface RootFieldNames {
   insertOne: string;
   update: string;
   updateByPk: string;
+  updateMany: string;
   delete: string;
   deleteByPk: string;
 }
@@ -88,6 +90,7 @@ function getRootFieldNames(table: TableInfo): RootFieldNames {
     insertOne: custom?.insert_one ?? `insert${typeName}One`,
     update: custom?.update ?? `update${typeName}`,
     updateByPk: custom?.update_by_pk ?? `update${typeName}ByPk`,
+    updateMany: `update${typeName}Many`,
     delete: custom?.delete ?? `delete${typeName}`,
     deleteByPk: custom?.delete_by_pk ?? `delete${typeName}ByPk`,
   };
@@ -350,6 +353,22 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
         },
         resolve: makeUpdateByPkResolver(table),
         description: `Update a single row in ${table.schema}.${table.name} by primary key`,
+      };
+    }
+
+    // update_many — batch updates with different values per entry
+    if (mutInputs.updateManyInput) {
+      mutationFields[names.updateMany] = {
+        type: mutInputs.mutationResponse,
+        args: {
+          updates: {
+            type: new GraphQLNonNull(
+              new GraphQLList(new GraphQLNonNull(mutInputs.updateManyInput)),
+            ),
+          },
+        },
+        resolve: makeUpdateManyResolver(table),
+        description: `Update multiple rows with different values in ${table.schema}.${table.name}`,
       };
     }
 

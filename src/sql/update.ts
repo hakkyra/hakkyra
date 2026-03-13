@@ -371,3 +371,55 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
 
   return { sql, params: params.getParams() };
 }
+
+// ─── UPDATE MANY ─────────────────────────────────────────────────────────────
+
+export interface UpdateManyEntry {
+  where: BoolExp;
+  _set: Record<string, unknown>;
+}
+
+export interface UpdateManyOptions {
+  table: TableInfo;
+  /** Array of update entries, each with its own where + _set */
+  updates: UpdateManyEntry[];
+  /** Columns to return in the response */
+  returningColumns: string[];
+  /** Relationships to include in the RETURNING clause */
+  returningRelationships?: RelationshipSelection[];
+  permission?: {
+    filter: CompiledFilter;
+    check?: CompiledFilter;
+    columns: string[] | '*';
+    presets?: Record<string, string>;
+  };
+  session: SessionVariables;
+}
+
+/**
+ * Compile multiple UPDATE statements for the "update many" pattern.
+ *
+ * Each entry in `updates` has its own `where` and `_set`, allowing different
+ * rows to be updated with different values in a single GraphQL mutation.
+ *
+ * Returns an array of CompiledQuery objects. The caller should execute them
+ * sequentially within a single transaction (they're already in a transaction
+ * via `queryWithSession`).
+ */
+export function compileUpdateMany(opts: UpdateManyOptions): CompiledQuery[] {
+  if (opts.updates.length === 0) {
+    return [];
+  }
+
+  return opts.updates.map((entry) =>
+    compileUpdate({
+      table: opts.table,
+      where: entry.where,
+      _set: entry._set,
+      returningColumns: opts.returningColumns,
+      returningRelationships: opts.returningRelationships,
+      permission: opts.permission,
+      session: opts.session,
+    }),
+  );
+}

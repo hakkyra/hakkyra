@@ -26,7 +26,7 @@ import type { JobQueue } from '../shared/job-queue/types.js';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../sql/select.js';
 import type { OrderByItem, AggregateSelection, ComputedFieldSelection } from '../sql/select.js';
 import { compileInsertOne, compileInsert } from '../sql/insert.js';
-import { compileUpdateByPk, compileUpdate } from '../sql/update.js';
+import { compileUpdateByPk, compileUpdate, compileUpdateMany } from '../sql/update.js';
 import { compileDeleteByPk, compileDelete } from '../sql/delete.js';
 import { toCamelCase } from './type-builder.js';
 import { parseResolveInfo, parseReturningInfo, parseAggregateNodesInfo } from './resolve-info.js';
@@ -952,6 +952,96 @@ export function makeUpdateByPkResolver(
     if (!data || typeof data !== 'object') return null;
 
     return remapRowToCamel(data as Record<string, unknown>, table);
+  };
+}
+
+// ─── Update Many Resolver ────────────────────────────────────────────────────
+
+/**
+ * Creates a resolver for the `update<Table>Many` mutation field.
+ *
+ * Arguments: updates (required) — array of { where, _set }
+ * Returns: <Type>MutationResponse { affectedRows, returning }
+ */
+export function makeUpdateManyResolver(
+  table: TableInfo,
+): GraphQLFieldResolver<unknown, ResolverContext> {
+  const columnMap = camelToColumnMap(table);
+
+  return async (_parent, args, context, info) => {
+    const { auth, queryWithSession, permissionLookup } = context;
+    const perm = permissionLookup.getUpdate(table.schema, table.name, auth.role);
+
+    if (!perm && !auth.isAdmin) {
+      throw permissionDenied('update', `${table.schema}.${table.name}`, auth.role);
+    }
+
+    const rawUpdates = args.updates as Array<{ where: Record<string, unknown>; _set: Record<string, unknown> }>;
+    if (!rawUpdates || rawUpdates.length === 0) {
+      return { affectedRows: 0, returning: [] };
+    }
+
+    const returningColumns = getReturningColumns(table);
+
+    // Parse returning selection set for relationships
+    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth);
+    const returningRelationships = returningParsed?.relationships && returningParsed.relationships.length > 0
+      ? returningParsed.relationships
+      : undefined;
+
+    // Compile each update
+    const updates = rawUpdates.map((entry) => ({
+      where: remapBoolExp(entry.where as BoolExp | undefined, columnMap) ?? ({} as BoolExp),
+      _set: remapKeys(entry._set as Record<string, unknown>, columnMap) ?? {},
+    }));
+
+    const compiledQueries = compileUpdateMany({
+      table,
+      updates,
+      returningColumns,
+      returningRelationships,
+      permission: perm ? {
+        filter: perm.filter,
+        check: perm.check,
+        columns: perm.columns,
+        presets: perm.presets,
+      } : undefined,
+      session: auth,
+    });
+
+    // Execute each update query within the same session (transaction)
+    let totalAffected = 0;
+    const allReturning: Record<string, unknown>[] = [];
+
+    for (const compiled of compiledQueries) {
+      const result = await queryWithSession(compiled.sql, compiled.params, auth, 'write');
+
+      // CTE pattern (check OR relationships): single row with "data" as JSON array
+      // Without CTE: each row has a "data" column
+      const usesCTE = !!(perm?.check || returningRelationships);
+
+      if (usesCTE) {
+        const firstRow = result.rows[0] as Record<string, unknown> | undefined;
+        const data = firstRow?.data;
+        if (data && Array.isArray(data)) {
+          totalAffected += data.length;
+          allReturning.push(...remapRowsToCamel(data as Record<string, unknown>[], table));
+        }
+      } else {
+        const rows = result.rows.map((row) => {
+          const r = row as Record<string, unknown>;
+          const data = r.data as Record<string, unknown> | undefined;
+          return data ? remapRowToCamel(data, table) : {};
+        });
+        totalAffected += rows.length;
+        allReturning.push(...rows);
+      }
+    }
+
+    return {
+      affectedRows: totalAffected,
+      returning: allReturning,
+    };
   };
 }
 
