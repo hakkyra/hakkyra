@@ -254,7 +254,15 @@
   - [x] Forward input + session variables to handler URL
   - [x] Header forwarding (configured headers + client header forwarding)
   - [ ] Request/response transformation
-- [ ] Async actions (return immediately, deliver result later)
+- [x] Async actions (return immediately, deliver result later)
+  - [x] Async action DB schema (`hakkyra.async_action_log` table)
+  - [x] Enqueue async action → insert row + job queue → return action ID
+  - [x] Worker: fetch action, call webhook, store result/errors
+  - [x] GraphQL: mutation returns `{ actionId: UUID! }`, result query `{name}Result(id: UUID!)`
+  - [x] `AsyncActionStatus` enum, per-action `AsyncResult` types
+  - [x] REST endpoint: `GET /v1/actions/:actionId/status`
+  - [x] Independent initialization (does not fail if events/crons fail)
+  - [x] Integration tests (18 tests: schema, enqueue, worker, result query, permissions, REST)
 - [x] Action permissions per role
 - [ ] Action relationship mapping (link action output to DB tables)
 - [x] Integration tests (16 tests: schema, execution, permissions, errors, session vars)

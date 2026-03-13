@@ -277,6 +277,20 @@ export interface ActionConfig {
   comment?: string;
 }
 
+// ─── Async Action Result ─────────────────────────────────────────────────────
+
+export type AsyncActionStatus = 'created' | 'processing' | 'completed' | 'failed';
+
+export interface AsyncActionResult {
+  id: string;
+  actionName: string;
+  status: AsyncActionStatus;
+  output?: unknown;
+  errors?: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── REST API Config (Hakkyra extension) ────────────────────────────────────
 
 export interface RESTEndpointOverride {

@@ -47,6 +47,8 @@ import type { SubscriptionManager } from './subscriptions/manager.js';
 import type { ResolverPermissionLookup } from './schema/resolvers.js';
 import { authenticateWsConnection } from './auth/ws-auth.js';
 import { registerInvokeRoute } from './events/invoke.js';
+import { ensureAsyncActionSchema, registerAsyncActionWorkers } from './actions/index.js';
+import { registerAsyncActionStatusRoute } from './actions/rest.js';
 
 // ─── Permission adapters ─────────────────────────────────────────────────────
 
@@ -230,10 +232,13 @@ export async function createServer(
   // 7c. Create query cache for compiled SQL templates
   const queryCache = createQueryCache(1000);
 
-  // 7d. Mutable reference to the subscription manager so we can set it
-  // after Mercurius is registered (subscription infra starts later).
-  // The context closure captures this object by reference.
+  // 7d. Mutable references for services initialized after Mercurius registration.
+  // The context closure captures these objects by reference.
   const subscriptionRef: { manager: SubscriptionManager | undefined } = { manager: undefined };
+  const asyncActionRef: { jobQueue: JobQueue | undefined; pool: typeof primaryPool | undefined } = {
+    jobQueue: undefined,
+    pool: undefined,
+  };
 
   await server.register(mercurius, {
     schema: cjsSchema,
@@ -262,6 +267,8 @@ export async function createServer(
         functions: schemaModel.functions,
         queryCache,
         subscriptionManager: subscriptionRef.manager,
+        jobQueue: asyncActionRef.jobQueue,
+        pool: asyncActionRef.pool,
       };
     },
     subscription: {
@@ -303,6 +310,8 @@ export async function createServer(
           functions: schemaModel.functions,
           queryCache,
           subscriptionManager: subscriptionRef.manager,
+          jobQueue: asyncActionRef.jobQueue,
+          pool: asyncActionRef.pool,
         };
       },
     },
@@ -373,7 +382,7 @@ export async function createServer(
 
   if (primaryConnectionString) {
     try {
-      // Start job queue (shared by events + crons)
+      // Start job queue (shared by events, crons, and async actions)
       // Determine provider from config (default: pg-boss)
       const jobQueueConfig = config.jobQueue ?? { provider: 'pg-boss' as const };
       jobQueue = await createJobQueue({
@@ -382,26 +391,46 @@ export async function createServer(
       });
       await jobQueue.start();
       server.log.info({ provider: jobQueueConfig.provider ?? 'pg-boss' }, 'Job queue started');
-
-      // Initialize cron triggers
-      await initCronTriggers(jobQueue, config.cronTriggers, log);
-
-      // Initialize event triggers
-      eventManager = await initEventTriggers(
-        primaryPool,
-        jobQueue,
-        schemaModel.tables,
-        primaryConnectionString,
-        log,
-      );
-
-      // Register event log cleanup
-      await registerEventCleanup(jobQueue, primaryPool, 7, log);
     } catch (err) {
+      server.log.warn({ err }, 'Job queue initialization failed — continuing without Phase 2 features');
+    }
 
-      server.log.warn({ err }, 'Phase 2 (events/crons) initialization failed — continuing without');
-      jobQueue = undefined;
-      eventManager = undefined;
+    // Initialize events + crons (separate try/catch so failures don't block async actions)
+    if (jobQueue) {
+      try {
+        // Initialize cron triggers
+        await initCronTriggers(jobQueue, config.cronTriggers, log);
+
+        // Initialize event triggers
+        eventManager = await initEventTriggers(
+          primaryPool,
+          jobQueue,
+          schemaModel.tables,
+          primaryConnectionString,
+          log,
+        );
+
+        // Register event log cleanup
+        await registerEventCleanup(jobQueue, primaryPool, 7, log);
+      } catch (err) {
+        server.log.warn({ err }, 'Event/cron initialization failed — continuing without');
+        eventManager = undefined;
+      }
+
+      // ── Async action initialization (independent from events/crons) ─────
+      try {
+        const asyncActions = config.actions.filter((a) => a.definition.kind === 'asynchronous');
+        if (asyncActions.length > 0) {
+          await ensureAsyncActionSchema(primaryPool);
+          await registerAsyncActionWorkers(jobQueue, primaryPool, config.actions, log);
+          // Populate the mutable ref so resolver contexts pick up the services
+          asyncActionRef.jobQueue = jobQueue;
+          asyncActionRef.pool = primaryPool;
+          server.log.info({ count: asyncActions.length }, 'Async action system initialized');
+        }
+      } catch (err) {
+        server.log.warn({ err }, 'Async action initialization failed — continuing without');
+      }
     }
 
     // ── Manual event invocation route ─────────────────────────────────────
@@ -409,6 +438,11 @@ export async function createServer(
       pool: primaryPool,
       jobQueue,
       tables: schemaModel.tables,
+    });
+
+    // ── Async action status REST endpoint ─────────────────────────────────
+    registerAsyncActionStatusRoute(server as any, {
+      pool: primaryPool,
     });
 
     try {
