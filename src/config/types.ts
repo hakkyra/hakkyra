@@ -292,6 +292,10 @@ export interface RawServerConfig {
       enabled?: boolean;
       window_seconds?: number;
     };
+    prepared_statements?: {
+      enabled?: boolean;
+      max_cached?: number;
+    };
   };
 }
 

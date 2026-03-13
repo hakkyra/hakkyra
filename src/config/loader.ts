@@ -238,6 +238,7 @@ function transformDatabases(
   }
 
   const ryw = serverConfig?.databases?.read_your_writes;
+  const ps = serverConfig?.databases?.prepared_statements;
 
   return {
     primary: {
@@ -251,6 +252,9 @@ function transformDatabases(
     replicas: replicas.length > 0 ? replicas : undefined,
     readYourWrites: ryw
       ? { enabled: ryw.enabled ?? false, windowSeconds: ryw.window_seconds ?? 5 }
+      : undefined,
+    preparedStatements: ps
+      ? { enabled: ps.enabled ?? false, maxCached: ps.max_cached }
       : undefined,
   };
 }

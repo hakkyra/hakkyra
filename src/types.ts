@@ -462,6 +462,10 @@ export interface DatabasesConfig {
     enabled: boolean;
     windowSeconds: number;
   };
+  preparedStatements?: {
+    enabled: boolean;
+    maxCached?: number;
+  };
 }
 
 export interface PoolConfig {

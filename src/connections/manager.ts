@@ -8,6 +8,8 @@
 
 import pg from 'pg';
 import type { DatabasesConfig, PoolConfig, SessionVariables } from '../types.js';
+import { createPreparedStatementManager } from './prepared-statements.js';
+import type { PreparedStatementManager } from './prepared-statements.js';
 
 const { Pool } = pg;
 type PoolInstance = InstanceType<typeof pg.Pool>;
@@ -72,6 +74,13 @@ export function createConnectionManager(config: DatabasesConfig): ConnectionMana
   // Primary pool (always required)
   const primaryPool = createPool(config.primary.urlEnv, config.primary.pool);
 
+  // Prepared statement manager (optional)
+  const psConfig = config.preparedStatements;
+  const stmtManager: PreparedStatementManager | null =
+    psConfig?.enabled
+      ? createPreparedStatementManager(psConfig.maxCached)
+      : null;
+
   // Replica pools (optional)
   const replicaPools: PoolInstance[] = [];
   if (config.replicas && config.replicas.length > 0) {
@@ -130,7 +139,9 @@ export function createConnectionManager(config: DatabasesConfig): ConnectionMana
         }
         await client.query(`SELECT set_config('hakkyra.role', $1, true)`, [session.role]);
 
-        const result = await client.query(sql, params);
+        const result = stmtManager
+          ? await client.query(stmtManager.prepare(sql, params))
+          : await client.query(sql, params);
         await client.query('COMMIT');
         return { rows: result.rows as unknown[], rowCount: result.rowCount ?? 0 };
       } catch (err) {
