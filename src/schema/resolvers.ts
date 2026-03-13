@@ -18,8 +18,10 @@ import type {
   ComputedFieldConfig,
   FunctionInfo,
 } from '../types.js';
+import type { Pool } from 'pg';
 import type { QueryCache } from '../sql/cache.js';
 import type { SubscriptionManager } from '../subscriptions/manager.js';
+import type { JobQueue } from '../shared/job-queue/types.js';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../sql/select.js';
 import type { OrderByItem, AggregateSelection, ComputedFieldSelection } from '../sql/select.js';
 import { compileInsertOne, compileInsert } from '../sql/insert.js';
@@ -60,6 +62,12 @@ export interface ResolverContext {
 
   /** Subscription manager for real-time subscriptions (available when subscriptions are enabled). */
   subscriptionManager?: SubscriptionManager;
+
+  /** Job queue instance for async action enqueuing (available when job queue is enabled). */
+  jobQueue?: JobQueue;
+
+  /** Primary database pool for async action storage (available when database is connected). */
+  pool?: Pool;
 }
 
 /**

@@ -3,6 +3,10 @@
  *
  * Parses actions.graphql SDL, builds GraphQL types for action inputs/outputs,
  * and generates resolver-wired field configs for Query and Mutation root types.
+ *
+ * Supports both synchronous and asynchronous actions:
+ * - Sync: mutation calls webhook inline, returns result directly
+ * - Async: mutation enqueues job, returns { actionId }, result queried separately
  */
 
 import {
@@ -16,6 +20,7 @@ import {
   GraphQLBoolean,
   GraphQLInt,
   GraphQLError,
+  GraphQLEnumType,
 } from 'graphql';
 import type {
   DocumentNode,
@@ -32,6 +37,7 @@ import { customScalars } from '../schema/scalars.js';
 import type { ResolverContext } from '../schema/resolvers.js';
 import { checkActionPermission } from './permissions.js';
 import { executeAction } from './proxy.js';
+import { enqueueAsyncAction, getAsyncActionResult } from './async.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -160,6 +166,29 @@ function parseActionsSDL(sdl: string) {
   return { actions, inputTypeDefs, outputTypeDefs };
 }
 
+// ─── Shared Async Action Types ──────────────────────────────────────────────
+
+/** AsyncActionStatus enum type — shared across all async actions */
+const AsyncActionStatusEnum = new GraphQLEnumType({
+  name: 'AsyncActionStatus',
+  description: 'Status of an asynchronous action',
+  values: {
+    created: { value: 'created' },
+    processing: { value: 'processing' },
+    completed: { value: 'completed' },
+    failed: { value: 'failed' },
+  },
+});
+
+/** The return type for async action mutations: { actionId: UUID! } */
+const AsyncActionIdType = new GraphQLObjectType({
+  name: 'AsyncActionId',
+  description: 'Return type for async action mutations',
+  fields: {
+    actionId: { type: new GraphQLNonNull(customScalars['UUID']!) },
+  },
+});
+
 // ─── Main Builder ───────────────────────────────────────────────────────────
 
 /**
@@ -229,26 +258,74 @@ export function buildActionFields(
   const queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
   const mutationFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
 
+  // Track whether we need async types in the schema
+  let hasAsyncActions = false;
+
   for (const parsed of parsedActions) {
     const actionConfig = actionConfigMap.get(parsed.name);
     if (!actionConfig) continue;
 
+    const isAsync = actionConfig.definition.kind === 'asynchronous';
     const returnType = resolveOutputType(parsed.returnTypeNode, outputTypes);
     const inputType = inputTypes.get(parsed.inputTypeName);
 
-    const fieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
-      type: returnType,
-      args: inputType
-        ? { input: { type: new GraphQLNonNull(inputType) } }
-        : {},
-      description: actionConfig.comment ?? undefined,
-      resolve: makeActionResolver(actionConfig),
-    };
+    if (isAsync) {
+      hasAsyncActions = true;
 
-    if (parsed.rootType === 'Query') {
-      queryFields[parsed.name] = fieldConfig;
+      // ── Async action: mutation returns { actionId: UUID! } ────────────
+      const mutationFieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
+        type: new GraphQLNonNull(AsyncActionIdType),
+        args: inputType
+          ? { input: { type: new GraphQLNonNull(inputType) } }
+          : {},
+        description: actionConfig.comment
+          ? `${actionConfig.comment} (async — returns action ID)`
+          : `Async action: ${actionConfig.name}`,
+        resolve: makeAsyncActionResolver(actionConfig),
+      };
+      mutationFields[parsed.name] = mutationFieldConfig;
+
+      // ── Async action: result query field ──────────────────────────────
+      // Build a per-action result type that includes the action's output type
+      const resultTypeName = `${parsed.name.charAt(0).toUpperCase()}${parsed.name.slice(1)}AsyncResult`;
+      const asyncResultType = new GraphQLObjectType({
+        name: resultTypeName,
+        description: `Async action result for ${actionConfig.name}`,
+        fields: {
+          id: { type: new GraphQLNonNull(customScalars['UUID']!) },
+          status: { type: new GraphQLNonNull(AsyncActionStatusEnum) },
+          output: { type: returnType },
+          errors: { type: customScalars['JSONB']! },
+          createdAt: { type: new GraphQLNonNull(customScalars['Timestamptz']!) },
+        },
+      });
+      outputTypes.set(resultTypeName, asyncResultType);
+
+      const resultQueryFieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
+        type: asyncResultType,
+        args: {
+          id: { type: new GraphQLNonNull(customScalars['UUID']!) },
+        },
+        description: `Check the status and result of async action "${actionConfig.name}"`,
+        resolve: makeAsyncActionResultResolver(actionConfig),
+      };
+      queryFields[`${parsed.name}Result`] = resultQueryFieldConfig;
     } else {
-      mutationFields[parsed.name] = fieldConfig;
+      // ── Sync action: standard resolver ────────────────────────────────
+      const fieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
+        type: returnType,
+        args: inputType
+          ? { input: { type: new GraphQLNonNull(inputType) } }
+          : {},
+        description: actionConfig.comment ?? undefined,
+        resolve: makeActionResolver(actionConfig),
+      };
+
+      if (parsed.rootType === 'Query') {
+        queryFields[parsed.name] = fieldConfig;
+      } else {
+        mutationFields[parsed.name] = fieldConfig;
+      }
     }
   }
 
@@ -258,10 +335,15 @@ export function buildActionFields(
     ...outputTypes.values(),
   ];
 
+  // Add async action shared types if any async actions exist
+  if (hasAsyncActions) {
+    types.push(AsyncActionStatusEnum, AsyncActionIdType);
+  }
+
   return { queryFields, mutationFields, types };
 }
 
-// ─── Action Resolver Factory ────────────────────────────────────────────────
+// ─── Sync Action Resolver Factory ───────────────────────────────────────────
 
 function makeActionResolver(
   action: ActionConfig,
@@ -294,5 +376,97 @@ function makeActionResolver(
     }
 
     return result.data;
+  };
+}
+
+// ─── Async Action Resolver Factories ────────────────────────────────────────
+
+/**
+ * Creates a resolver for the async action mutation.
+ * Returns { actionId } immediately after enqueuing the action.
+ */
+function makeAsyncActionResolver(
+  action: ActionConfig,
+) {
+  return async (
+    _parent: unknown,
+    args: Record<string, unknown>,
+    context: ResolverContext,
+  ): Promise<unknown> => {
+    // Check permissions
+    if (!checkActionPermission(action, context.auth)) {
+      throw new GraphQLError(
+        `Not authorized to execute action "${action.name}"`,
+        { extensions: { code: 'FORBIDDEN' } },
+      );
+    }
+
+    // Check that async action infrastructure is available
+    if (!context.jobQueue || !context.pool) {
+      throw new GraphQLError(
+        `Async action infrastructure not available`,
+        { extensions: { code: 'SERVICE_UNAVAILABLE' } },
+      );
+    }
+
+    // Enqueue the action and return the ID immediately
+    const actionId = await enqueueAsyncAction(
+      context.jobQueue,
+      context.pool,
+      action,
+      (args.input as Record<string, unknown>) ?? {},
+      context.auth,
+    );
+
+    return { actionId };
+  };
+}
+
+/**
+ * Creates a resolver for the async action result query.
+ * Returns the current status and output of the action.
+ */
+function makeAsyncActionResultResolver(
+  action: ActionConfig,
+) {
+  return async (
+    _parent: unknown,
+    args: Record<string, unknown>,
+    context: ResolverContext,
+  ): Promise<unknown> => {
+    // Check permissions — same as the action itself
+    if (!checkActionPermission(action, context.auth)) {
+      throw new GraphQLError(
+        `Not authorized to query result of action "${action.name}"`,
+        { extensions: { code: 'FORBIDDEN' } },
+      );
+    }
+
+    if (!context.pool) {
+      throw new GraphQLError(
+        `Async action infrastructure not available`,
+        { extensions: { code: 'SERVICE_UNAVAILABLE' } },
+      );
+    }
+
+    const actionId = args.id as string;
+    const result = await getAsyncActionResult(context.pool, actionId);
+
+    if (!result) {
+      return null;
+    }
+
+    // Verify the action name matches (prevent cross-action snooping)
+    if (result.actionName !== action.name) {
+      return null;
+    }
+
+    return {
+      id: result.id,
+      status: result.status,
+      output: result.output,
+      errors: result.errors,
+      createdAt: result.createdAt,
+    };
   };
 }
