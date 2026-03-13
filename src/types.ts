@@ -252,6 +252,7 @@ export interface ActionConfig {
   name: string;
   definition: {
     kind: 'synchronous' | 'asynchronous';
+    type: 'query' | 'mutation';
     handler: string;                   // URL or local file path
     handlerFromEnv?: string;
     forwardClientHeaders?: boolean;
@@ -363,6 +364,7 @@ export interface HakkyraConfig {
   databases: DatabasesConfig;
   tables: TableInfo[];
   actions: ActionConfig[];
+  actionsGraphql?: string;
   cronTriggers: CronTriggerConfig[];
   rest: RESTConfig;
   customQueries: CustomQueryConfig[];

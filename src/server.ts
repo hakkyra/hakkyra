@@ -141,8 +141,11 @@ export async function createServer(
   // 4. Compile permissions
   const permissionLookup = buildPermissionLookup(schemaModel.tables);
 
-  // 5. Generate GraphQL schema
-  const graphqlSchema = generateSchema(schemaModel);
+  // 5. Generate GraphQL schema (with action fields if configured)
+  const graphqlSchema = generateSchema(schemaModel, {
+    actions: config.actions,
+    actionsGraphql: config.actionsGraphql,
+  });
 
   // 6. Create Fastify server
   let transport: { target: string; options: Record<string, unknown> } | undefined;
@@ -365,6 +368,7 @@ export async function createServer(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const log = server.log as any;
 
+
   if (primaryConnectionString) {
     try {
       // Start pg-boss (shared by events + crons)
@@ -387,6 +391,7 @@ export async function createServer(
       // Register event log cleanup
       await registerEventCleanup(pgBossManager.boss, primaryPool, 7, log);
     } catch (err) {
+
       server.log.warn({ err }, 'Phase 2 (events/crons) initialization failed — continuing without');
       pgBossManager = undefined;
       eventManager = undefined;
@@ -400,8 +405,10 @@ export async function createServer(
     });
 
     try {
+
       // Install subscription notification triggers
       await installSubscriptionTriggers(primaryPool, schemaModel.tables);
+
       server.log.info('Subscription triggers installed');
 
       // Create change listener for subscriptions
@@ -420,6 +427,7 @@ export async function createServer(
       await changeListener.start();
       server.log.info('Subscription change listener started');
     } catch (err) {
+
       server.log.warn({ err }, 'Subscription initialization failed — continuing without');
       changeListener = undefined;
       subscriptionMgr = undefined;
@@ -446,7 +454,10 @@ export async function createServer(
         const newIntrospection = await introspectDatabase(primaryPool);
         const newMerge = mergeSchemaModel(newIntrospection, newConfig);
         const newPermLookup = buildPermissionLookup(newMerge.model.tables);
-        const newSchema = generateSchema(newMerge.model);
+        const newSchema = generateSchema(newMerge.model, {
+          actions: newConfig.actions,
+          actionsGraphql: newConfig.actionsGraphql,
+        });
 
         // Rebuild the CJS schema for Mercurius
         const newSdl = printSchema(newSchema);

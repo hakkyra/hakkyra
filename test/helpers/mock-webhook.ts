@@ -20,13 +20,17 @@ export interface RecordedRequest {
 
 // ─── Mock Webhook Server ───────────────────────────────────────────────────
 
+export type ResponseHandler = (req: RecordedRequest) => { code: number; body: unknown };
+
 export class MockWebhookServer {
   private server: http.Server | null = null;
   private _requests: RecordedRequest[] = [];
   private _responseCode: number = 200;
   private _responseDelayMs: number = 0;
+  private _responseBody: unknown | undefined;
   private _port: number = 0;
   private waiters: Array<{ count: number; resolve: () => void }> = [];
+  private _pathHandlers: Map<string, ResponseHandler> = new Map();
 
   /** All requests received since last reset. */
   get requests(): ReadonlyArray<RecordedRequest> {
@@ -51,6 +55,16 @@ export class MockWebhookServer {
   /** Set an artificial delay (ms) before responding to requests. */
   set responseDelay(ms: number) {
     this._responseDelayMs = ms;
+  }
+
+  /** Set a custom JSON response body for all requests. */
+  set responseBody(body: unknown) {
+    this._responseBody = body;
+  }
+
+  /** Register a handler for a specific URL path. */
+  onPath(path: string, handler: ResponseHandler): void {
+    this._pathHandlers.set(path, handler);
   }
 
   /**
@@ -89,8 +103,21 @@ export class MockWebhookServer {
         await new Promise((resolve) => setTimeout(resolve, this._responseDelayMs));
       }
 
+      // Check for path-specific handler
+      const pathHandler = this._pathHandlers.get(req.url ?? '/');
+      if (pathHandler) {
+        const handlerResult = pathHandler(recorded);
+        res.writeHead(handlerResult.code, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(handlerResult.body));
+        return;
+      }
+
+      const responseBody = this._responseBody !== undefined
+        ? this._responseBody
+        : { ok: this._responseCode < 400 };
+
       res.writeHead(this._responseCode, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: this._responseCode < 400 }));
+      res.end(JSON.stringify(responseBody));
     });
 
     await new Promise<void>((resolve) => {
@@ -156,6 +183,8 @@ export class MockWebhookServer {
     this._requests = [];
     this._responseCode = 200;
     this._responseDelayMs = 0;
+    this._responseBody = undefined;
+    this._pathHandlers.clear();
     this.waiters = [];
   }
 

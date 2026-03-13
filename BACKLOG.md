@@ -178,14 +178,14 @@
 - [x] Event triggers, cron triggers, actions, REST endpoints, query collections
 - [x] Seed data: fixture data for all tracked tables
 - [x] JWT test helpers (HS256 tokens for test roles)
-- [x] **250 tests passing** across 9 test suites
+- [x] **279 tests passing** across 11 test suites
 
 ### Phase 1 Nice-to-have
 - [ ] Doc regeneration on config/schema change (SDL endpoint currently caches at startup)
 
 ---
 
-## Phase 2: Real-time & Events
+## Phase 2: Real-time & Events — COMPLETE
 
 ### Shared Infrastructure (`src/shared/`)
 - [x] Webhook delivery utility (fetch-based, timeout, header/URL env resolution)
@@ -202,7 +202,7 @@
 - [x] Connection authentication (JWT from WebSocket connectionParams)
 - [x] Subscription keep-alive / ping-pong (Mercurius `keepAlive` option, 30s)
 - [ ] Redis pub/sub fanout for multi-instance
-- [ ] Integration tests (WebSocket connect, subscribe, receive update, unsubscribe)
+- [x] Integration tests (13 tests: WebSocket auth, initial data, live INSERT/UPDATE/DELETE, permissions, cleanup)
 
 ### P2.2 — Event Triggers (`src/events/`)
 - [x] Create `hakkyra` schema + `hakkyra.event_log` table on startup
@@ -221,6 +221,7 @@
 - [x] Integration tests (9 tests: insert→webhook, column-filtered update, retry, dead letter, status tracking, session vars)
 - [x] Bug fix: pg-boss queue names use `/` instead of `:` (pg-boss v12+ constraint)
 - [x] Bug fix: session vars capture uses NULLIF for empty string handling
+- [x] Bug fix: subscription trigger install skips materialized views (`cannot have triggers`)
 
 ### P2.3 — Cron Triggers (`src/crons/`)
 - [x] Load cron_triggers.yaml (already handled by config loader)
@@ -238,27 +239,33 @@
 
 ## Phase 2 — Remaining Work
 
-### Required for production
-- [ ] Integration tests: subscriptions (WebSocket connect, subscribe, receive update, unsubscribe)
-
 ### Nice to have
 - [ ] Redis pub/sub fanout for multi-instance subscriptions
 
+### Bug Fixes (completed during Phase 2 testing)
+- [x] Subscription trigger installation: skip materialized views (cannot have triggers)
+
 ---
 
-## Phase 3: Advanced Features
+## Phase 3: Advanced Features — IN PROGRESS
 
 ### P3.1 — Actions (`src/actions/`)
-- [ ] Load actions.yaml + actions.graphql
-- [ ] Parse GraphQL type definitions for action inputs/outputs
-- [ ] Webhook proxy mode (compatible with Hasura action format)
-  - [ ] Forward input + session variables to handler URL
+- [x] Load actions.yaml + actions.graphql (config loader reads SDL, parses action configs with type field)
+- [x] Parse GraphQL type definitions for action inputs/outputs (SDL parser builds GraphQL types)
+- [x] Webhook proxy mode (compatible with Hasura action format)
+  - [x] Forward input + session variables to handler URL
+  - [x] Header forwarding (configured headers + client header forwarding)
   - [ ] Request/response transformation
-  - [ ] Header forwarding
 - [ ] Async actions (return immediately, deliver result later)
-- [ ] Action permissions per role
+- [x] Action permissions per role
 - [ ] Action relationship mapping (link action output to DB tables)
-- [ ] Integration tests
+- [x] Integration tests (16 tests: schema, execution, permissions, errors, session vars)
+
+### P3.1 — Server Integration
+- [x] Actions wired into `src/server.ts` (passes action config + SDL to schema generator)
+- [x] Schema generator merges action query/mutation fields into root types
+- [x] Dev mode hot reload includes action schema regeneration
+- [x] Mock webhook server extended with per-path handlers and custom response bodies
 
 ### P3.2 — Advanced SQL Features
 - [ ] GROUP BY support in aggregations

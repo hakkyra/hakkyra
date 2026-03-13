@@ -45,18 +45,27 @@ export async function installSubscriptionTriggers(
   // Create the shared notification function
   await pool.query(NOTIFY_FUNCTION_SQL);
 
-  // Install trigger on each tracked table
+  // Install trigger on each tracked table (skip views/materialized views)
   for (const table of tables) {
     const tableRef = `${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
     const triggerName = `hakkyra_notify_${table.schema}_${table.name}`;
 
-    await pool.query(`
-      DROP TRIGGER IF EXISTS ${triggerName} ON ${tableRef};
-      CREATE TRIGGER ${triggerName}
-        AFTER INSERT OR UPDATE OR DELETE ON ${tableRef}
-        FOR EACH ROW
-        EXECUTE FUNCTION hakkyra.notify_change();
-    `);
+    try {
+      await pool.query(`
+        DROP TRIGGER IF EXISTS ${triggerName} ON ${tableRef};
+        CREATE TRIGGER ${triggerName}
+          AFTER INSERT OR UPDATE OR DELETE ON ${tableRef}
+          FOR EACH ROW
+          EXECUTE FUNCTION hakkyra.notify_change();
+      `);
+    } catch (err) {
+      // Materialized views and some views cannot have triggers — skip silently
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('cannot have triggers')) {
+        continue;
+      }
+      throw err;
+    }
   }
 }
 

@@ -123,6 +123,7 @@ export async function loadConfig(
   const databases = await loadDatabases(absMetadataDir);
   const tables = await loadAllTables(absMetadataDir);
   const actions = await loadActions(absMetadataDir);
+  const actionsGraphql = await loadActionsGraphql(absMetadataDir);
   const cronTriggers = await loadCronTriggers(absMetadataDir);
   const apiConfig = await loadApiConfig(absMetadataDir);
   const serverConfig = await loadServerConfig(serverConfigPath);
@@ -147,6 +148,7 @@ export async function loadConfig(
     databases: transformDatabases(databases, serverConfig),
     tables,
     actions,
+    actionsGraphql: actionsGraphql ?? undefined,
     cronTriggers,
     rest: transformRESTConfig(apiConfig),
     customQueries: transformCustomQueries(apiConfig),
@@ -468,6 +470,7 @@ function transformAction(raw: RawAction): ActionConfig {
     name: raw.name,
     definition: {
       kind: raw.definition.kind ?? 'synchronous',
+      type: (raw.definition.type as 'query' | 'mutation') ?? 'mutation',
       handler,
       handlerFromEnv: raw.definition.handler_from_env,
       forwardClientHeaders: raw.definition.forward_client_headers,
@@ -477,6 +480,14 @@ function transformAction(raw: RawAction): ActionConfig {
     permissions: raw.permissions,
     comment: raw.comment,
   };
+}
+
+// ─── Actions GraphQL SDL ─────────────────────────────────────────────────────
+
+async function loadActionsGraphql(metadataDir: string): Promise<string | null> {
+  const graphqlPath = path.join(metadataDir, 'actions.graphql');
+  if (!(await fileExists(graphqlPath))) return null;
+  return fs.readFile(graphqlPath, 'utf-8');
 }
 
 // ─── Cron triggers ──────────────────────────────────────────────────────────

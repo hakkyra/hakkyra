@@ -26,7 +26,8 @@ import type {
   GraphQLFieldConfigMap,
   GraphQLFieldConfigArgumentMap,
 } from 'graphql';
-import type { SchemaModel, TableInfo, EnumInfo } from '../types.js';
+import type { SchemaModel, TableInfo, EnumInfo, ActionConfig } from '../types.js';
+import { buildActionFields } from '../actions/schema.js';
 import { pgEnumToGraphQLName } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
 import {
@@ -127,7 +128,12 @@ function buildEnumTypes(enums: EnumInfo[]): Map<string, GraphQLEnumType> {
  * @param model  The merged schema model (introspection + Hasura config)
  * @returns      A complete, executable GraphQLSchema
  */
-export function generateSchema(model: SchemaModel): GraphQLSchema {
+export interface GenerateSchemaOptions {
+  actions?: ActionConfig[];
+  actionsGraphql?: string;
+}
+
+export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptions): GraphQLSchema {
   const { tables, enums, customQueries } = model;
 
   // ── Step 1: Initialize registries ──────────────────────────────────────
@@ -249,6 +255,16 @@ export function generateSchema(model: SchemaModel): GraphQLSchema {
     queryFields[name] = fieldConfig;
   }
 
+  // ── Step 5c: Build action fields ────────────────────────────────────────
+  const actionFields = (options?.actions?.length && options?.actionsGraphql)
+    ? buildActionFields(options.actions, options.actionsGraphql)
+    : { queryFields: {}, mutationFields: {}, types: [] };
+
+  // Add action query fields to Query
+  for (const [name, fieldConfig] of Object.entries(actionFields.queryFields)) {
+    queryFields[name] = fieldConfig;
+  }
+
   const queryType = new GraphQLObjectType({
     name: 'Query',
     fields: queryFields,
@@ -367,6 +383,11 @@ export function generateSchema(model: SchemaModel): GraphQLSchema {
     mutationFields[name] = fieldConfig;
   }
 
+  // Add action mutation fields to Mutation
+  for (const [name, fieldConfig] of Object.entries(actionFields.mutationFields)) {
+    mutationFields[name] = fieldConfig;
+  }
+
   const mutationType = new GraphQLObjectType({
     name: 'Mutation',
     fields: mutationFields,
@@ -444,6 +465,9 @@ export function generateSchema(model: SchemaModel): GraphQLSchema {
       ...enumTypes.values(),
       OrderByDirection,
       ...customFields.outputTypes,
+      // Note: action types are NOT included here because they are reachable
+      // through the query/mutation field graph. Including them would cause
+      // ESM/CJS dual-module issues when Mercurius rebuilds the schema via SDL.
     ],
   });
 }
