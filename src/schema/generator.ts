@@ -169,7 +169,8 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   for (const table of tables) {
     const key = tableKey(table.schema, table.name);
     const objectType = typeRegistry.get(key)!;
-    const mutInputs = buildMutationInputTypes(table, objectType, enumTypes, enumNames);
+    const filterType = filterTypes.get(key);
+    const mutInputs = buildMutationInputTypes(table, objectType, enumTypes, enumNames, filterType);
     mutationInputsByTable.set(key, mutInputs);
     // Register orderBy types for use in array relationship args
     orderByTypes.set(key, mutInputs.orderBy);

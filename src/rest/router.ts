@@ -174,6 +174,7 @@ function buildInsertSQL(
   body: Record<string, unknown>,
   session: SessionVariables,
   permission: CompiledPermission | undefined,
+  onConflict?: { constraint: string; update_columns?: string[]; where?: BoolExp },
 ): { sql: string; params: unknown[] } {
   const params = new ParamCollector();
   const tableRef = quoteTableRef(table.schema, table.name);
@@ -213,7 +214,37 @@ function buildInsertSQL(
   const valueList = values.join(', ');
   const returnCols = allowedColumns.map((c) => quoteIdentifier(c)).join(', ');
 
-  const sql = `INSERT INTO ${tableRef} (${columnList}) VALUES (${valueList}) RETURNING ${returnCols}`;
+  // Build ON CONFLICT clause for upsert
+  let onConflictClause = '';
+  if (onConflict) {
+    const constraintRef = quoteIdentifier(onConflict.constraint);
+    const updateCols = onConflict.update_columns ?? [];
+
+    if (updateCols.length > 0) {
+      // Filter update columns to allowed columns
+      const validUpdateCols = updateCols.filter((c) => allowedColumns.includes(c));
+      if (validUpdateCols.length > 0) {
+        const updates = validUpdateCols.map(
+          (c) => `${quoteIdentifier(c)} = EXCLUDED.${quoteIdentifier(c)}`,
+        ).join(', ');
+        onConflictClause = ` ON CONFLICT ON CONSTRAINT ${constraintRef} DO UPDATE SET ${updates}`;
+
+        // Optional WHERE clause on the DO UPDATE
+        if (onConflict.where) {
+          const whereSQL = compileWhere(onConflict.where, params, table.name, session);
+          if (whereSQL) {
+            onConflictClause += ` WHERE ${whereSQL}`;
+          }
+        }
+      } else {
+        onConflictClause = ` ON CONFLICT ON CONSTRAINT ${constraintRef} DO NOTHING`;
+      }
+    } else {
+      onConflictClause = ` ON CONFLICT ON CONSTRAINT ${constraintRef} DO NOTHING`;
+    }
+  }
+
+  const sql = `INSERT INTO ${tableRef} (${columnList}) VALUES (${valueList})${onConflictClause} RETURNING ${returnCols}`;
 
   return { sql, params: params.getParams() };
 }
@@ -609,8 +640,17 @@ function registerInsertRoute(
         return;
       }
 
+      // Extract on_conflict from body if present
+      const onConflict = body.on_conflict as
+        | { constraint: string; update_columns?: string[]; where?: BoolExp }
+        | undefined;
+
+      // Remove on_conflict from the data to be inserted
+      const insertData = { ...body };
+      delete insertData.on_conflict;
+
       const permission = session.isAdmin ? undefined : deps.getPermission(table, session.role);
-      const { sql, params } = buildInsertSQL(table, body, session, permission);
+      const { sql, params } = buildInsertSQL(table, insertData, session, permission, onConflict);
       const pool = deps.getPool('write');
       const result = await pool.query(sql, params);
 

@@ -329,6 +329,14 @@ export interface SessionVariables {
   claims: Record<string, string | string[]>;
 }
 
+// ─── ON CONFLICT (Upsert) ────────────────────────────────────────────────────
+
+export interface OnConflictInput {
+  constraint: string;           // PK or unique constraint name
+  updateColumns: string[];      // columns to update on conflict
+  where?: BoolExp;              // optional filter for the update
+}
+
 // ─── SQL Compiler Output ────────────────────────────────────────────────────
 
 export interface CompiledQuery {

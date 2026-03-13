@@ -613,10 +613,25 @@ export function makeInsertOneResolver(
     const obj = remapKeys(args.object as Record<string, unknown>, columnMap) ?? {};
     const returningColumns = getReturningColumns(table);
 
+    // Parse onConflict if provided
+    let onConflict: { constraint: string; updateColumns: string[]; where?: BoolExp } | undefined;
+    if (args.onConflict) {
+      const oc = args.onConflict as Record<string, unknown>;
+      const updateCols = (oc.updateColumns as string[] | undefined) ?? [];
+      // UpdateColumn enum resolves to PG column names; remap any remaining camelCase names
+      const remappedUpdateCols = updateCols.map((c) => columnMap.get(c) ?? c);
+      onConflict = {
+        constraint: oc.constraint as string,
+        updateColumns: remappedUpdateCols,
+        where: oc.where ? remapBoolExp(oc.where as BoolExp, columnMap) : undefined,
+      };
+    }
+
     const compiled = compileInsertOne({
       table,
       object: obj,
       returningColumns,
+      onConflict,
       permission: perm ? {
         check: perm.check,
         columns: perm.columns,
