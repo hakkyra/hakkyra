@@ -16,6 +16,7 @@ import type {
   TableInfo,
 } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
+import { compileWhere } from './where.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ export interface InsertOneOptions {
   object: Record<string, unknown>;
   /** Columns to return in the response */
   returningColumns: string[];
+  /** Conflict handling */
+  onConflict?: OnConflictClause;
   permission?: {
     check: CompiledFilter;
     columns: string[] | '*';
@@ -112,6 +115,41 @@ function prepareInsertData(
   return result;
 }
 
+// ─── ON CONFLICT Clause Builder ───────────────────────────────────────────────
+
+/**
+ * Build the ON CONFLICT SQL fragment from an OnConflictClause.
+ * Handles DO UPDATE SET ... WHERE ... and DO NOTHING.
+ */
+function buildOnConflictSQL(
+  oc: OnConflictClause,
+  params: ParamCollector,
+  table: TableInfo,
+  session: SessionVariables,
+): string {
+  const constraintRef = quoteIdentifier(oc.constraint);
+
+  if (oc.updateColumns.length === 0) {
+    return `\nON CONFLICT ON CONSTRAINT ${constraintRef} DO NOTHING`;
+  }
+
+  const updates = oc.updateColumns.map(
+    (c) => `${quoteIdentifier(c)} = EXCLUDED.${quoteIdentifier(c)}`,
+  ).join(', ');
+
+  let whereClause = '';
+  if (oc.where) {
+    // Compile the where clause — use the table name as alias since DO UPDATE
+    // SET ... WHERE references the target table columns directly
+    const whereSQL = compileWhere(oc.where, params, table.name, session);
+    if (whereSQL) {
+      whereClause = ` WHERE ${whereSQL}`;
+    }
+  }
+
+  return `\nON CONFLICT ON CONSTRAINT ${constraintRef} DO UPDATE SET ${updates}${whereClause}`;
+}
+
 // ─── INSERT ONE ──────────────────────────────────────────────────────────────
 
 /**
@@ -139,6 +177,11 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
   const quotedColumns = columnNames.map(quoteIdentifier).join(', ');
   const valuePlaceholders = columnNames.map((col) => params.add(data[col])).join(', ');
 
+  // Build ON CONFLICT clause
+  const onConflictClause = opts.onConflict
+    ? buildOnConflictSQL(opts.onConflict, params, opts.table, opts.session)
+    : '';
+
   // Build RETURNING fields
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
@@ -163,7 +206,7 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
     const sql = [
       `WITH "_inserted" AS (`,
       `  INSERT INTO ${tableRef} (${quotedColumns})`,
-      `  VALUES (${valuePlaceholders})`,
+      `  VALUES (${valuePlaceholders})${onConflictClause}`,
       `  RETURNING *`,
       `)`,
       `SELECT json_build_object(${returningFields}) AS "data"`,
@@ -185,7 +228,7 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
   const sql = [
     `INSERT INTO ${tableRef} (${quotedColumns})`,
     `VALUES (${valuePlaceholders})`,
-  ].join('\n') + returningClause;
+  ].join('\n') + onConflictClause + returningClause;
 
   return { sql, params: params.getParams() };
 }
@@ -238,19 +281,9 @@ export function compileInsert(opts: InsertOptions): CompiledQuery {
   });
 
   // Build ON CONFLICT clause
-  let onConflictClause = '';
-  if (opts.onConflict) {
-    const oc = opts.onConflict;
-    const constraintRef = quoteIdentifier(oc.constraint);
-    if (oc.updateColumns.length > 0) {
-      const updates = oc.updateColumns.map(
-        (c) => `${quoteIdentifier(c)} = EXCLUDED.${quoteIdentifier(c)}`,
-      ).join(', ');
-      onConflictClause = `\nON CONFLICT ON CONSTRAINT ${constraintRef} DO UPDATE SET ${updates}`;
-    } else {
-      onConflictClause = `\nON CONFLICT ON CONSTRAINT ${constraintRef} DO NOTHING`;
-    }
-  }
+  const onConflictClause = opts.onConflict
+    ? buildOnConflictSQL(opts.onConflict, params, opts.table, opts.session)
+    : '';
 
   // Build RETURNING
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));

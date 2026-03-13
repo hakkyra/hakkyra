@@ -34,7 +34,7 @@ import type {
 import type { TableInfo, ColumnInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
-import { toCamelCase, getTypeName } from './type-builder.js';
+import { toCamelCase, getTypeName, tableKey } from './type-builder.js';
 
 // ─── OrderBy Direction Enum ─────────────────────────────────────────────────
 
@@ -187,6 +187,7 @@ export function buildMutationInputTypes(
   objectType: GraphQLObjectType,
   enumTypes: Map<string, GraphQLEnumType>,
   enumNames: Set<string>,
+  filterType?: GraphQLInputObjectType,
 ): MutationInputTypes {
   const typeName = getTypeName(table);
 
@@ -221,18 +222,24 @@ export function buildMutationInputTypes(
   // ── OnConflict ────────────────────────────────────────────────────────
   let onConflict: GraphQLInputObjectType | null = null;
   if (constraintEnum) {
+    const onConflictFields: GraphQLInputFieldConfigMap = {
+      constraint: { type: new GraphQLNonNull(constraintEnum) },
+      updateColumns: {
+        type: new GraphQLNonNull(
+          new GraphQLList(new GraphQLNonNull(updateColumnEnum)),
+        ),
+      },
+    };
+    if (filterType) {
+      onConflictFields['where'] = {
+        type: filterType,
+        description: 'Optional filter for the DO UPDATE SET clause.',
+      };
+    }
     onConflict = new GraphQLInputObjectType({
       name: `${typeName}OnConflict`,
       description: `Conflict resolution for ${typeName} upserts.`,
-      fields: {
-        constraint: { type: new GraphQLNonNull(constraintEnum) },
-        updateColumns: {
-          type: new GraphQLNonNull(
-            new GraphQLList(new GraphQLNonNull(updateColumnEnum)),
-          ),
-        },
-        // where clause is added lazily if filter types are available
-      },
+      fields: onConflictFields,
     });
   }
 
