@@ -26,7 +26,7 @@ import type {
   GraphQLFieldConfigArgumentMap,
   GraphQLScalarType,
 } from 'graphql';
-import type { TableInfo, ColumnInfo } from '../types.js';
+import type { TableInfo, ColumnInfo, FunctionInfo, ComputedFieldConfig } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
 
@@ -157,6 +157,7 @@ export function columnToGraphQLType(
  * @param enumNames     Set of PG enum type names (for column type resolution)
  * @param filterTypes   Map of table key → BoolExp input type (for where args on array rels)
  * @param orderByTypes  Map of table key → OrderBy input type (for orderBy args on array rels)
+ * @param functions     List of introspected PG functions (for computed field return type resolution)
  */
 export function buildObjectType(
   table: TableInfo,
@@ -165,6 +166,7 @@ export function buildObjectType(
   enumNames: Set<string>,
   filterTypes?: Map<string, GraphQLInputObjectType>,
   orderByTypes?: Map<string, GraphQLInputObjectType>,
+  functions?: FunctionInfo[],
 ): GraphQLObjectType {
   const typeName = getTypeName(table);
 
@@ -252,6 +254,36 @@ export function buildObjectType(
               localColumns: rel.localColumns,
               remoteColumns: rel.remoteColumns,
               columnMapping: rel.columnMapping,
+            },
+          };
+        }
+      }
+
+      // ── Computed fields ─────────────────────────────────────────────
+      if (table.computedFields && functions) {
+        for (const cf of table.computedFields) {
+          const fieldName = toCamelCase(cf.name);
+
+          // Look up the PG function to determine the return type
+          const fn = functions.find(
+            (f) => f.name === cf.function.name && f.schema === (cf.function.schema ?? 'public'),
+          );
+          if (!fn) continue;
+
+          // TODO: Handle set-returning functions (array computed fields)
+          if (fn.isSetReturning) continue;
+
+          // Map the PG return type to a GraphQL type
+          const mapping = pgTypeToGraphQL(fn.returnType, false, enumNames);
+          const fieldType = resolveScalarType(mapping.name, mapping.isList, enumTypes);
+
+          fields[fieldName] = {
+            type: fieldType,
+            description: cf.comment ?? `Computed field from ${cf.function.schema ?? 'public'}.${cf.function.name}`,
+            extensions: {
+              isComputedField: true,
+              computedFieldConfig: cf,
+              functionInfo: fn,
             },
           };
         }

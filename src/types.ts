@@ -40,6 +40,20 @@ export interface TableInfo {
   permissions: TablePermissions;
   eventTriggers: EventTriggerConfig[];
   customRootFields?: CustomRootFields;
+  computedFields?: ComputedFieldConfig[];
+}
+
+// ─── Computed Fields ─────────────────────────────────────────────────────────
+
+export interface ComputedFieldConfig {
+  name: string;
+  function: {
+    name: string;
+    schema?: string;  // defaults to 'public'
+  };
+  tableArgument?: string;  // the function param name for the table row
+  sessionArgument?: string; // optional param for session vars (hasura compat)
+  comment?: string;
 }
 
 export interface ColumnInfo {
@@ -328,6 +342,7 @@ export interface CompiledPermission {
     columns: string[] | '*';
     limit?: number;
     allowAggregations: boolean;
+    computedFields?: string[];
   };
   insert?: {
     check: CompiledFilter;

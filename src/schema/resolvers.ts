@@ -15,11 +15,13 @@ import type {
   SessionVariables,
   BoolExp,
   CompiledPermission,
+  ComputedFieldConfig,
+  FunctionInfo,
 } from '../types.js';
 import type { QueryCache } from '../sql/cache.js';
 import type { SubscriptionManager } from '../subscriptions/manager.js';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../sql/select.js';
-import type { OrderByItem, AggregateSelection } from '../sql/select.js';
+import type { OrderByItem, AggregateSelection, ComputedFieldSelection } from '../sql/select.js';
 import { compileInsertOne, compileInsert } from '../sql/insert.js';
 import { compileUpdateByPk, compileUpdate } from '../sql/update.js';
 import { compileDeleteByPk, compileDelete } from '../sql/delete.js';
@@ -49,6 +51,9 @@ export interface ResolverContext {
 
   /** All tracked tables (for relationship resolution). */
   tables: TableInfo[];
+
+  /** All introspected PG functions (for computed field resolution). */
+  functions: FunctionInfo[];
 
   /** Query cache for compiled SQL templates. */
   queryCache?: QueryCache;
@@ -210,6 +215,46 @@ function resolveLimit(userLimit?: number, permLimit?: number): number | undefine
 }
 
 /**
+ * Build ComputedFieldSelection[] from parsed computed field names + table config + schema functions.
+ */
+function buildComputedFieldSelections(
+  computedFieldNames: string[] | undefined,
+  table: TableInfo,
+  functions: FunctionInfo[],
+  permComputedFields?: string[],
+  isAdmin?: boolean,
+): ComputedFieldSelection[] {
+  if (!computedFieldNames || computedFieldNames.length === 0 || !table.computedFields) {
+    return [];
+  }
+
+  const selections: ComputedFieldSelection[] = [];
+
+  for (const cfName of computedFieldNames) {
+    // Check permission: non-admin roles need computed field listed in permission
+    if (!isAdmin && permComputedFields && !permComputedFields.includes(cfName)) {
+      continue;
+    }
+
+    const cfConfig = table.computedFields.find((cf) => cf.name === cfName);
+    if (!cfConfig) continue;
+
+    const fnSchema = cfConfig.function.schema ?? 'public';
+    const fn = functions.find(
+      (f) => f.name === cfConfig.function.name && f.schema === fnSchema,
+    );
+    if (!fn) continue;
+
+    // Skip set-returning functions for now (TODO: array computed fields)
+    if (fn.isSetReturning) continue;
+
+    selections.push({ config: cfConfig, functionInfo: fn });
+  }
+
+  return selections;
+}
+
+/**
  * Remap row keys from snake_case to camelCase for GraphQL response.
  */
 function remapRowToCamel(
@@ -222,7 +267,8 @@ function remapRowToCamel(
       result[toCamelCase(col.name)] = row[col.name];
     }
   }
-  // Preserve any extra keys (e.g., relationship subquery results already use the right name)
+  // Preserve any extra keys (e.g., relationship subquery results and computed fields
+  // already use the right name)
   for (const [key, value] of Object.entries(row)) {
     const camelKey = toCamelCase(key);
     if (!(camelKey in result)) {
@@ -267,6 +313,15 @@ export function makeSelectResolver(
     const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
     const columns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
 
+    // Build computed field selections
+    const computedFields = buildComputedFieldSelections(
+      parsed.computedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+    );
+
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
     const orderBy = remapOrderBy(args.orderBy as Array<Record<string, string>> | undefined, columnMap);
     const limit = resolveLimit(args.limit as number | undefined, perm?.limit);
@@ -279,6 +334,7 @@ export function makeSelectResolver(
       limit,
       offset: args.offset as number | undefined,
       relationships: parsed.relationships,
+      computedFields: computedFields.length > 0 ? computedFields : undefined,
       permission: perm ? {
         filter: perm.filter,
         columns: perm.columns,
@@ -327,11 +383,21 @@ export function makeSelectByPkResolver(
     const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
     const columns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
 
+    // Build computed field selections
+    const computedFields = buildComputedFieldSelections(
+      parsed.computedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+    );
+
     const compiled = compileSelectByPk({
       table,
       pkValues,
       columns,
       relationships: parsed.relationships,
+      computedFields: computedFields.length > 0 ? computedFields : undefined,
       permission: perm ? {
         filter: perm.filter,
         columns: perm.columns,

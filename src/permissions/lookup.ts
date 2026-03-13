@@ -79,6 +79,7 @@ function compileSelectPermission(
     columns: perm.columns,
     limit: perm.limit,
     allowAggregations: perm.allowAggregations ?? false,
+    computedFields: perm.computedFields,
   };
 }
 

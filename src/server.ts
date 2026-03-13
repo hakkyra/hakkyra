@@ -259,6 +259,7 @@ export async function createServer(
         ) => connectionManager.queryWithSession(sql, params, session, intent),
         permissionLookup: resolverPermissionLookup,
         tables: schemaModel.tables,
+        functions: schemaModel.functions,
         queryCache,
         subscriptionManager: subscriptionRef.manager,
       };
@@ -299,6 +300,7 @@ export async function createServer(
           ) => connectionManager.queryWithSession(sql, params, sess, intent),
           permissionLookup: resolverPermissionLookup,
           tables: schemaModel.tables,
+          functions: schemaModel.functions,
           queryCache,
           subscriptionManager: subscriptionRef.manager,
         };
