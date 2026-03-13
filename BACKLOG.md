@@ -278,7 +278,7 @@
 - [ ] Distinct queries
 - [x] Computed fields (from PG functions) — config, schema, SQL, resolvers, permissions, 17 tests
 - [x] ON CONFLICT (upsert) for inserts — constraint/column enums, WHERE on DO UPDATE, REST support, 22 tests
-- [ ] Returning nested relationships after mutations
+- [x] Returning nested relationships after mutations — object/array rels in INSERT/UPDATE/DELETE RETURNING, CTE pattern, permission filtering, 16 tests
 - [ ] Batch operations optimization
 - [ ] Prepared statement caching
 

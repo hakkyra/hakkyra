@@ -111,7 +111,7 @@ export interface SelectAggregateOptions {
 // ─── Alias Counter ───────────────────────────────────────────────────────────
 
 /** Thread-local alias counter for generating unique table aliases. */
-class AliasCounter {
+export class AliasCounter {
   private count = 0;
 
   next(): string {
@@ -129,7 +129,7 @@ class AliasCounter {
  * Filter requested columns against permitted columns.
  * Returns only columns that exist on the table AND are allowed by permissions.
  */
-function filterColumns(
+export function filterColumns(
   requested: string[],
   table: TableInfo,
   permittedColumns?: string[] | '*',
@@ -169,7 +169,7 @@ function compileOrderBy(orderBy: OrderByItem[], alias: string): string {
  * Build the json_build_object argument list for selected columns, computed fields,
  * and relationships.
  */
-function buildJsonFields(
+export function buildJsonFields(
   columns: ColumnInfo[],
   alias: string,
   relationships: RelationshipSelection[] | undefined,

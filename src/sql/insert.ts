@@ -17,6 +17,8 @@ import type {
 } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
+import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
+import type { RelationshipSelection } from './select.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -26,6 +28,8 @@ export interface InsertOneOptions {
   object: Record<string, unknown>;
   /** Columns to return in the response */
   returningColumns: string[];
+  /** Relationships to include in the RETURNING clause */
+  returningRelationships?: RelationshipSelection[];
   /** Conflict handling */
   onConflict?: OnConflictClause;
   permission?: {
@@ -42,6 +46,8 @@ export interface InsertOptions {
   objects: Record<string, unknown>[];
   /** Columns to return in the response */
   returningColumns: string[];
+  /** Relationships to include in the RETURNING clause */
+  returningRelationships?: RelationshipSelection[];
   /** Conflict handling */
   onConflict?: OnConflictClause;
   permission?: {
@@ -150,6 +156,40 @@ function buildOnConflictSQL(
   return `\nON CONFLICT ON CONSTRAINT ${constraintRef} DO UPDATE SET ${updates}${whereClause}`;
 }
 
+// ─── Returning Fields Builder ────────────────────────────────────────────────
+
+/**
+ * Build json_build_object fields for the RETURNING clause, including
+ * relationship subqueries when requested.
+ *
+ * When relationships are present, uses buildJsonFields from the SELECT compiler
+ * to generate correlated subqueries alongside scalar column fields.
+ */
+function buildReturningFields(
+  table: TableInfo,
+  returningColumns: string[],
+  alias: string,
+  params: ParamCollector,
+  session: SessionVariables,
+  relationships?: RelationshipSelection[],
+): string {
+  const tableColumnNames = new Set(table.columns.map((c) => c.name));
+  const validReturning = returningColumns.filter((c) => tableColumnNames.has(c));
+
+  if (relationships && relationships.length > 0) {
+    // Use buildJsonFields from SELECT compiler — it handles both scalar columns
+    // and relationship subqueries in one pass
+    const columns = filterColumns(validReturning, table);
+    const aliasCounter = new AliasCounter();
+    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter);
+  }
+
+  // No relationships — simple column list
+  return validReturning.map(
+    (c) => `'${c}', ${quoteIdentifier(alias)}.${quoteIdentifier(c)}`,
+  ).join(', ');
+}
+
 // ─── INSERT ONE ──────────────────────────────────────────────────────────────
 
 /**
@@ -182,26 +222,33 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
     ? buildOnConflictSQL(opts.onConflict, params, opts.table, opts.session)
     : '';
 
-  // Build RETURNING fields
-  const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
-  const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
-  const returningFields = validReturning.map(
-    (c) => `'${c}', "_inserted".${quoteIdentifier(c)}`,
-  ).join(', ');
+  const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
 
-  // Check if we need a permission check CTE
-  if (opts.permission?.check) {
-    const checkResult = opts.permission.check.toSQL(
-      opts.session,
-      params.getOffset(),
+  // Check if we need a CTE (permission check OR relationships in RETURNING)
+  if (opts.permission?.check || hasRelationships) {
+    // Build RETURNING fields with potential relationship subqueries
+    const returningFields = buildReturningFields(
+      opts.table,
+      opts.returningColumns,
       '_inserted',
+      params,
+      opts.session,
+      opts.returningRelationships,
     );
-    // Add check params
-    for (const p of checkResult.params) {
-      params.add(p);
-    }
 
-    const checkWhere = checkResult.sql ? ` WHERE ${checkResult.sql}` : '';
+    let checkWhere = '';
+    if (opts.permission?.check) {
+      const checkResult = opts.permission.check.toSQL(
+        opts.session,
+        params.getOffset(),
+        '_inserted',
+      );
+      // Add check params
+      for (const p of checkResult.params) {
+        params.add(p);
+      }
+      checkWhere = checkResult.sql ? ` WHERE ${checkResult.sql}` : '';
+    }
 
     const sql = [
       `WITH "_inserted" AS (`,
@@ -217,7 +264,9 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
     return { sql, params: params.getParams() };
   }
 
-  // Simple insert without check — RETURNING references bare column names
+  // Simple insert without check or relationships — RETURNING references bare column names
+  const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
+  const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
     (c) => `'${c}', ${quoteIdentifier(c)}`,
   ).join(', ');
@@ -285,26 +334,31 @@ export function compileInsert(opts: InsertOptions): CompiledQuery {
     ? buildOnConflictSQL(opts.onConflict, params, opts.table, opts.session)
     : '';
 
-  // Build RETURNING
-  const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
-  const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
+  const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
 
-  // Check if we need a permission check CTE
-  if (opts.permission?.check) {
-    const returningFields = validReturning.map(
-      (c) => `'${c}', "_inserted".${quoteIdentifier(c)}`,
-    ).join(', ');
-
-    const checkResult = opts.permission.check.toSQL(
-      opts.session,
-      params.getOffset(),
+  // Check if we need a CTE (permission check OR relationships in RETURNING)
+  if (opts.permission?.check || hasRelationships) {
+    const returningFields = buildReturningFields(
+      opts.table,
+      opts.returningColumns,
       '_inserted',
+      params,
+      opts.session,
+      opts.returningRelationships,
     );
-    for (const p of checkResult.params) {
-      params.add(p);
-    }
 
-    const checkWhere = checkResult.sql ? ` WHERE ${checkResult.sql}` : '';
+    let checkWhere = '';
+    if (opts.permission?.check) {
+      const checkResult = opts.permission.check.toSQL(
+        opts.session,
+        params.getOffset(),
+        '_inserted',
+      );
+      for (const p of checkResult.params) {
+        params.add(p);
+      }
+      checkWhere = checkResult.sql ? ` WHERE ${checkResult.sql}` : '';
+    }
 
     const sql = [
       `WITH "_inserted" AS (`,
@@ -320,7 +374,9 @@ export function compileInsert(opts: InsertOptions): CompiledQuery {
     return { sql, params: params.getParams() };
   }
 
-  // Simple bulk insert without check
+  // Simple bulk insert without check or relationships
+  const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
+  const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
     (c) => `'${c}', ${quoteIdentifier(c)}`,
   ).join(', ');

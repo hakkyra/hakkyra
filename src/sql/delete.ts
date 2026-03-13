@@ -15,6 +15,8 @@ import type {
 } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
+import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
+import type { RelationshipSelection } from './select.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,8 @@ export interface DeleteByPkOptions {
   pkValues: Record<string, unknown>;
   /** Columns to return in the response */
   returningColumns: string[];
+  /** Relationships to include in the RETURNING clause */
+  returningRelationships?: RelationshipSelection[];
   permission?: {
     filter: CompiledFilter;
   };
@@ -36,10 +40,40 @@ export interface DeleteOptions {
   where: BoolExp;
   /** Columns to return in the response */
   returningColumns: string[];
+  /** Relationships to include in the RETURNING clause */
+  returningRelationships?: RelationshipSelection[];
   permission?: {
     filter: CompiledFilter;
   };
   session: SessionVariables;
+}
+
+// ─── Returning Fields Builder ────────────────────────────────────────────────
+
+/**
+ * Build json_build_object fields for the RETURNING clause, including
+ * relationship subqueries when requested.
+ */
+function buildReturningFields(
+  table: TableInfo,
+  returningColumns: string[],
+  alias: string,
+  params: ParamCollector,
+  session: SessionVariables,
+  relationships?: RelationshipSelection[],
+): string {
+  const tableColumnNames = new Set(table.columns.map((c) => c.name));
+  const validReturning = returningColumns.filter((c) => tableColumnNames.has(c));
+
+  if (relationships && relationships.length > 0) {
+    const columns = filterColumns(validReturning, table);
+    const aliasCounter = new AliasCounter();
+    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter);
+  }
+
+  return validReturning.map(
+    (c) => `'${c}', ${quoteIdentifier(alias)}.${quoteIdentifier(c)}`,
+  ).join(', ');
 }
 
 // ─── DELETE BY PK ────────────────────────────────────────────────────────────
@@ -47,6 +81,17 @@ export interface DeleteOptions {
 /**
  * Compile a DELETE by primary key.
  * Returns the deleted row as json_build_object.
+ *
+ * When relationships are requested in RETURNING, uses a CTE pattern so
+ * correlated subqueries can reference the deleted row's columns.
+ *
+ * IMPORTANT: For DELETE with relationships, the relationship subqueries read
+ * from the live tables AFTER the delete has occurred. This means:
+ * - Array relationships pointing TO the deleted row (e.g., child rows with FK
+ *   to this row) will reflect post-delete state. If ON DELETE CASCADE is set,
+ *   those child rows will already be deleted and return empty arrays.
+ * - Array relationships FROM the deleted row (e.g., the deleted row references
+ *   a parent) will still work since the parent is not deleted.
  */
 export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
   const params = new ParamCollector();
@@ -73,8 +118,33 @@ export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
   }
 
   const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+  const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
 
-  // Build RETURNING
+  if (hasRelationships) {
+    // Use CTE pattern so relationship subqueries can reference the deleted row
+    const returningFields = buildReturningFields(
+      opts.table,
+      opts.returningColumns,
+      '_deleted',
+      params,
+      opts.session,
+      opts.returningRelationships,
+    );
+
+    const sql = [
+      `WITH "_deleted" AS (`,
+      `  DELETE FROM ${tableRef}`,
+      whereClause ? `  ${whereClause}` : null,
+      `  RETURNING *`,
+      `)`,
+      `SELECT json_build_object(${returningFields}) AS "data"`,
+      `FROM "_deleted"`,
+    ].filter(Boolean).join('\n');
+
+    return { sql, params: params.getParams() };
+  }
+
+  // Simple delete without relationships — RETURNING references bare column names
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
 
@@ -132,13 +202,19 @@ export function compileDelete(opts: DeleteOptions): CompiledQuery {
   // Build RETURNING
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
+  const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
 
-  // For bulk delete, we use a CTE to collect results as JSON array
-  const returningFields = validReturning.map(
-    (c) => `'${c}', "_deleted".${quoteIdentifier(c)}`,
-  ).join(', ');
+  if (validReturning.length > 0 || hasRelationships) {
+    // Use CTE to collect results as JSON array, with optional relationship subqueries
+    const returningFields = buildReturningFields(
+      opts.table,
+      opts.returningColumns,
+      '_deleted',
+      params,
+      opts.session,
+      opts.returningRelationships,
+    );
 
-  if (validReturning.length > 0) {
     const sql = [
       `WITH "_deleted" AS (`,
       `  DELETE FROM ${tableRef} AS ${quoteIdentifier(alias)}`,

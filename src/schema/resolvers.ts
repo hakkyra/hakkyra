@@ -26,7 +26,7 @@ import { compileInsertOne, compileInsert } from '../sql/insert.js';
 import { compileUpdateByPk, compileUpdate } from '../sql/update.js';
 import { compileDeleteByPk, compileDelete } from '../sql/delete.js';
 import { toCamelCase } from './type-builder.js';
-import { parseResolveInfo, parseAggregateNodesInfo } from './resolve-info.js';
+import { parseResolveInfo, parseReturningInfo, parseAggregateNodesInfo } from './resolve-info.js';
 
 // ─── Resolver Context ───────────────────────────────────────────────────────
 
@@ -506,7 +506,7 @@ export function makeInsertResolver(
 ): GraphQLFieldResolver<unknown, ResolverContext> {
   const columnMap = camelToColumnMap(table);
 
-  return async (_parent, args, context, _info) => {
+  return async (_parent, args, context, info) => {
     const { auth, queryWithSession, permissionLookup } = context;
     const perm = permissionLookup.getInsert(table.schema, table.name, auth.role);
 
@@ -522,6 +522,12 @@ export function makeInsertResolver(
     }
 
     const returningColumns = getReturningColumns(table);
+
+    // Parse returning selection set for relationships
+    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth);
+    const returningRelationships = returningParsed?.relationships && returningParsed.relationships.length > 0
+      ? returningParsed.relationships
+      : undefined;
 
     // Parse onConflict if provided
     let onConflict: { constraint: string; updateColumns: string[]; where?: BoolExp } | undefined;
@@ -541,6 +547,7 @@ export function makeInsertResolver(
       table,
       objects,
       returningColumns,
+      returningRelationships,
       onConflict,
       permission: perm ? {
         check: perm.check,
@@ -552,17 +559,17 @@ export function makeInsertResolver(
 
     const result = await queryWithSession(compiled.sql, compiled.params, auth, 'write');
 
-    // compileInsert with check: CTE wraps results in json_agg → "data" column
-    // compileInsert without check: RETURNING json_build_object → "data" column per row
+    // CTE pattern (check OR relationships): single row with "data" as JSON array
+    // Simple pattern: RETURNING json_build_object → "data" column per row
+    const usesCTE = !!(perm?.check || returningRelationships);
     const firstRow = result.rows[0] as Record<string, unknown> | undefined;
 
-    if (perm?.check) {
-      // CTE pattern: single row with "data" as JSON array
+    if (usesCTE) {
       const data = firstRow?.data;
       if (!data || !Array.isArray(data)) {
         // If the check filter eliminates all rows, it means the insert was done
         // but the check failed — this should be an error
-        if (result.rowCount === 0 && objects.length > 0) {
+        if (perm?.check && result.rowCount === 0 && objects.length > 0) {
           throw new Error(
             `Insert check constraint failed for "${table.schema}"."${table.name}"`,
           );
@@ -602,7 +609,7 @@ export function makeInsertOneResolver(
 ): GraphQLFieldResolver<unknown, ResolverContext> {
   const columnMap = camelToColumnMap(table);
 
-  return async (_parent, args, context, _info) => {
+  return async (_parent, args, context, info) => {
     const { auth, queryWithSession, permissionLookup } = context;
     const perm = permissionLookup.getInsert(table.schema, table.name, auth.role);
 
@@ -612,6 +619,12 @@ export function makeInsertOneResolver(
 
     const obj = remapKeys(args.object as Record<string, unknown>, columnMap) ?? {};
     const returningColumns = getReturningColumns(table);
+
+    // Parse resolve info for relationships (insertOne returns the type directly)
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
+    const returningRelationships = parsed.relationships.length > 0
+      ? parsed.relationships
+      : undefined;
 
     // Parse onConflict if provided
     let onConflict: { constraint: string; updateColumns: string[]; where?: BoolExp } | undefined;
@@ -631,6 +644,7 @@ export function makeInsertOneResolver(
       table,
       object: obj,
       returningColumns,
+      returningRelationships,
       onConflict,
       permission: perm ? {
         check: perm.check,
@@ -672,7 +686,7 @@ export function makeUpdateResolver(
 ): GraphQLFieldResolver<unknown, ResolverContext> {
   const columnMap = camelToColumnMap(table);
 
-  return async (_parent, args, context, _info) => {
+  return async (_parent, args, context, info) => {
     const { auth, queryWithSession, permissionLookup } = context;
     const perm = permissionLookup.getUpdate(table.schema, table.name, auth.role);
 
@@ -688,11 +702,18 @@ export function makeUpdateResolver(
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap) ?? ({} as BoolExp);
     const returningColumns = getReturningColumns(table);
 
+    // Parse returning selection set for relationships
+    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth);
+    const returningRelationships = returningParsed?.relationships && returningParsed.relationships.length > 0
+      ? returningParsed.relationships
+      : undefined;
+
     const compiled = compileUpdate({
       table,
       where,
       _set: setValues,
       returningColumns,
+      returningRelationships,
       permission: perm ? {
         filter: perm.filter,
         check: perm.check,
@@ -704,9 +725,10 @@ export function makeUpdateResolver(
 
     const result = await queryWithSession(compiled.sql, compiled.params, auth, 'write');
 
-    // With check CTE: single row with "data" as JSON array
-    // Without check: each row has a "data" column
-    if (perm?.check) {
+    // CTE pattern (check OR relationships): single row with "data" as JSON array
+    // Without CTE: each row has a "data" column
+    const usesCTE = !!(perm?.check || returningRelationships);
+    if (usesCTE) {
       const firstRow = result.rows[0] as Record<string, unknown> | undefined;
       const data = firstRow?.data;
       if (!data || !Array.isArray(data)) {
@@ -744,7 +766,7 @@ export function makeUpdateByPkResolver(
 ): GraphQLFieldResolver<unknown, ResolverContext> {
   const columnMap = camelToColumnMap(table);
 
-  return async (_parent, args, context, _info) => {
+  return async (_parent, args, context, info) => {
     const { auth, queryWithSession, permissionLookup } = context;
     const perm = permissionLookup.getUpdate(table.schema, table.name, auth.role);
 
@@ -761,11 +783,18 @@ export function makeUpdateByPkResolver(
 
     const returningColumns = getReturningColumns(table);
 
+    // Parse resolve info for relationships (updateByPk returns the type directly)
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
+    const returningRelationships = parsed.relationships.length > 0
+      ? parsed.relationships
+      : undefined;
+
     const compiled = compileUpdateByPk({
       table,
       pkValues,
       _set: setValues,
       returningColumns,
+      returningRelationships,
       permission: perm ? {
         filter: perm.filter,
         check: perm.check,
@@ -798,7 +827,7 @@ export function makeDeleteResolver(
 ): GraphQLFieldResolver<unknown, ResolverContext> {
   const columnMap = camelToColumnMap(table);
 
-  return async (_parent, args, context, _info) => {
+  return async (_parent, args, context, info) => {
     const { auth, queryWithSession, permissionLookup } = context;
     const perm = permissionLookup.getDelete(table.schema, table.name, auth.role);
 
@@ -809,10 +838,17 @@ export function makeDeleteResolver(
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap) ?? ({} as BoolExp);
     const returningColumns = getReturningColumns(table);
 
+    // Parse returning selection set for relationships
+    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth);
+    const returningRelationships = returningParsed?.relationships && returningParsed.relationships.length > 0
+      ? returningParsed.relationships
+      : undefined;
+
     const compiled = compileDelete({
       table,
       where,
       returningColumns,
+      returningRelationships,
       permission: perm ? {
         filter: perm.filter,
       } : undefined,
@@ -852,7 +888,7 @@ export function makeDeleteByPkResolver(
 ): GraphQLFieldResolver<unknown, ResolverContext> {
   const columnMap = camelToColumnMap(table);
 
-  return async (_parent, args, context, _info) => {
+  return async (_parent, args, context, info) => {
     const { auth, queryWithSession, permissionLookup } = context;
     const perm = permissionLookup.getDelete(table.schema, table.name, auth.role);
 
@@ -863,10 +899,17 @@ export function makeDeleteByPkResolver(
     const pkValues = remapKeys(args as Record<string, unknown>, columnMap) ?? {};
     const returningColumns = getReturningColumns(table);
 
+    // Parse resolve info for relationships (deleteByPk returns the type directly)
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
+    const returningRelationships = parsed.relationships.length > 0
+      ? parsed.relationships
+      : undefined;
+
     const compiled = compileDeleteByPk({
       table,
       pkValues,
       returningColumns,
+      returningRelationships,
       permission: perm ? {
         filter: perm.filter,
       } : undefined,
