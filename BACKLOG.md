@@ -210,7 +210,7 @@
 - [x] Column-specific UPDATE triggers (only fire when tracked columns change)
 - [x] Session variable capture in triggers (`current_setting('hasura.user')`)
 - [x] pg-listen subscriber for `hakkyra_events` NOTIFY channel
-- [x] pg-boss workers: fetch pending events, deliver webhooks
+- [x] Job queue workers: fetch pending events, deliver webhooks
 - [x] Webhook payload format (compatible with Hasura event payload)
 - [x] Retry with exponential backoff (per-trigger retry config)
 - [x] Dead letter queue (status → 'failed' after retries exhausted)
@@ -225,27 +225,19 @@
 
 ### P2.3 — Cron Triggers (`src/crons/`)
 - [x] Load cron_triggers.yaml (already handled by config loader)
-- [x] Register crons with pg-boss (distributed single-execution via advisory locks)
-- [x] Webhook delivery with retry (pg-boss retry config: limit, delay, backoff)
+- [x] Register crons via job queue (distributed single-execution via advisory locks)
+- [x] Webhook delivery with retry (job queue retry config: limit, delay, backoff)
 - [x] Webhook payload format compatible with Hasura cron payload (scheduled_time, payload, name, comment)
 - [x] Integration tests (14 tests: schedule registration, webhook delivery, payload format, headers, env resolution, retry, dead letter)
 
 ### Server Integration
 - [x] Phase 2 modules wired into `src/server.ts` startup sequence
-- [x] Graceful shutdown: change listener → event manager → pg-boss → server → pools
-- [x] Graceful degradation: Phase 2 skips with warning if pg-boss fails to connect
+- [x] Graceful shutdown: change listener → event manager → job queue → server → pools
+- [x] Graceful degradation: Phase 2 skips with warning if job queue fails to connect
 
 ---
 
-## Phase 2 — Remaining Work
-- [ ] Redis pub/sub fanout for multi-instance subscriptions
-
-### Bug Fixes (completed during Phase 2 testing)
-- [x] Subscription trigger installation: skip materialized views (cannot have triggers)
-
----
-
-## Phase 3: Advanced Features — IN PROGRESS
+## Phase 3: Advanced Features — COMPLETE
 
 ### P3.1 — Actions (`src/actions/`)
 - [x] Load actions.yaml + actions.graphql (config loader reads SDL, parses action configs with type field)
@@ -253,7 +245,7 @@
 - [x] Webhook proxy mode (compatible with Hasura action format)
   - [x] Forward input + session variables to handler URL
   - [x] Header forwarding (configured headers + client header forwarding)
-  - [ ] Request/response transformation
+  - [x] Request/response transformation — template interpolation engine, URL/method/body/header transforms (32 tests)
 - [x] Async actions (return immediately, deliver result later)
   - [x] Async action DB schema (`hakkyra.async_action_log` table)
   - [x] Enqueue async action → insert row + job queue → return action ID
@@ -262,9 +254,9 @@
   - [x] `AsyncActionStatus` enum, per-action `AsyncResult` types
   - [x] REST endpoint: `GET /v1/actions/:actionId/status`
   - [x] Independent initialization (does not fail if events/crons fail)
-  - [x] Integration tests (18 tests: schema, enqueue, worker, result query, permissions, REST)
+  - [x] Integration tests (18 tests)
 - [x] Action permissions per role
-- [ ] Action relationship mapping (link action output to DB tables)
+- [x] Action relationship mapping — object/array relationships to DB tables, permission enforcement (13 tests)
 - [x] Integration tests (16 tests: schema, execution, permissions, errors, session vars)
 
 ### P3.1 — Server Integration
@@ -274,26 +266,32 @@
 - [x] Mock webhook server extended with per-path handlers and custom response bodies
 
 ### P3.1.5 — Job Queue Abstraction (`src/shared/job-queue/`)
-- [x] JobQueue interface abstracting pg-boss
-- [x] PgBossAdapter (wraps existing pg-boss usage)
-- [x] BullMQAdapter (optional, requires Redis, uses dynamic imports)
+- [x] `JobQueue` interface abstracting pg-boss
+- [x] `PgBossAdapter` (wraps existing pg-boss usage, `hakkyra_boss` schema)
+- [x] `BullMQAdapter` (optional, requires Redis, uses dynamic imports)
 - [x] Factory function with config-driven provider selection
-- [x] All event/cron consumers refactored to use JobQueue interface
-- [x] Config support: `job_queue.provider: 'pg-boss' | 'bullmq'`
+- [x] All event/cron/async-action consumers refactored to use `JobQueue` interface
+- [x] Config: `job_queue.provider: 'pg-boss' | 'bullmq'` (default: pg-boss)
 
 ### P3.2 — Advanced SQL Features
-- [ ] GROUP BY support in aggregations
-- [x] Distinct queries (DISTINCT ON support — SQL compiler, GraphQL schema, resolvers, REST API, 22 tests)
-- [x] Computed fields (from PG functions) — config, schema, SQL, resolvers, permissions, 17 tests
-- [x] ON CONFLICT (upsert) for inserts — constraint/column enums, WHERE on DO UPDATE, REST support, 22 tests
-- [x] Returning nested relationships after mutations — object/array rels in INSERT/UPDATE/DELETE RETURNING, CTE pattern, permission filtering, 16 tests
-- [ ] Batch operations optimization
-- [ ] Prepared statement caching
+- [x] Computed fields (from PG functions) — config, schema, SQL, resolvers, permissions (17 tests)
+- [x] ON CONFLICT (upsert) for inserts — constraint/column enums, WHERE on DO UPDATE, REST support (22 tests)
+- [x] Distinct queries — DISTINCT ON, SelectColumn enum, auto ORDER BY prepend, REST support (22 tests)
+- [x] Returning nested relationships after mutations — CTE pattern, reuses buildJsonFields, permission filtering (16 tests)
+- [x] GROUP BY support in aggregations — groupBy argument, grouped aggregates, REST support (18 tests)
+- [x] Batch operations optimization — UNNEST for large inserts, updateMany mutation, array parameter optimization (26 tests)
+- [x] Prepared statement caching — LRU-based PreparedStatementManager, config-driven, disabled by default (13 tests)
 
 ### P3.3 — Read-Your-Writes Consistency
-- [ ] After mutation, flag user for primary reads (Redis or in-memory with TTL)
-- [ ] Configurable consistency window
-- [ ] Per-table opt-in
+- [x] After mutation, flag user for primary reads (in-memory TTL)
+- [x] ConsistencyTracker with configurable window (default 5s)
+- [x] Integrates into ConnectionManager pool selection transparently
+- [x] Disabled by default, enabled via config (15 tests)
+
+---
+
+## Phase 3 — Remaining Work
+- [ ] Configurable event_log retention period (currently hardcoded to 7 days in server.ts)
 
 ---
 
@@ -305,7 +303,45 @@
 - [ ] `hakkyra dev` — alias for `--dev` with introspection watch
 - [ ] `hakkyra start` — production start
 - [ ] `hakkyra metadata apply` — apply YAML config (install triggers, validate)
-- [ ] `hakkyra console` — interactive GraphQL playground
+
+### P4.1.5 — Zod Validation & Inferred Types
+- [ ] Add `zod` dependency, remove unused `ajv` dependency
+- [ ] **Config schemas** (`src/config/schemas/`)
+  - [ ] Zod schema for `DatabasesConfig` (pool settings, URL env refs, replica config, prepared statements, read-your-writes)
+  - [ ] Zod schema for `AuthConfig` (JWT algorithm enum, key/keyEnv, JWKS URL, claims namespace/map, webhook config, admin secret)
+  - [ ] Zod schema for `TableConfig` (permissions per role per operation, relationships, computed fields, column presets)
+  - [ ] Zod schema for `BoolExp` (recursive: `_and`/`_or`/`_not`/`_exists`, column operators with discriminated values)
+  - [ ] Zod schema for `EventTriggerConfig` (operations enum, columns, webhook URL/env, retry config, headers)
+  - [ ] Zod schema for `CronTriggerConfig` (cron expression regex, webhook URL/env, payload, retry config, headers)
+  - [ ] Zod schema for `ActionConfig` (kind enum, handler URL/env, permissions, request/response transforms)
+  - [ ] Zod schema for `RESTConfig` (pagination limits, endpoint overrides, default_order)
+  - [ ] Zod schema for `CustomQueryConfig` (name, sql, type enum, params, output columns)
+  - [ ] Zod schema for `JobQueueConfig` (provider enum, Redis URL)
+  - [ ] Zod schema for `ServerConfig` (port range, host, dev mode)
+  - [ ] Top-level `HakkyraConfig` schema composing all above
+  - [ ] Replace manual `validateConfig()` in `src/config/validator.ts` with Zod `.parse()` / `.safeParse()`
+  - [ ] Replace raw config types in `src/config/types.ts` with `z.infer<>` from schemas
+- [ ] **Environment variable validation** (`src/config/env.ts`)
+  - [ ] Zod schema for required env vars (DATABASE_URL, JWT key, admin secret)
+  - [ ] Zod schema for optional env vars (LOG_LEVEL, NODE_ENV) with defaults
+  - [ ] Validate webhook URL env vars (event triggers, cron triggers, actions, auth webhook) are valid URLs
+  - [ ] Centralize `resolveEnv()` to use Zod transforms (parse + coerce in one step)
+  - [ ] Fail-fast on startup with clear error messages listing all missing/invalid env vars
+- [ ] **REST API input validation** (`src/rest/schemas/`)
+  - [ ] Zod schema for query parameters (limit, offset as coerced integers with range constraints)
+  - [ ] Zod schema for filter syntax parsing (column=op.value format validation)
+  - [ ] Zod schema for order_by parameter (column.direction.nulls format)
+  - [ ] Zod schema for select/distinct_on/group_by column lists
+  - [ ] Zod schema for insert request body (object, non-null, non-array)
+  - [ ] Zod schema for update request body (object, non-null, non-array, optional on_conflict)
+  - [ ] Zod schema for PK route params (type coercion per column type: UUID, integer, string)
+  - [ ] Integrate Zod validation into Fastify route hooks (preValidation or schema option)
+  - [ ] Structured error responses from Zod issues (field path, expected type, received value)
+- [ ] **Type replacement** — Replace manually written interfaces with `z.infer<typeof schema>` in:
+  - [ ] `src/types.ts` — main config types (DatabasesConfig, AuthConfig, EventTriggerConfig, CronTriggerConfig, ActionConfig, RESTConfig, etc.)
+  - [ ] `src/config/types.ts` — raw YAML types (RawDatabaseEntry, RawTableYaml, RawPermissionEntry, etc.)
+  - [ ] `src/rest/filters.ts` — parsed filter/order types
+- [ ] Tests for Zod schemas (valid configs pass, invalid configs produce clear errors with paths)
 
 ### P4.2 — Observability
 - [ ] Structured logging with pino
@@ -324,3 +360,39 @@
 - [ ] Example projects (todo app, e-commerce)
 - [ ] Docker image + docker-compose for quick start
 - [ ] GitHub Actions CI template
+
+---
+
+## Cross-cutting / Future
+- [ ] Redis pub/sub fanout for multi-instance subscriptions
+- [ ] Doc regeneration on config/schema change
+
+---
+
+## Test Summary
+
+| Suite | Tests | Status |
+|-------|-------|--------|
+| Config loader | 19 | Pass |
+| Introspection | 30 | Pass |
+| Permissions | 31 | Pass |
+| SQL compiler | 24 | Pass |
+| Schema generator | 34 | Pass |
+| REST filters | 30 | Pass |
+| Server / E2E | 59 | Pass |
+| Events | 9 | Pass |
+| Crons | 14 | Pass |
+| Subscriptions | 13 | Flaky (test infra) |
+| Actions | 16 | Pass |
+| Async actions | 18 | Pass |
+| Computed fields | 17 | Pass |
+| Upsert | 22 | Pass |
+| Distinct | 22 | Pass |
+| Returning rels | 16 | Pass |
+| Prepared statements | 13 | Pass |
+| Read-your-writes | 15 | Pass |
+| GROUP BY | 18 | Pass |
+| Action transforms | 32 | Pass |
+| Batch operations | 26 | Pass |
+| Action relationships | 13 | Pass |
+| **Total** | **~517** | |
