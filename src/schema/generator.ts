@@ -195,6 +195,10 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
     // select (list)
     const selectArgs: GraphQLFieldConfigArgumentMap = {};
+    selectArgs['distinctOn'] = {
+      type: new GraphQLList(new GraphQLNonNull(mutInputs.selectColumnEnum)),
+      description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
+    };
     if (filterType) {
       selectArgs['where'] = { type: filterType };
     }

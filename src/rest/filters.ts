@@ -15,6 +15,7 @@ export interface ParsedRESTQuery {
   limit?: number;
   offset?: number;
   select?: string[];
+  distinctOn?: string[];
 }
 
 export interface OrderByClause {
@@ -174,7 +175,7 @@ function parseSelect(selectStr: string): string[] {
 // ─── Main parser ─────────────────────────────────────────────────────────────
 
 /** Reserved query parameter names that are not column filters. */
-const RESERVED_PARAMS = new Set(['order', 'limit', 'offset', 'select']);
+const RESERVED_PARAMS = new Set(['order', 'limit', 'offset', 'select', 'distinct_on']);
 
 /**
  * Parse query string parameters into a structured REST query.
@@ -195,6 +196,7 @@ export function parseRESTFilters(query: Record<string, string>): ParsedRESTQuery
   let limit: number | undefined;
   let offset: number | undefined;
   let select: string[] | undefined;
+  let distinctOn: string[] | undefined;
 
   for (const [key, value] of Object.entries(query)) {
     if (!value && value !== '') continue;
@@ -226,6 +228,11 @@ export function parseRESTFilters(query: Record<string, string>): ParsedRESTQuery
       continue;
     }
 
+    if (key === 'distinct_on') {
+      distinctOn = value.split(',').map((s) => s.trim()).filter(Boolean);
+      continue;
+    }
+
     // Column filter: key is column name, value is `op.value`
     const ops = parseFilterValue(value);
     if (ops) {
@@ -241,7 +248,7 @@ export function parseRESTFilters(query: Record<string, string>): ParsedRESTQuery
   // Build BoolExp from column filters
   const where = buildWhere(columnFilters);
 
-  return { where, orderBy, limit, offset, select };
+  return { where, orderBy, limit, offset, select, distinctOn };
 }
 
 /**

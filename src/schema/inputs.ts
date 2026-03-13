@@ -95,6 +95,20 @@ function buildUpdateColumnEnum(table: TableInfo, typeName: string): GraphQLEnumT
   });
 }
 
+function buildSelectColumnEnum(table: TableInfo, typeName: string): GraphQLEnumType {
+  const values: Record<string, { value: string }> = {};
+  for (const col of table.columns) {
+    // camelCase enum value names — internal value is the PG column name
+    const fieldName = toCamelCase(col.name);
+    values[fieldName] = { value: col.name };
+  }
+  return new GraphQLEnumType({
+    name: `${typeName}SelectColumn`,
+    description: `Select columns for ${typeName}. Used for distinct_on.`,
+    values,
+  });
+}
+
 // ─── Scalar Resolution (Input Types) ────────────────────────────────────────
 
 const BUILTIN_INPUT_SCALARS: Record<string, GraphQLInputType> = {
@@ -175,6 +189,7 @@ export interface MutationInputTypes {
   selectAggregateFields: GraphQLObjectType;
   constraintEnum: GraphQLEnumType | null;
   updateColumnEnum: GraphQLEnumType;
+  selectColumnEnum: GraphQLEnumType;
 }
 
 // ─── Builder ────────────────────────────────────────────────────────────────
@@ -215,9 +230,10 @@ export function buildMutationInputTypes(
     },
   });
 
-  // ── Constraint and UpdateColumn enums ──────────────────────────────────
+  // ── Constraint, UpdateColumn, and SelectColumn enums ─────────────────
   const constraintEnum = buildConstraintEnum(table, typeName);
   const updateColumnEnum = buildUpdateColumnEnum(table, typeName);
+  const selectColumnEnum = buildSelectColumnEnum(table, typeName);
 
   // ── OnConflict ────────────────────────────────────────────────────────
   let onConflict: GraphQLInputObjectType | null = null;
@@ -429,5 +445,6 @@ export function buildMutationInputTypes(
     selectAggregateFields,
     constraintEnum,
     updateColumnEnum,
+    selectColumnEnum,
   };
 }

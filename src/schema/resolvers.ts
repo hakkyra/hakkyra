@@ -326,11 +326,24 @@ export function makeSelectResolver(
     const orderBy = remapOrderBy(args.orderBy as Array<Record<string, string>> | undefined, columnMap);
     const limit = resolveLimit(args.limit as number | undefined, perm?.limit);
 
+    // Extract distinctOn — enum values resolve to PG column names directly
+    const rawDistinctOn = args.distinctOn as string[] | undefined;
+    let distinctOn: string[] | undefined;
+    if (rawDistinctOn && rawDistinctOn.length > 0) {
+      // Filter distinct_on columns against permitted columns
+      const allowedColumns = perm?.columns === '*'
+        ? table.columns.map((c) => c.name)
+        : (perm?.columns ?? table.columns.map((c) => c.name));
+      distinctOn = rawDistinctOn.filter((col) => allowedColumns.includes(col));
+      if (distinctOn.length === 0) distinctOn = undefined;
+    }
+
     const compiled = compileSelect({
       table,
       columns,
       where,
       orderBy,
+      distinctOn,
       limit,
       offset: args.offset as number | undefined,
       relationships: parsed.relationships,

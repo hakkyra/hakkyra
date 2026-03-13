@@ -275,7 +275,7 @@
 
 ### P3.2 — Advanced SQL Features
 - [ ] GROUP BY support in aggregations
-- [ ] Distinct queries
+- [x] Distinct queries (DISTINCT ON support — SQL compiler, GraphQL schema, resolvers, REST API, 22 tests)
 - [x] Computed fields (from PG functions) — config, schema, SQL, resolvers, permissions, 17 tests
 - [x] ON CONFLICT (upsert) for inserts — constraint/column enums, WHERE on DO UPDATE, REST support, 22 tests
 - [ ] Returning nested relationships after mutations

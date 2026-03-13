@@ -66,6 +66,43 @@ function buildSelectSQL(
 
   const columnList = selectedColumns.map((c) => `${alias}.${quoteIdentifier(c)}`).join(', ');
 
+  // DISTINCT ON
+  let distinctOnClause = '';
+  if (parsed.distinctOn && parsed.distinctOn.length > 0) {
+    // Filter distinct_on columns to allowed columns
+    const validDistinctCols = parsed.distinctOn.filter((c) => allowedColumns.includes(c));
+    if (validDistinctCols.length > 0) {
+      const distinctCols = validDistinctCols.map((c) => `${alias}.${quoteIdentifier(c)}`).join(', ');
+      distinctOnClause = `DISTINCT ON (${distinctCols}) `;
+
+      // Ensure ORDER BY starts with distinct columns (PostgreSQL requirement)
+      const existingOrderCols = new Set(parsed.orderBy.map((o) => o.column));
+      const prependOrder: OrderByClause[] = [];
+      for (const col of validDistinctCols) {
+        if (!existingOrderCols.has(col)) {
+          prependOrder.push({ column: col, direction: 'asc' });
+        }
+      }
+      if (prependOrder.length > 0) {
+        // Reorder: distinct columns first, then existing order
+        const distinctSet = new Set(validDistinctCols);
+        const existingInDistinct = parsed.orderBy.filter((o) => distinctSet.has(o.column));
+        const existingNotInDistinct = parsed.orderBy.filter((o) => !distinctSet.has(o.column));
+        parsed.orderBy = [...existingInDistinct, ...prependOrder, ...existingNotInDistinct];
+      } else {
+        // Ensure distinct columns come first in ORDER BY
+        const distinctSet = new Set(validDistinctCols);
+        const inDistinct = parsed.orderBy.filter((o) => distinctSet.has(o.column));
+        const notInDistinct = parsed.orderBy.filter((o) => !distinctSet.has(o.column));
+        parsed.orderBy = [...inDistinct, ...notInDistinct];
+      }
+      // If no ORDER BY was specified at all, add the distinct columns
+      if (parsed.orderBy.length === 0) {
+        parsed.orderBy = validDistinctCols.map((c) => ({ column: c, direction: 'asc' as const }));
+      }
+    }
+  }
+
   // Build WHERE clause combining user filters and permission filters
   const whereParts: string[] = [];
 
@@ -122,7 +159,7 @@ function buildSelectSQL(
     ? ` OFFSET ${params.add(parsed.offset)}`
     : '';
 
-  const sql = `SELECT ${columnList} FROM ${tableRef} ${alias}${whereClause}${orderClause}${limitClause}${offsetClause}`;
+  const sql = `SELECT ${distinctOnClause}${columnList} FROM ${tableRef} ${alias}${whereClause}${orderClause}${limitClause}${offsetClause}`;
 
   return { sql, params: params.getParams() };
 }

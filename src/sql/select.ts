@@ -63,6 +63,7 @@ export interface SelectOptions {
   columns: string[];
   where?: BoolExp;
   orderBy?: OrderByItem[];
+  distinctOn?: string[];
   limit?: number;
   offset?: number;
   relationships?: RelationshipSelection[];
@@ -161,6 +162,57 @@ function compileOrderBy(orderBy: OrderByItem[], alias: string): string {
   });
 
   return ` ORDER BY ${parts.join(', ')}`;
+}
+
+// ─── DISTINCT ON ─────────────────────────────────────────────────────────────
+
+/**
+ * Compile DISTINCT ON clause for PostgreSQL.
+ */
+function compileDistinctOn(distinctOn: string[], alias: string): string {
+  if (distinctOn.length === 0) return '';
+
+  const cols = distinctOn.map((col) =>
+    `${quoteIdentifier(alias)}.${quoteIdentifier(col)}`,
+  );
+
+  return `DISTINCT ON (${cols.join(', ')}) `;
+}
+
+/**
+ * Ensure ORDER BY starts with the DISTINCT ON columns.
+ * PostgreSQL requires that DISTINCT ON expressions must match the leftmost ORDER BY expressions.
+ * If the user-provided ORDER BY doesn't already start with the distinct columns,
+ * prepend them (using ASC as default direction).
+ */
+function ensureDistinctOnInOrderBy(
+  distinctOn: string[],
+  orderBy?: OrderByItem[],
+): OrderByItem[] {
+  const existing = orderBy ?? [];
+
+  // Check which distinct columns are already at the start of ORDER BY
+  const result: OrderByItem[] = [];
+
+  for (const col of distinctOn) {
+    const existingIdx = existing.findIndex((item) => item.column === col);
+    if (existingIdx !== -1) {
+      // Use the user-specified direction for this column
+      result.push(existing[existingIdx]);
+    } else {
+      // Prepend with default ASC direction
+      result.push({ column: col, direction: 'asc' });
+    }
+  }
+
+  // Append remaining ORDER BY items that aren't already in result
+  for (const item of existing) {
+    if (!result.some((r) => r.column === item.column)) {
+      result.push(item);
+    }
+  }
+
+  return result;
 }
 
 // ─── json_build_object Fields ────────────────────────────────────────────────
@@ -416,8 +468,17 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
 
   const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
 
+  // DISTINCT ON — adjust ORDER BY to satisfy PostgreSQL requirement
+  const distinctOn = opts.distinctOn;
+  const distinctOnClause = distinctOn && distinctOn.length > 0
+    ? compileDistinctOn(distinctOn, alias)
+    : '';
+  const effectiveOrderBy = distinctOn && distinctOn.length > 0
+    ? ensureDistinctOnInOrderBy(distinctOn, opts.orderBy)
+    : opts.orderBy;
+
   // ORDER BY
-  const orderByClause = opts.orderBy ? compileOrderBy(opts.orderBy, alias) : '';
+  const orderByClause = effectiveOrderBy ? compileOrderBy(effectiveOrderBy, alias) : '';
 
   // LIMIT / OFFSET
   let limitOffsetClause = '';
@@ -429,12 +490,12 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
     limitOffsetClause += ` OFFSET ${params.add(opts.offset)}`;
   }
 
-  // If ORDER BY or LIMIT is used, wrap in a subquery so the ordering/limiting
-  // applies to the rows, then aggregate the result.
+  // If ORDER BY, LIMIT, or DISTINCT ON is used, wrap in a subquery so the
+  // ordering/limiting/deduplication applies to the rows, then aggregate the result.
   let sql: string;
-  if (orderByClause || limitOffsetClause) {
+  if (orderByClause || limitOffsetClause || distinctOnClause) {
     const innerSql = [
-      `SELECT ${jsonFields ? `json_build_object(${jsonFields}) AS "_row_"` : `${quoteIdentifier(alias)}.*`}`,
+      `SELECT ${distinctOnClause}${jsonFields ? `json_build_object(${jsonFields}) AS "_row_"` : `${quoteIdentifier(alias)}.*`}`,
       `FROM ${tableRef} ${quoteIdentifier(alias)}`,
       whereClause ? whereClause.trim() : null,
       orderByClause ? orderByClause.trim() : null,
