@@ -1,0 +1,338 @@
+# Hakkyra
+
+Auto-generate GraphQL + REST APIs from PostgreSQL with Hasura-compatible YAML metadata configuration.
+
+Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible with Hasura's metadata format), and serves a fully-featured GraphQL and REST API with authentication, role-based permissions, real-time subscriptions, event triggers, and cron scheduling — all without writing application code.
+
+## Features
+
+- **GraphQL API** — auto-generated queries, mutations, and subscriptions for every tracked table
+- **REST API** — CRUD endpoints with PostgREST-style filtering and pagination
+- **Permissions** — row-level and column-level security per role, compiled to SQL at startup
+- **Authentication** — JWT (HS256, RS256, ES256, Ed25519), JWKS auto-rotation, webhook auth
+- **Relationships** — object and array relationships resolved in a single SQL query
+- **Subscriptions** — real-time updates via WebSocket (graphql-ws protocol) with LISTEN/NOTIFY
+- **Event triggers** — capture INSERT/UPDATE/DELETE changes and deliver webhooks with retry
+- **Cron triggers** — scheduled webhook invocations via pg-boss
+- **Custom queries** — hand-written SQL overrides registered as GraphQL operations
+- **Read replicas** — automatic read/write routing with round-robin
+- **API docs** — OpenAPI 3.1, GraphQL SDL, and LLM-friendly compact format
+- **Hot reload** — `--dev` mode watches config files and reloads schema without restart
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js >= 20
+- PostgreSQL 17 (or compatible)
+
+### Install and Run
+
+```bash
+npm install
+npm run build
+hakkyra --config ./hakkyra.yaml --metadata ./metadata
+```
+
+Or in development with hot reload:
+
+```bash
+npm run dev -- --dev --config ./hakkyra.yaml --metadata ./metadata
+```
+
+### Docker Compose (for development/testing)
+
+```bash
+docker compose up -d   # starts PostgreSQL 17
+npm test               # runs the test suite (250 tests)
+```
+
+## Configuration
+
+Hakkyra uses two configuration layers:
+
+### 1. Server config (`hakkyra.yaml`)
+
+```yaml
+server:
+  port: 3000
+  host: 0.0.0.0
+
+auth:
+  jwt:
+    type: RS256
+    jwk_url: https://auth.example.com/.well-known/jwks.json
+    claims_namespace: https://hasura.io/jwt/claims
+    audience: my-app
+    issuer: https://auth.example.com
+  admin_secret_from_env: HAKKYRA_ADMIN_SECRET
+  unauthorized_role: anonymous
+
+databases:
+  primary:
+    url_from_env: DATABASE_URL
+    pool:
+      max: 20
+      idle_timeout: 30
+  replicas:
+    - url_from_env: DATABASE_REPLICA_URL
+      pool:
+        max: 40
+  read_your_writes:
+    enabled: true
+    window_seconds: 5
+```
+
+### 2. Metadata directory (Hasura-compatible)
+
+```
+metadata/
+├── version.yaml
+├── databases/
+│   ├── databases.yaml
+│   └── default/
+│       └── tables/
+│           ├── tables.yaml
+│           ├── public_users.yaml
+│           └── public_articles.yaml
+├── api_config.yaml          # table aliases, custom queries, REST overrides
+├── actions.yaml
+├── actions.graphql
+├── cron_triggers.yaml
+├── inherited_roles.yaml
+└── rest_endpoints.yaml
+```
+
+#### Table config example
+
+```yaml
+table:
+  schema: public
+  name: client
+
+object_relationships:
+  - name: branch
+    using:
+      foreign_key_constraint_on: branch_id
+
+array_relationships:
+  - name: accounts
+    using:
+      foreign_key_constraint_on:
+        column: client_id
+        table:
+          schema: public
+          name: account
+
+select_permissions:
+  - role: client
+    permission:
+      columns: [id, username, email, status]
+      filter:
+        id:
+          _eq: X-Hasura-User-Id
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+insert_permissions:
+  - role: backoffice
+    permission:
+      columns: [username, email, branch_id]
+      check:
+        branch_id:
+          _is_null: false
+      set:
+        status: active
+```
+
+## API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /graphql` | GraphQL endpoint (queries, mutations, subscriptions via WebSocket upgrade) |
+| `GET /api/v1/{table}` | List rows with filters, ordering, pagination |
+| `GET /api/v1/{table}/:id` | Get row by primary key |
+| `POST /api/v1/{table}` | Insert row |
+| `PATCH /api/v1/{table}/:id` | Update row |
+| `DELETE /api/v1/{table}/:id` | Delete row |
+| `GET /openapi.json` | OpenAPI 3.1 specification |
+| `GET /llm-api.json` | LLM-friendly compact API description |
+| `GET /sdl` | GraphQL SDL with descriptions |
+| `GET /healthz` | Health check |
+| `GET /readyz` | Readiness check |
+| `POST /v1/events/invoke/:trigger` | Manually invoke an event trigger (admin only) |
+
+### REST Filtering
+
+Query parameters use PostgREST-style syntax:
+
+```
+GET /api/v1/users?status=eq.active&created_at=gte.2024-01-01&order=created_at.desc&limit=20
+```
+
+| Filter | SQL Equivalent |
+|--------|---------------|
+| `column=eq.value` | `column = value` |
+| `column=neq.value` | `column <> value` |
+| `column=gt.value` | `column > value` |
+| `column=gte.value` | `column >= value` |
+| `column=lt.value` | `column < value` |
+| `column=lte.value` | `column <= value` |
+| `column=in.(a,b,c)` | `column IN (a, b, c)` |
+| `column=like.*pattern*` | `column LIKE '%pattern%'` |
+| `column=is.null` | `column IS NULL` |
+
+## Authentication
+
+Hakkyra supports three authentication methods, checked in order:
+
+1. **Admin secret** — `x-hasura-admin-secret` header bypasses all permissions
+2. **JWT** — `Authorization: Bearer <token>` with claims in configurable namespace
+3. **Webhook** — forward headers to an external auth endpoint
+
+JWT claims follow the Hasura format:
+
+```json
+{
+  "https://hasura.io/jwt/claims": {
+    "x-hasura-default-role": "user",
+    "x-hasura-allowed-roles": ["user", "admin"],
+    "x-hasura-user-id": "42"
+  }
+}
+```
+
+## Custom Queries
+
+Define SQL-backed operations in `api_config.yaml`:
+
+```yaml
+custom_queries:
+  - name: userWithStats
+    type: query
+    sql: |
+      SELECT u.id, u.username,
+        (SELECT count(*) FROM orders WHERE user_id = u.id) as order_count
+      FROM users u WHERE u.id = $1
+    params:
+      - name: userId
+        type: uuid
+    returns: UserWithStats
+    permissions:
+      - role: admin
+      - role: user
+        filter:
+          id:
+            _eq: X-Hasura-User-Id
+```
+
+## Event Triggers
+
+Capture database changes and deliver webhooks with at-least-once semantics:
+
+```yaml
+# In table config YAML
+event_triggers:
+  - name: user_created
+    definition:
+      insert:
+        columns: "*"
+    webhook: https://api.example.com/hooks/user-created
+    retry_conf:
+      num_retries: 5
+      retry_interval_seconds: 15
+      timeout_seconds: 60
+    headers:
+      - name: x-webhook-secret
+        value_from_env: WEBHOOK_SECRET
+```
+
+Events follow the **transactional outbox pattern**: PG triggers write to `hakkyra.event_log` in the same transaction as the data change, then the job queue delivers the webhook with exponential backoff retry.
+
+This means events are captured reliably even if the server is down — the PG trigger and `event_log` insert happen entirely within PostgreSQL. When the server starts back up, it catches up on all pending events automatically. Delivery is at-least-once: events are marked `processing` before webhook delivery and updated to `delivered` or retried on failure.
+
+The job queue backend is pluggable — pg-boss (default, PostgreSQL-based) or BullMQ (optional, requires Redis). See [Job Queue](#job-queue) for configuration.
+
+## Cron Triggers
+
+Schedule recurring webhook invocations:
+
+```yaml
+# cron_triggers.yaml
+- name: daily_cleanup
+  webhook: https://api.example.com/cron/cleanup
+  schedule: "0 3 * * *"
+  payload:
+    action: cleanup
+  retry_conf:
+    num_retries: 3
+    retry_interval_seconds: 60
+```
+
+## CLI
+
+```
+hakkyra [options]
+
+Options:
+  --port <number>      Server port (default: 3000)
+  --host <string>      Server host (default: 0.0.0.0)
+  --config <path>      Path to hakkyra.yaml (default: ./hakkyra.yaml)
+  --metadata <path>    Path to metadata directory (default: ./metadata)
+  --dev                Enable dev mode with config hot reload
+  --help, -h           Show help
+```
+
+## Architecture
+
+```
+HTTP/WS ─► Fastify ─► Auth Hook ─► Permission Compiler
+                         │
+              ┌──────────┴──────────┐
+              │    Schema Engine    │
+              │  GraphQL  │  REST   │
+              └──────┬────┴────┬────┘
+                     └────┬────┘
+                  SQL Query Compiler
+                          │
+                 Connection Manager
+               ┌──────────┼──────────┐
+             Primary    Replica    Replica
+```
+
+All queries — GraphQL and REST — compile to a single parameterized SQL statement using `json_build_object` for response shaping. Relationships are resolved via correlated subqueries, not N+1 queries.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| HTTP Server | Fastify 5 |
+| GraphQL | Mercurius (with graphql-jit) |
+| WebSocket | graphql-ws protocol |
+| JWT | jose |
+| PostgreSQL | pg (node-postgres) |
+| Job Queue | pg-boss (default) or BullMQ (optional, requires Redis) |
+| DB Notifications | pg-listen |
+| Config | js-yaml with `!include` support |
+
+## Development
+
+```bash
+npm install
+docker compose up -d        # start PostgreSQL
+npm test                    # run tests (250 tests, 9 suites)
+npm run typecheck           # type-check without emitting
+npm run build               # compile TypeScript
+```
+
+## Name
+
+*Häkkyrä* (Finnish): a thingy, contraption, or gadget — an indefinable or convoluted-looking device. *"Kummallinen rautalankahäkkyrä."*
+
+## License
+
+MIT
