@@ -1,0 +1,60 @@
+# REST endpoints mapping to allowed queries in the collection
+- name: get_client_by_id
+  url: /api/v1/client/:id
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: GetClientById
+  comment: "Get a single client by UUID"
+
+- name: list_clients
+  url: /api/v1/clients
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: ListClients
+  comment: "List clients with pagination"
+
+- name: get_client_accounts
+  url: /api/v1/client/:clientId/accounts
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: GetClientAccounts
+  comment: "Get all accounts for a client"
+
+- name: list_invoices
+  url: /api/v1/invoices
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: ListInvoices
+  comment: "List invoices with filters"
+
+- name: get_client_summary
+  url: /api/v1/client/:clientId/summary
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: GetClientSummary
+  comment: "Get client summary from materialized view"
+
+- name: list_active_service_plans
+  url: /api/v1/service-plans/active
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: ListActiveServicePlans
+  comment: "List all active service plans"

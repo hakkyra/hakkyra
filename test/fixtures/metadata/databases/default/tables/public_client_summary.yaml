@@ -1,0 +1,48 @@
+table:
+  schema: public
+  name: client_summary
+
+configuration:
+  custom_root_fields:
+    select: clientSummaries
+    select_aggregate: clientSummariesAggregate
+  custom_column_names:
+    client_id: clientId
+    branch_id: branchId
+    total_balance: totalBalance
+    deposit_count: depositCount
+    total_deposits: totalDeposits
+    total_appointments: totalAppointments
+    created_at: createdAt
+  comment: "Materialized view for optimized client summary queries"
+
+object_relationships:
+  - name: client
+    using:
+      manual_configuration:
+        remote_table:
+          schema: public
+          name: client
+        column_mapping:
+          client_id: id
+  - name: branch
+    using:
+      manual_configuration:
+        remote_table:
+          schema: public
+          name: branch
+        column_mapping:
+          branch_id: id
+
+select_permissions:
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true

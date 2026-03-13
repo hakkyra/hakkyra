@@ -1,0 +1,54 @@
+table:
+  schema: public
+  name: user
+
+configuration:
+  custom_column_names:
+    role_id: roleId
+    created_at: createdAt
+
+object_relationships:
+  - name: role
+    using:
+      foreign_key_constraint_on: role_id
+
+select_permissions:
+  - role: backoffice
+    permission:
+      columns:
+        - id
+        - email
+        - name
+        - active
+        - created_at
+      filter: {}
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+insert_permissions:
+  - role: administrator
+    permission:
+      columns:
+        - email
+        - name
+        - role_id
+        - active
+      check: {}
+
+update_permissions:
+  - role: administrator
+    permission:
+      columns:
+        - name
+        - role_id
+        - active
+      filter: {}
+
+delete_permissions:
+  - role: administrator
+    permission:
+      filter: {}

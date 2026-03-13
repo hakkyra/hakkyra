@@ -1,0 +1,87 @@
+table:
+  schema: public
+  name: client_data
+
+configuration:
+  custom_column_names:
+    client_id: clientId
+    created_at: createdAt
+
+object_relationships:
+  - name: client
+    using:
+      foreign_key_constraint_on: client_id
+
+select_permissions:
+  - role: client
+    permission:
+      columns:
+        - id
+        - key
+        - value
+        - created_at
+      filter:
+        client_id:
+          _eq: X-Hasura-User-Id
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+  - role: function
+    permission:
+      columns: "*"
+      filter:
+        client_id:
+          _eq: X-Hasura-Client-Id
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+insert_permissions:
+  - role: client
+    permission:
+      columns:
+        - key
+        - value
+      check:
+        client_id:
+          _eq: X-Hasura-User-Id
+      set:
+        client_id: X-Hasura-User-Id
+
+  - role: backoffice
+    permission:
+      columns:
+        - client_id
+        - key
+        - value
+      check: {}
+
+update_permissions:
+  - role: client
+    permission:
+      columns:
+        - value
+      filter:
+        client_id:
+          _eq: X-Hasura-User-Id
+
+  - role: backoffice
+    permission:
+      columns:
+        - value
+      filter: {}
+
+delete_permissions:
+  - role: backoffice
+    permission:
+      filter: {}
+
+  - role: administrator
+    permission:
+      filter: {}

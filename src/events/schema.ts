@@ -1,0 +1,53 @@
+/**
+ * Event trigger database schema.
+ *
+ * Creates the hakkyra schema and event_log table used by the
+ * outbox pattern for reliable event delivery.
+ */
+
+import type { Pool } from 'pg';
+
+/**
+ * SQL to create the hakkyra schema and event_log table.
+ */
+const CREATE_SCHEMA_SQL = `CREATE SCHEMA IF NOT EXISTS hakkyra`;
+
+const CREATE_EVENT_LOG_SQL = `
+CREATE TABLE IF NOT EXISTS hakkyra.event_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trigger_name TEXT NOT NULL,
+  table_schema TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  old_data JSONB,
+  new_data JSONB,
+  session_vars JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  delivered_at TIMESTAMPTZ,
+  retry_count INTEGER DEFAULT 0,
+  next_retry TIMESTAMPTZ DEFAULT now(),
+  status TEXT DEFAULT 'pending',
+  last_error TEXT,
+  response_status INTEGER
+)
+`;
+
+const CREATE_INDEXES_SQL = `
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_event_log_status') THEN
+    CREATE INDEX idx_event_log_status ON hakkyra.event_log(status, next_retry);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_event_log_trigger') THEN
+    CREATE INDEX idx_event_log_trigger ON hakkyra.event_log(trigger_name);
+  END IF;
+END $$
+`;
+
+/**
+ * Ensure the hakkyra schema and event_log table exist.
+ */
+export async function ensureEventSchema(pool: Pool): Promise<void> {
+  await pool.query(CREATE_SCHEMA_SQL);
+  await pool.query(CREATE_EVENT_LOG_SQL);
+  await pool.query(CREATE_INDEXES_SQL);
+}

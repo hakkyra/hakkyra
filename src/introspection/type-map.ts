@@ -1,0 +1,167 @@
+/**
+ * Maps PostgreSQL type names to GraphQL scalar type names.
+ */
+
+/** GraphQL scalar names used in schema generation. */
+export type GraphQLScalarName =
+  | 'Int'
+  | 'Float'
+  | 'String'
+  | 'Boolean'
+  | 'BigInt'
+  | 'BigDecimal'
+  | 'UUID'
+  | 'JSON'
+  | 'DateTime'
+  | 'Date'
+  | 'Time'
+  | 'Interval'
+  | 'Bytea'
+  | 'Inet';
+
+export interface GraphQLTypeName {
+  /** The base scalar or enum name, e.g. "Int", "String", "MyEnum" */
+  name: string;
+  /** Whether this is a list type, e.g. [String] */
+  isList: boolean;
+  /** Whether this is a custom scalar (not built-in GraphQL) */
+  isCustomScalar: boolean;
+}
+
+/**
+ * Mapping from PostgreSQL udt_name (without leading underscore for arrays)
+ * to GraphQL scalar name and whether it's custom.
+ */
+const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> = {
+  // Integer types
+  int2: { name: 'Int', isCustomScalar: false },
+  int4: { name: 'Int', isCustomScalar: false },
+  serial: { name: 'Int', isCustomScalar: false },
+  serial4: { name: 'Int', isCustomScalar: false },
+
+  // Big integer
+  int8: { name: 'BigInt', isCustomScalar: true },
+  bigserial: { name: 'BigInt', isCustomScalar: true },
+  serial8: { name: 'BigInt', isCustomScalar: true },
+
+  // Floating point
+  float4: { name: 'Float', isCustomScalar: false },
+  float8: { name: 'Float', isCustomScalar: false },
+  numeric: { name: 'BigDecimal', isCustomScalar: true },
+  money: { name: 'BigDecimal', isCustomScalar: true },
+
+  // Boolean
+  bool: { name: 'Boolean', isCustomScalar: false },
+
+  // String types
+  text: { name: 'String', isCustomScalar: false },
+  varchar: { name: 'String', isCustomScalar: false },
+  char: { name: 'String', isCustomScalar: false },
+  bpchar: { name: 'String', isCustomScalar: false },
+  name: { name: 'String', isCustomScalar: false },
+  citext: { name: 'String', isCustomScalar: false },
+  xml: { name: 'String', isCustomScalar: false },
+
+  // UUID
+  uuid: { name: 'UUID', isCustomScalar: true },
+
+  // JSON
+  json: { name: 'JSON', isCustomScalar: true },
+  jsonb: { name: 'JSON', isCustomScalar: true },
+
+  // Timestamps & dates
+  timestamp: { name: 'DateTime', isCustomScalar: true },
+  timestamptz: { name: 'DateTime', isCustomScalar: true },
+  date: { name: 'Date', isCustomScalar: true },
+  time: { name: 'Time', isCustomScalar: true },
+  timetz: { name: 'Time', isCustomScalar: true },
+  interval: { name: 'Interval', isCustomScalar: true },
+
+  // Binary
+  bytea: { name: 'Bytea', isCustomScalar: true },
+
+  // Network
+  inet: { name: 'Inet', isCustomScalar: true },
+  cidr: { name: 'Inet', isCustomScalar: true },
+  macaddr: { name: 'String', isCustomScalar: false },
+
+  // Geometric (expose as JSON for now)
+  point: { name: 'JSON', isCustomScalar: true },
+  line: { name: 'JSON', isCustomScalar: true },
+  lseg: { name: 'JSON', isCustomScalar: true },
+  box: { name: 'JSON', isCustomScalar: true },
+  path: { name: 'JSON', isCustomScalar: true },
+  polygon: { name: 'JSON', isCustomScalar: true },
+  circle: { name: 'JSON', isCustomScalar: true },
+
+  // OID
+  oid: { name: 'Int', isCustomScalar: false },
+};
+
+/**
+ * Map a PostgreSQL type to a GraphQL type name.
+ *
+ * @param pgType   - The PostgreSQL udt_name (e.g. "int4", "varchar", "my_enum").
+ *                   Array types have a leading underscore stripped by the caller
+ *                   before passing.
+ * @param isArray  - Whether the column is an array type.
+ * @param enumNames - Set of known enum type names, so we can map them correctly.
+ */
+export function pgTypeToGraphQL(
+  pgType: string,
+  isArray: boolean,
+  enumNames?: Set<string>,
+): GraphQLTypeName {
+  // Strip leading underscore from array element type (PG convention: _int4 => int4)
+  const baseType = pgType.startsWith('_') ? pgType.slice(1) : pgType;
+
+  // Check if it's a known enum
+  if (enumNames?.has(baseType)) {
+    return {
+      name: pgEnumToGraphQLName(baseType),
+      isList: isArray,
+      isCustomScalar: false, // enums are not scalars, they're enum types
+    };
+  }
+
+  const mapping = PG_TO_GRAPHQL[baseType];
+  if (mapping) {
+    return {
+      name: mapping.name,
+      isList: isArray,
+      isCustomScalar: mapping.isCustomScalar,
+    };
+  }
+
+  // Unknown type — fall back to String
+  return {
+    name: 'String',
+    isList: isArray,
+    isCustomScalar: false,
+  };
+}
+
+/**
+ * Convert a PostgreSQL enum type name to a GraphQL enum name.
+ * Converts snake_case to PascalCase, e.g. "user_role" → "UserRole".
+ */
+export function pgEnumToGraphQLName(pgName: string): string {
+  return pgName
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join('');
+}
+
+/**
+ * Returns the set of all custom scalar names used in the type map.
+ * Useful for registering custom scalars in the GraphQL schema.
+ */
+export function getCustomScalarNames(): Set<string> {
+  const scalars = new Set<string>();
+  for (const mapping of Object.values(PG_TO_GRAPHQL)) {
+    if (mapping.isCustomScalar) {
+      scalars.add(mapping.name);
+    }
+  }
+  return scalars;
+}

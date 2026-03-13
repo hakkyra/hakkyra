@@ -1,0 +1,223 @@
+table:
+  schema: public
+  name: client
+
+configuration:
+  custom_root_fields:
+    select: clients
+    select_by_pk: clientByPk
+    select_aggregate: clientsAggregate
+    insert: insertClients
+    insert_one: insertClient
+    update: updateClients
+    update_by_pk: updateClientByPk
+    delete: deleteClients
+    delete_by_pk: deleteClientByPk
+  custom_column_names:
+    id: id
+    username: username
+    email: email
+    status: status
+    branch_id: branchId
+    currency_id: currencyId
+    country_id: countryId
+    language_id: languageId
+    trust_level: trustLevel
+    on_hold: onHold
+    tags: tags
+    metadata: metadata
+    last_contact_at: lastContactAt
+    created_at: createdAt
+    updated_at: updatedAt
+  comment: "Core client entity with custom naming"
+
+object_relationships:
+  - name: branch
+    using:
+      foreign_key_constraint_on: branch_id
+  - name: currency
+    using:
+      foreign_key_constraint_on: currency_id
+  - name: country
+    using:
+      foreign_key_constraint_on: country_id
+  - name: language
+    using:
+      foreign_key_constraint_on: language_id
+
+array_relationships:
+  - name: accounts
+    using:
+      foreign_key_constraint_on:
+        column: client_id
+        table:
+          schema: public
+          name: account
+  - name: invoices
+    using:
+      foreign_key_constraint_on:
+        column: client_id
+        table:
+          schema: public
+          name: invoice
+  - name: ledgerEntries
+    using:
+      foreign_key_constraint_on:
+        column: client_id
+        table:
+          schema: public
+          name: ledger_entry
+  - name: clientData
+    using:
+      foreign_key_constraint_on:
+        column: client_id
+        table:
+          schema: public
+          name: client_data
+  - name: appointments
+    using:
+      foreign_key_constraint_on:
+        column: client_id
+        table:
+          schema: public
+          name: appointment
+  - name: servicePlanClients
+    using:
+      foreign_key_constraint_on:
+        column: client_id
+        table:
+          schema: public
+          name: service_plan_client
+  - name: clientServices
+    using:
+      foreign_key_constraint_on:
+        column: client_id
+        table:
+          schema: public
+          name: client_service
+
+select_permissions:
+  - role: client
+    permission:
+      columns:
+        - id
+        - username
+        - email
+        - status
+        - branch_id
+        - currency_id
+        - country_id
+        - language_id
+        - trust_level
+        - tags
+        - last_contact_at
+        - created_at
+      filter:
+        id:
+          _eq: X-Hasura-User-Id
+      computed_fields:
+        - total_balance
+    comment: "Clients can only see their own profile"
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+      computed_fields:
+        - total_balance
+    comment: "Backoffice can see all clients with aggregations"
+
+  - role: function
+    permission:
+      columns:
+        - id
+        - username
+        - email
+        - status
+        - branch_id
+        - currency_id
+        - country_id
+        - language_id
+        - trust_level
+        - on_hold
+        - tags
+        - metadata
+      filter:
+        id:
+          _eq: X-Hasura-Client-Id
+      computed_fields:
+        - total_balance
+    comment: "Function role for backend service calls, scoped to single client"
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+      computed_fields:
+        - total_balance
+
+insert_permissions:
+  - role: backoffice
+    permission:
+      columns:
+        - username
+        - email
+        - branch_id
+        - currency_id
+        - country_id
+        - language_id
+        - tags
+        - metadata
+      check:
+        branch_id:
+          _is_null: false
+      set:
+        status: active
+        trust_level: "0"
+    comment: "Backoffice creates clients with status preset to active"
+
+  - role: administrator
+    permission:
+      columns: "*"
+      check: {}
+
+update_permissions:
+  - role: client
+    permission:
+      columns:
+        - language_id
+        - currency_id
+      filter:
+        id:
+          _eq: X-Hasura-User-Id
+      check:
+        _and:
+          - status:
+              _eq: active
+          - on_hold:
+              _eq: false
+    comment: "Clients can only update their own language and currency preferences"
+
+  - role: backoffice
+    permission:
+      columns:
+        - status
+        - trust_level
+        - on_hold
+        - tags
+        - metadata
+        - country_id
+      filter: {}
+    comment: "Backoffice can update client status, trust level, and hold state"
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+delete_permissions:
+  - role: administrator
+    permission:
+      filter: {}

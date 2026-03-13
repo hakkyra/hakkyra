@@ -1,0 +1,12 @@
+- name: default
+  kind: postgres
+  configuration:
+    connection_info:
+      database_url:
+        from_env: DATABASE_URL
+      pool_settings:
+        max_connections: 10
+        idle_timeout: 180
+        retries: 1
+      use_prepared_statements: true
+  tables: !include default/tables/tables.yaml

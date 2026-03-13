@@ -1,0 +1,125 @@
+table:
+  schema: public
+  name: service_plan
+
+configuration:
+  custom_column_names:
+    branch_id: branchId
+    review_schedule: reviewSchedule
+    start_at: startAt
+    end_at: endAt
+    created_at: createdAt
+    updated_at: updatedAt
+
+object_relationships:
+  - name: branch
+    using:
+      foreign_key_constraint_on: branch_id
+
+array_relationships:
+  - name: planItems
+    using:
+      foreign_key_constraint_on:
+        column: service_plan_id
+        table:
+          schema: public
+          name: plan_item
+  - name: servicePlanClients
+    using:
+      foreign_key_constraint_on:
+        column: service_plan_id
+        table:
+          schema: public
+          name: service_plan_client
+
+select_permissions:
+  - role: client
+    permission:
+      columns:
+        - id
+        - name
+        - state
+        - start_at
+        - end_at
+      filter:
+        _and:
+          - state:
+              _eq: active
+          - branch_id:
+              _eq: X-Hasura-Branch-Id
+    comment: "Clients can only see active service plans for their branch"
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+insert_permissions:
+  - role: backoffice
+    permission:
+      columns:
+        - name
+        - branch_id
+        - review_schedule
+        - start_at
+        - end_at
+        - config
+      check: {}
+      set:
+        state: draft
+
+  - role: administrator
+    permission:
+      columns: "*"
+      check: {}
+
+update_permissions:
+  - role: backoffice
+    permission:
+      columns:
+        - name
+        - state
+        - review_schedule
+        - start_at
+        - end_at
+        - config
+      filter:
+        state:
+          _nin:
+            - completed
+            - cancelled
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+delete_permissions:
+  - role: administrator
+    permission:
+      filter:
+        state:
+          _eq: draft
+
+event_triggers:
+  - name: plan_state_changed
+    definition:
+      enable_manual: true
+      update:
+        columns:
+          - state
+    retry_conf:
+      interval_sec: 10
+      num_retries: 3
+      timeout_sec: 60
+    webhook: "{{TEST_SERVER_URL}}/webhooks/plan-state-changed"
+    headers:
+      - name: x-webhook-secret
+        value_from_env: WEBHOOK_SECRET

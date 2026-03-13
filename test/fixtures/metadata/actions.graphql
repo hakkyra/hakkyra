@@ -1,0 +1,104 @@
+# ── Action: createPayment ──────────────────────────────────────────────────────
+type Mutation {
+  createPayment(input: CreatePaymentInput!): PaymentResult
+}
+
+input CreatePaymentInput {
+  amount: Float!
+  currencyId: String!
+  provider: String
+  returnUrl: String
+}
+
+type PaymentResult {
+  invoiceId: uuid!
+  redirectUrl: String
+  status: String!
+}
+
+# ── Action: adjustAccount ──────────────────────────────────────────────────────
+extend type Mutation {
+  adjustAccount(input: AdjustAccountInput!): AdjustAccountResult
+}
+
+input AdjustAccountInput {
+  clientId: uuid!
+  amount: Float!
+  currencyId: String!
+  reason: String!
+  type: String!
+}
+
+type AdjustAccountResult {
+  ledgerEntryId: uuid!
+  newBalance: Float!
+  success: Boolean!
+}
+
+# ── Action: requestVerification ────────────────────────────────────────────────
+extend type Mutation {
+  requestVerification(input: RequestVerificationInput!): VerificationRequestResult
+}
+
+input RequestVerificationInput {
+  documentType: String!
+  documentCountry: String!
+}
+
+type VerificationRequestResult {
+  requestId: uuid!
+  status: String!
+  verificationUrl: String
+}
+
+# ── Action: checkDiscountEligibility ───────────────────────────────────────────
+type Query {
+  checkDiscountEligibility(input: CheckDiscountEligibilityInput!): DiscountEligibilityResult
+}
+
+input CheckDiscountEligibilityInput {
+  servicePlanId: uuid!
+  clientId: uuid
+}
+
+type DiscountEligibilityResult {
+  eligible: Boolean!
+  reason: String
+  planName: String!
+  discountType: String
+  discountValue: JSON
+}
+
+# ── Action: scheduleConsultation ───────────────────────────────────────────────
+extend type Mutation {
+  scheduleConsultation(input: ScheduleConsultationInput!): ScheduleConsultationResult
+}
+
+input ScheduleConsultationInput {
+  productCode: String!
+  mode: String
+  returnUrl: String
+}
+
+type ScheduleConsultationResult {
+  appointmentId: uuid!
+  confirmationUrl: String!
+  reference: String!
+  expiresAt: DateTime
+}
+
+# ── Action: processService ─────────────────────────────────────────────────────
+extend type Mutation {
+  processService(input: ProcessServiceInput!): ProcessServiceResult
+}
+
+input ProcessServiceInput {
+  clientServiceId: uuid!
+  action: String!
+}
+
+type ProcessServiceResult {
+  success: Boolean!
+  newStatus: String!
+  amountApplied: Float
+}

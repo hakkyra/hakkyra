@@ -1,0 +1,175 @@
+table:
+  schema: public
+  name: invoice
+
+configuration:
+  custom_column_names:
+    client_id: clientId
+    account_id: accountId
+    currency_id: currencyId
+    external_id: externalId
+    created_at: createdAt
+    updated_at: updatedAt
+
+object_relationships:
+  - name: client
+    using:
+      foreign_key_constraint_on: client_id
+  - name: account
+    using:
+      foreign_key_constraint_on: account_id
+  - name: currency
+    using:
+      foreign_key_constraint_on: currency_id
+
+array_relationships:
+  - name: ledgerEntries
+    using:
+      foreign_key_constraint_on:
+        column: invoice_id
+        table:
+          schema: public
+          name: ledger_entry
+
+select_permissions:
+  - role: client
+    permission:
+      columns:
+        - id
+        - client_id
+        - currency_id
+        - amount
+        - state
+        - type
+        - provider
+        - created_at
+      filter:
+        client_id:
+          _eq: X-Hasura-User-Id
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+  - role: function
+    permission:
+      columns: "*"
+      filter:
+        client_id:
+          _eq: X-Hasura-Client-Id
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+insert_permissions:
+  - role: function
+    permission:
+      columns:
+        - client_id
+        - account_id
+        - currency_id
+        - amount
+        - type
+        - provider
+        - external_id
+        - metadata
+      check:
+        _and:
+          - amount:
+              _gt: 0
+          - client:
+              status:
+                _eq: active
+      set:
+        state: draft
+    backend_only: true
+
+  - role: backoffice
+    permission:
+      columns:
+        - client_id
+        - account_id
+        - currency_id
+        - amount
+        - type
+        - provider
+        - external_id
+        - metadata
+      check: {}
+
+  - role: administrator
+    permission:
+      columns: "*"
+      check: {}
+
+update_permissions:
+  - role: function
+    permission:
+      columns:
+        - state
+        - metadata
+        - updated_at
+      filter:
+        state:
+          _in:
+            - draft
+            - sent
+      check:
+        state:
+          _in:
+            - draft
+            - sent
+            - paid
+            - overdue
+            - cancelled
+
+  - role: backoffice
+    permission:
+      columns:
+        - state
+        - metadata
+      filter:
+        state:
+          _ne: paid
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+event_triggers:
+  - name: invoice_created
+    definition:
+      enable_manual: true
+      insert:
+        columns: "*"
+    retry_conf:
+      interval_sec: 15
+      num_retries: 5
+      timeout_sec: 60
+    webhook: "{{TEST_SERVER_URL}}/webhooks/invoice-created"
+    headers:
+      - name: x-webhook-secret
+        value_from_env: WEBHOOK_SECRET
+
+  - name: invoice_state_changed
+    definition:
+      enable_manual: false
+      update:
+        columns:
+          - state
+    retry_conf:
+      interval_sec: 10
+      num_retries: 3
+      timeout_sec: 30
+    webhook: "{{TEST_SERVER_URL}}/webhooks/invoice-state-changed"
+    headers:
+      - name: x-webhook-secret
+        value_from_env: WEBHOOK_SECRET
+      - name: x-source
+        value: hakkyra-test

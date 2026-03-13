@@ -1,0 +1,26 @@
+# Hakkyra test server configuration
+
+server:
+  port: 0        # 0 = auto-assign (for parallel test runs)
+  host: 127.0.0.1
+
+auth:
+  jwt:
+    type: HS256
+    key: test-secret-key-minimum-32-chars!!
+    claims_namespace: https://hasura.io/jwt/claims
+    audience: hakkyra-test
+    issuer: hakkyra-test-suite
+  admin_secret_from_env: HAKKYRA_ADMIN_SECRET
+  unauthorized_role: anonymous
+
+databases:
+  primary:
+    url_from_env: DATABASE_URL
+    pool:
+      max: 5
+      idle_timeout: 30
+      connection_timeout: 5
+  read_your_writes:
+    enabled: true
+    window_seconds: 2

@@ -1,0 +1,98 @@
+table:
+  schema: public
+  name: service_plan_client
+
+configuration:
+  custom_column_names:
+    service_plan_id: servicePlanId
+    client_id: clientId
+    enrolled_at: enrolledAt
+
+object_relationships:
+  - name: servicePlan
+    using:
+      foreign_key_constraint_on: service_plan_id
+  - name: client
+    using:
+      foreign_key_constraint_on: client_id
+
+array_relationships:
+  - name: clientServices
+    using:
+      foreign_key_constraint_on:
+        column: service_plan_client_id
+        table:
+          schema: public
+          name: client_service
+
+select_permissions:
+  - role: client
+    permission:
+      columns:
+        - id
+        - service_plan_id
+        - state
+        - enrolled_at
+      filter:
+        client_id:
+          _eq: X-Hasura-User-Id
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+  - role: function
+    permission:
+      columns: "*"
+      filter:
+        client_id:
+          _eq: X-Hasura-Client-Id
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+insert_permissions:
+  - role: function
+    permission:
+      columns:
+        - service_plan_id
+        - client_id
+        - state
+      check:
+        servicePlan:
+          state:
+            _eq: active
+    backend_only: true
+
+  - role: backoffice
+    permission:
+      columns:
+        - service_plan_id
+        - client_id
+        - state
+      check: {}
+
+update_permissions:
+  - role: function
+    permission:
+      columns:
+        - state
+      filter:
+        client_id:
+          _eq: X-Hasura-Client-Id
+
+  - role: backoffice
+    permission:
+      columns:
+        - state
+      filter: {}
+
+delete_permissions:
+  - role: administrator
+    permission:
+      filter: {}

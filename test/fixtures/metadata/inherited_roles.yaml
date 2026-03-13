@@ -1,0 +1,18 @@
+# backoffice_admin inherits both backoffice and administrator permissions
+# This means it gets the union of both permission sets
+- role_name: backoffice_admin
+  role_set:
+    - backoffice
+    - administrator
+
+# support inherits backoffice permissions only
+# Support agents get the same view as backoffice but with a distinct role name
+- role_name: support
+  role_set:
+    - backoffice
+
+# auditor inherits backoffice for read access + function for broader visibility
+- role_name: auditor
+  role_set:
+    - backoffice
+    - function

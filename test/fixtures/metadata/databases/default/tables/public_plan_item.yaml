@@ -1,0 +1,92 @@
+table:
+  schema: public
+  name: plan_item
+
+configuration:
+  custom_column_names:
+    service_plan_id: servicePlanId
+    created_at: createdAt
+
+object_relationships:
+  - name: servicePlan
+    using:
+      foreign_key_constraint_on: service_plan_id
+
+array_relationships:
+  - name: clientServices
+    using:
+      foreign_key_constraint_on:
+        column: plan_item_id
+        table:
+          schema: public
+          name: client_service
+
+select_permissions:
+  - role: client
+    permission:
+      columns:
+        - id
+        - name
+        - type
+        - value
+      filter:
+        servicePlan:
+          state:
+            _eq: active
+    comment: "Clients can see plan items for active service plans only"
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+insert_permissions:
+  - role: backoffice
+    permission:
+      columns:
+        - service_plan_id
+        - name
+        - type
+        - value
+      check:
+        servicePlan:
+          state:
+            _in:
+              - draft
+              - scheduled
+
+  - role: administrator
+    permission:
+      columns: "*"
+      check: {}
+
+update_permissions:
+  - role: backoffice
+    permission:
+      columns:
+        - name
+        - type
+        - value
+      filter:
+        servicePlan:
+          state:
+            _in:
+              - draft
+              - scheduled
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+delete_permissions:
+  - role: administrator
+    permission:
+      filter: {}

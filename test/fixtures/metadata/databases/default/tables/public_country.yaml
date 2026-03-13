@@ -1,0 +1,21 @@
+table:
+  schema: public
+  name: country
+
+select_permissions:
+  - role: anonymous
+    permission:
+      columns: "*"
+      filter: {}
+  - role: client
+    permission:
+      columns: "*"
+      filter: {}
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}

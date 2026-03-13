@@ -1,0 +1,71 @@
+# Every-minute trigger: check for expired services
+- name: check_expired_services
+  webhook: "{{TEST_SERVER_URL}}/cron/check-expired-services"
+  schedule: "* * * * *"
+  payload:
+    action: expire_services
+  retry_conf:
+    num_retries: 2
+    retry_interval_seconds: 30
+    timeout_seconds: 60
+  headers:
+    - name: x-cron-secret
+      value_from_env: CRON_SECRET
+  include_in_metadata: true
+  comment: "Check and expire services past their expiration date"
+
+# Daily trigger: generate client activity summary
+- name: daily_client_summary_refresh
+  webhook: "{{TEST_SERVER_URL}}/cron/refresh-client-summary"
+  schedule: "0 3 * * *"
+  payload:
+    action: refresh_materialized_view
+    view: client_summary
+  retry_conf:
+    num_retries: 3
+    retry_interval_seconds: 60
+    timeout_seconds: 300
+  headers:
+    - name: x-cron-secret
+      value_from_env: CRON_SECRET
+  include_in_metadata: true
+  comment: "Refresh client_summary materialized view daily at 03:00 UTC"
+
+# Weekly trigger: service plan cleanup with payload
+- name: weekly_plan_cleanup
+  webhook: "{{TEST_SERVER_URL}}/cron/plan-cleanup"
+  schedule: "0 4 * * 1"
+  payload:
+    action: cleanup_plans
+    max_age_days: 90
+    states:
+      - completed
+      - cancelled
+    archive: true
+  retry_conf:
+    num_retries: 1
+    retry_interval_seconds: 120
+    timeout_seconds: 600
+    tolerance_seconds: 3600
+  headers:
+    - name: x-cron-secret
+      value_from_env: CRON_SECRET
+  include_in_metadata: true
+  comment: "Weekly cleanup of old completed/cancelled service plans on Monday 04:00 UTC"
+
+# Hourly trigger: invoice reconciliation
+- name: hourly_invoice_reconciliation
+  webhook: "{{TEST_SERVER_URL}}/cron/reconcile-invoices"
+  schedule: "0 * * * *"
+  payload:
+    action: reconcile
+    lookback_minutes: 120
+  retry_conf:
+    num_retries: 3
+    retry_interval_seconds: 60
+    timeout_seconds: 120
+  headers:
+    - name: x-cron-secret
+      value_from_env: CRON_SECRET
+  include_in_metadata: true
+  comment: "Hourly reconciliation of draft invoices older than 2 hours"

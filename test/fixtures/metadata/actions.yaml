@@ -1,0 +1,99 @@
+actions:
+  # Sync mutation: client makes a payment
+  - name: createPayment
+    definition:
+      kind: synchronous
+      handler: "{{TEST_SERVER_URL}}/actions/create-payment"
+      forward_client_headers: true
+      timeout: 30
+      headers:
+        - name: x-internal-secret
+          value_from_env: ACTION_SECRET
+    permissions:
+      - role: client
+    comment: "Client initiates a payment via payment provider"
+
+  # Sync mutation: admin-only action to adjust account balance
+  - name: adjustAccount
+    definition:
+      kind: synchronous
+      handler: "{{TEST_SERVER_URL}}/actions/adjust-account"
+      forward_client_headers: false
+      timeout: 15
+      headers:
+        - name: x-internal-secret
+          value_from_env: ACTION_SECRET
+    permissions:
+      - role: administrator
+      - role: backoffice
+    comment: "Admin/backoffice manual account balance adjustment"
+
+  # Async mutation: trigger identity verification process
+  - name: requestVerification
+    definition:
+      kind: asynchronous
+      handler: "{{TEST_SERVER_URL}}/actions/request-verification"
+      forward_client_headers: true
+      timeout: 120
+    permissions:
+      - role: client
+      - role: backoffice
+    comment: "Async identity verification - result delivered via webhook"
+
+  # Query action: read-only lookup of client discount eligibility
+  - name: checkDiscountEligibility
+    definition:
+      kind: synchronous
+      handler: "{{TEST_SERVER_URL}}/actions/check-discount-eligibility"
+      forward_client_headers: true
+      type: query
+      timeout: 10
+    permissions:
+      - role: client
+      - role: function
+    comment: "Check if a client is eligible for a specific discount"
+
+  # Sync mutation: multi-role action for scheduling consultation
+  - name: scheduleConsultation
+    definition:
+      kind: synchronous
+      handler: "{{TEST_SERVER_URL}}/actions/schedule-consultation"
+      forward_client_headers: true
+      timeout: 20
+      headers:
+        - name: x-service-key
+          value_from_env: SERVICE_PROVIDER_KEY
+    permissions:
+      - role: client
+    comment: "Schedule a consultation appointment and get confirmation"
+
+  # Sync mutation: backend-only action for service processing
+  - name: processService
+    definition:
+      kind: synchronous
+      handler: "{{TEST_SERVER_URL}}/actions/process-service"
+      forward_client_headers: false
+      timeout: 30
+      headers:
+        - name: x-internal-secret
+          value_from_env: ACTION_SECRET
+    permissions:
+      - role: function
+      - role: administrator
+    comment: "Process a service item - mark as delivered to client"
+
+custom_types:
+  input_objects:
+    - name: CreatePaymentInput
+    - name: AdjustAccountInput
+    - name: RequestVerificationInput
+    - name: CheckDiscountEligibilityInput
+    - name: ScheduleConsultationInput
+    - name: ProcessServiceInput
+  objects:
+    - name: PaymentResult
+    - name: AdjustAccountResult
+    - name: VerificationRequestResult
+    - name: DiscountEligibilityResult
+    - name: ScheduleConsultationResult
+    - name: ProcessServiceResult

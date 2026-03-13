@@ -1,0 +1,104 @@
+/**
+ * Event trigger manager.
+ *
+ * Orchestrates the full event trigger lifecycle:
+ * 1. Create the hakkyra schema and event_log table
+ * 2. Install PG triggers on tables with event trigger configs
+ * 3. Start pg-listen subscriber for NOTIFY signals
+ * 4. Register pg-boss workers for webhook delivery
+ * 5. Catchup: enqueue any pending events from previous runs
+ */
+
+import type { Pool } from 'pg';
+import type { PgBoss } from 'pg-boss';
+import type { Logger } from 'pino';
+import createSubscriber from 'pg-listen';
+import type { TableInfo } from '../types.js';
+import { ensureEventSchema } from './schema.js';
+import { installEventTriggers, removeEventTriggers } from './triggers.js';
+import { enqueuePendingEvents, registerEventWorkers } from './delivery.js';
+
+// ─── Types ─────────────────────────────────────────────────────────────────
+
+export interface EventManager {
+  /** Stop the event system: listener, workers. Does NOT remove PG triggers. */
+  stop(): Promise<void>;
+}
+
+// ─── Initialization ────────────────────────────────────────────────────────
+
+/**
+ * Initialize the event trigger system.
+ *
+ * @param pool - Primary database connection pool
+ * @param boss - pg-boss instance (must already be started)
+ * @param tables - All tracked tables (only those with eventTriggers are processed)
+ * @param connectionString - Connection string for pg-listen
+ * @param logger - Pino logger instance
+ * @returns An EventManager for lifecycle control
+ */
+export async function initEventTriggers(
+  pool: Pool,
+  boss: PgBoss,
+  tables: TableInfo[],
+  connectionString: string,
+  logger: Logger,
+): Promise<EventManager> {
+  const tablesWithEvents = tables.filter((t) => t.eventTriggers.length > 0);
+
+  if (tablesWithEvents.length === 0) {
+    logger.info('No event triggers configured');
+    return { stop: async () => {} };
+  }
+
+  // 1. Ensure schema and event_log table
+  await ensureEventSchema(pool);
+  logger.info('Event log schema ready');
+
+  // 2. Install PG triggers
+  await installEventTriggers(pool, tablesWithEvents);
+  logger.info(
+    { tables: tablesWithEvents.map((t) => `${t.schema}.${t.name}`) },
+    'Event triggers installed',
+  );
+
+  // 3. Register pg-boss workers
+  await registerEventWorkers(boss, pool, tables, logger);
+
+  // 4. Start pg-listen subscriber
+  const subscriber = createSubscriber({ connectionString });
+
+  subscriber.notifications.on('hakkyra_events', async () => {
+    try {
+      await enqueuePendingEvents(pool, boss, logger);
+    } catch (err) {
+      logger.error({ err }, 'Error processing event notification');
+    }
+  });
+
+  subscriber.events.on('error', (err) => {
+    logger.error({ err }, 'pg-listen error');
+  });
+
+  await subscriber.connect();
+  await subscriber.listenTo('hakkyra_events');
+  logger.info('Event listener connected');
+
+  // 5. Catchup: process any pending events from before startup
+  const catchupCount = await enqueuePendingEvents(pool, boss, logger);
+  if (catchupCount > 0) {
+    logger.info({ count: catchupCount }, 'Caught up pending events');
+  }
+
+  const triggerCount = tablesWithEvents.reduce((sum, t) => sum + t.eventTriggers.length, 0);
+  logger.info(
+    { triggers: triggerCount, tables: tablesWithEvents.length },
+    'Event trigger system initialized',
+  );
+
+  return {
+    async stop(): Promise<void> {
+      await subscriber.close();
+    },
+  };
+}

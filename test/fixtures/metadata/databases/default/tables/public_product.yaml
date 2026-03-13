@@ -1,0 +1,92 @@
+table:
+  schema: public
+  name: product
+
+configuration:
+  custom_column_names:
+    supplier_id: supplierId
+    created_at: createdAt
+
+object_relationships:
+  - name: supplier
+    using:
+      foreign_key_constraint_on: supplier_id
+
+array_relationships:
+  - name: appointments
+    using:
+      foreign_key_constraint_on:
+        column: product_id
+        table:
+          schema: public
+          name: appointment
+
+select_permissions:
+  - role: anonymous
+    permission:
+      columns:
+        - id
+        - name
+        - code
+        - category
+        - tags
+        - margin
+      filter:
+        active:
+          _eq: true
+
+  - role: client
+    permission:
+      columns:
+        - id
+        - name
+        - code
+        - category
+        - tags
+        - margin
+        - metadata
+      filter:
+        active:
+          _eq: true
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+
+insert_permissions:
+  - role: administrator
+    permission:
+      columns:
+        - supplier_id
+        - name
+        - code
+        - category
+        - tags
+        - active
+        - margin
+        - metadata
+      check: {}
+
+update_permissions:
+  - role: backoffice
+    permission:
+      columns:
+        - name
+        - category
+        - tags
+        - active
+        - metadata
+      filter: {}
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}

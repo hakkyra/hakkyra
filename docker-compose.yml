@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: hakkyra_test
+      POSTGRES_USER: hakkyra
+      POSTGRES_PASSWORD: hakkyra_test
+    volumes:
+      - ./test/fixtures/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hakkyra -d hakkyra_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 10

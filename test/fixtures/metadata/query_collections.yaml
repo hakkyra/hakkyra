@@ -1,0 +1,119 @@
+- name: allowed_queries
+  definition:
+    queries:
+      - name: GetClientById
+        query: |
+          query GetClientById($id: uuid!) {
+            clientByPk(id: $id) {
+              id
+              username
+              email
+              status
+              trustLevel
+              branchId
+              currencyId
+              countryId
+              createdAt
+              branch {
+                name
+                code
+              }
+              currency {
+                id
+                name
+                symbol
+              }
+            }
+          }
+
+      - name: ListClients
+        query: |
+          query ListClients($limit: Int, $offset: Int, $where: client_bool_exp) {
+            clients(limit: $limit, offset: $offset, where: $where, order_by: {createdAt: desc}) {
+              id
+              username
+              email
+              status
+              trustLevel
+              branchId
+              createdAt
+            }
+            clientsAggregate(where: $where) {
+              aggregate {
+                count
+              }
+            }
+          }
+
+      - name: GetClientAccounts
+        query: |
+          query GetClientAccounts($clientId: uuid!) {
+            account(where: {clientId: {_eq: $clientId}}) {
+              id
+              currencyId
+              balance
+              creditBalance
+              pendingBalance
+              active
+              currency {
+                id
+                name
+                symbol
+              }
+            }
+          }
+
+      - name: ListInvoices
+        query: |
+          query ListInvoices($limit: Int, $offset: Int, $where: invoice_bool_exp) {
+            invoice(limit: $limit, offset: $offset, where: $where, order_by: {createdAt: desc}) {
+              id
+              clientId
+              currencyId
+              amount
+              state
+              type
+              provider
+              createdAt
+              client {
+                username
+              }
+            }
+          }
+
+      - name: GetClientSummary
+        query: |
+          query GetClientSummary($clientId: uuid!) {
+            clientSummaries(where: {clientId: {_eq: $clientId}}) {
+              clientId
+              username
+              branchId
+              status
+              totalBalance
+              paymentCount
+              totalPayments
+              totalAppointments
+              createdAt
+            }
+          }
+
+      - name: ListActiveServicePlans
+        query: |
+          query ListActiveServicePlans($branchId: uuid) {
+            servicePlan(
+              where: {state: {_eq: "active"}, branch_id: {_eq: $branchId}}
+              order_by: {start_at: desc}
+            ) {
+              id
+              name
+              state
+              startAt
+              endAt
+              planItems {
+                id
+                name
+                type
+                details
+              }
+            }
+          }

@@ -1,0 +1,38 @@
+table:
+  schema: public
+  name: role
+
+array_relationships:
+  - name: users
+    using:
+      foreign_key_constraint_on:
+        column: role_id
+        table:
+          schema: public
+          name: user
+
+select_permissions:
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+insert_permissions:
+  - role: administrator
+    permission:
+      columns:
+        - name
+        - description
+      check: {}
+
+update_permissions:
+  - role: administrator
+    permission:
+      columns:
+        - name
+        - description
+      filter: {}

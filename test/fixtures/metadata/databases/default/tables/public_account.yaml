@@ -1,0 +1,116 @@
+table:
+  schema: public
+  name: account
+
+configuration:
+  custom_column_names:
+    client_id: clientId
+    currency_id: currencyId
+    credit_balance: creditBalance
+    pending_balance: pendingBalance
+    created_at: createdAt
+    updated_at: updatedAt
+
+object_relationships:
+  - name: client
+    using:
+      foreign_key_constraint_on: client_id
+  - name: currency
+    using:
+      foreign_key_constraint_on: currency_id
+
+array_relationships:
+  - name: invoices
+    using:
+      foreign_key_constraint_on:
+        column: account_id
+        table:
+          schema: public
+          name: invoice
+  - name: ledgerEntries
+    using:
+      foreign_key_constraint_on:
+        column: account_id
+        table:
+          schema: public
+          name: ledger_entry
+
+select_permissions:
+  - role: client
+    permission:
+      columns:
+        - id
+        - client_id
+        - currency_id
+        - balance
+        - credit_balance
+        - pending_balance
+        - active
+        - created_at
+      filter:
+        client_id:
+          _eq: X-Hasura-User-Id
+      computed_fields:
+        - total
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+      computed_fields:
+        - total
+
+  - role: function
+    permission:
+      columns: "*"
+      filter:
+        client_id:
+          _eq: X-Hasura-Client-Id
+      computed_fields:
+        - total
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+      computed_fields:
+        - total
+
+insert_permissions:
+  - role: function
+    permission:
+      columns:
+        - client_id
+        - currency_id
+        - balance
+        - credit_balance
+      check: {}
+      set:
+        active: "true"
+    backend_only: true
+
+  - role: administrator
+    permission:
+      columns: "*"
+      check: {}
+
+update_permissions:
+  - role: function
+    permission:
+      columns:
+        - balance
+        - credit_balance
+        - pending_balance
+        - active
+      filter:
+        client_id:
+          _eq: X-Hasura-Client-Id
+      set:
+        updated_at: now()
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}

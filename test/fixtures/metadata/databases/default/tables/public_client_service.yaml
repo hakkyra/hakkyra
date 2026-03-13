@@ -1,0 +1,153 @@
+table:
+  schema: public
+  name: client_service
+
+configuration:
+  custom_root_fields:
+    select: clientServices
+    select_by_pk: clientServiceByPk
+    select_aggregate: clientServicesAggregate
+  custom_column_names:
+    client_id: clientId
+    plan_item_id: planItemId
+    service_plan_client_id: servicePlanClientId
+    currency_id: currencyId
+    service_cost: serviceCost
+    amount_paid: amountPaid
+    expires_at: expiresAt
+    created_at: createdAt
+    updated_at: updatedAt
+
+object_relationships:
+  - name: client
+    using:
+      foreign_key_constraint_on: client_id
+  - name: planItem
+    using:
+      foreign_key_constraint_on: plan_item_id
+  - name: servicePlanClient
+    using:
+      foreign_key_constraint_on: service_plan_client_id
+  - name: currency
+    using:
+      foreign_key_constraint_on: currency_id
+
+select_permissions:
+  - role: client
+    permission:
+      columns:
+        - id
+        - plan_item_id
+        - status
+        - amount
+        - service_cost
+        - amount_paid
+        - expires_at
+        - created_at
+      filter:
+        client_id:
+          _eq: X-Hasura-User-Id
+      computed_fields:
+        - outcome
+
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+      computed_fields:
+        - outcome
+
+  - role: function
+    permission:
+      columns: "*"
+      filter:
+        client_id:
+          _eq: X-Hasura-Client-Id
+      computed_fields:
+        - outcome
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+      allow_aggregations: true
+      computed_fields:
+        - outcome
+
+insert_permissions:
+  - role: function
+    permission:
+      columns:
+        - client_id
+        - plan_item_id
+        - service_plan_client_id
+        - currency_id
+        - status
+        - amount
+        - service_cost
+        - amount_paid
+        - expires_at
+      check: {}
+    backend_only: true
+
+  - role: backoffice
+    permission:
+      columns:
+        - client_id
+        - plan_item_id
+        - service_plan_client_id
+        - currency_id
+        - status
+        - amount
+        - service_cost
+        - expires_at
+      check: {}
+      set:
+        amount_paid: "0"
+
+update_permissions:
+  - role: function
+    permission:
+      columns:
+        - status
+        - amount_paid
+        - updated_at
+      filter:
+        _and:
+          - client_id:
+              _eq: X-Hasura-Client-Id
+          - status:
+              _in:
+                - pending
+                - scheduled
+      check:
+        _or:
+          - status:
+              _in:
+                - pending
+                - scheduled
+                - in_progress
+          - _and:
+              - status:
+                  _eq: completed
+              - expires_at:
+                  _lt: now()
+
+  - role: backoffice
+    permission:
+      columns:
+        - status
+        - service_cost
+        - amount_paid
+        - expires_at
+      filter:
+        status:
+          _nin:
+            - completed
+            - cancelled
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
