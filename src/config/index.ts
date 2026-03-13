@@ -1,6 +1,8 @@
 export { loadConfig } from './loader.js';
 export { validateConfig } from './validator.js';
 export type { ValidationResult, ValidationError, ValidationWarning } from './validator.js';
+export { validateEnvironment } from './env.js';
+export type { EnvValidationResult } from './env.js';
 export { IncludeRef } from './types.js';
 export type {
   RawTableYaml,
