@@ -681,6 +681,12 @@ function registerAggregateRoute(
         aggregate.avg = numericCols;
         aggregate.min = numericCols;
         aggregate.max = numericCols;
+        aggregate.stddev = numericCols;
+        aggregate.stddevPop = numericCols;
+        aggregate.stddevSamp = numericCols;
+        aggregate.variance = numericCols;
+        aggregate.varPop = numericCols;
+        aggregate.varSamp = numericCols;
       }
 
       const compiled = compileSelectAggregate({

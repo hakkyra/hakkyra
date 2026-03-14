@@ -9,8 +9,10 @@
  * - <Type>PkColumnsInput    — primary key fields for by_pk operations
  * - <Type>OrderBy           — column ordering input
  * - <Type>MutationResponse  — { affectedRows, returning }
- * - <Type>AggregateFields   — { count, sum, avg, min, max }
+ * - <Type>AggregateFields   — { count, sum, avg, min, max, stddev, stddevPop, stddevSamp, variance, varPop, varSamp }
  * - <Type>SumFields / AvgFields / MinFields / MaxFields
+ * - <Type>StddevFields / StddevPopFields / StddevSampFields
+ * - <Type>VarianceFields / VarPopFields / VarSampFields
  */
 
 import {
@@ -389,6 +391,103 @@ export function buildMutationInputTypes(
     },
   });
 
+  // ── Statistical Aggregate Sub-Fields (Stddev, Variance family) ──────
+  const stddevFields = new GraphQLObjectType({
+    name: `${typeName}StddevFields`,
+    description: `Sample standard deviation aggregate fields for ${typeName}.`,
+    fields: () => {
+      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
+      for (const column of numericColumns) {
+        const fieldName = toCamelCase(column.name);
+        fields[fieldName] = { type: GraphQLFloat };
+      }
+      if (numericColumns.length === 0) {
+        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
+      }
+      return fields;
+    },
+  });
+
+  const stddevPopFields = new GraphQLObjectType({
+    name: `${typeName}StddevPopFields`,
+    description: `Population standard deviation aggregate fields for ${typeName}.`,
+    fields: () => {
+      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
+      for (const column of numericColumns) {
+        const fieldName = toCamelCase(column.name);
+        fields[fieldName] = { type: GraphQLFloat };
+      }
+      if (numericColumns.length === 0) {
+        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
+      }
+      return fields;
+    },
+  });
+
+  const stddevSampFields = new GraphQLObjectType({
+    name: `${typeName}StddevSampFields`,
+    description: `Sample standard deviation (alias) aggregate fields for ${typeName}.`,
+    fields: () => {
+      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
+      for (const column of numericColumns) {
+        const fieldName = toCamelCase(column.name);
+        fields[fieldName] = { type: GraphQLFloat };
+      }
+      if (numericColumns.length === 0) {
+        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
+      }
+      return fields;
+    },
+  });
+
+  const varianceFields = new GraphQLObjectType({
+    name: `${typeName}VarianceFields`,
+    description: `Sample variance aggregate fields for ${typeName}.`,
+    fields: () => {
+      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
+      for (const column of numericColumns) {
+        const fieldName = toCamelCase(column.name);
+        fields[fieldName] = { type: GraphQLFloat };
+      }
+      if (numericColumns.length === 0) {
+        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
+      }
+      return fields;
+    },
+  });
+
+  const varPopFields = new GraphQLObjectType({
+    name: `${typeName}VarPopFields`,
+    description: `Population variance aggregate fields for ${typeName}.`,
+    fields: () => {
+      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
+      for (const column of numericColumns) {
+        const fieldName = toCamelCase(column.name);
+        fields[fieldName] = { type: GraphQLFloat };
+      }
+      if (numericColumns.length === 0) {
+        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
+      }
+      return fields;
+    },
+  });
+
+  const varSampFields = new GraphQLObjectType({
+    name: `${typeName}VarSampFields`,
+    description: `Sample variance (alias) aggregate fields for ${typeName}.`,
+    fields: () => {
+      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
+      for (const column of numericColumns) {
+        const fieldName = toCamelCase(column.name);
+        fields[fieldName] = { type: GraphQLFloat };
+      }
+      if (numericColumns.length === 0) {
+        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
+      }
+      return fields;
+    },
+  });
+
   // ── AggregateFields ───────────────────────────────────────────────────
   const aggregateFields = new GraphQLObjectType({
     name: `${typeName}AggregateFields`,
@@ -399,6 +498,12 @@ export function buildMutationInputTypes(
       avg: { type: avgFields },
       min: { type: minFields },
       max: { type: maxFields },
+      stddev: { type: stddevFields },
+      stddevPop: { type: stddevPopFields },
+      stddevSamp: { type: stddevSampFields },
+      variance: { type: varianceFields },
+      varPop: { type: varPopFields },
+      varSamp: { type: varSampFields },
     },
   });
 
@@ -431,6 +536,12 @@ export function buildMutationInputTypes(
       avg: { type: avgFields },
       min: { type: minFields },
       max: { type: maxFields },
+      stddev: { type: stddevFields },
+      stddevPop: { type: stddevPopFields },
+      stddevSamp: { type: stddevSampFields },
+      variance: { type: varianceFields },
+      varPop: { type: varPopFields },
+      varSamp: { type: varSampFields },
     },
   });
 

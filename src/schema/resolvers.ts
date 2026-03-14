@@ -588,7 +588,7 @@ export function makeSelectAggregateResolver(
     // Build aggregate selection — request count + sum/avg/min/max for numeric columns
     const aggregate: AggregateSelection = { count: {} };
 
-    // When groupBy is present, also request sum/avg for numeric columns
+    // When groupBy is present, also request sum/avg/stddev/variance for numeric columns
     if (groupBy) {
       const numericCols = table.columns
         .filter((c) => isNumericColumn(c))
@@ -598,6 +598,12 @@ export function makeSelectAggregateResolver(
         aggregate.avg = numericCols;
         aggregate.min = numericCols;
         aggregate.max = numericCols;
+        aggregate.stddev = numericCols;
+        aggregate.stddevPop = numericCols;
+        aggregate.stddevSamp = numericCols;
+        aggregate.variance = numericCols;
+        aggregate.varPop = numericCols;
+        aggregate.varSamp = numericCols;
       }
     }
 
@@ -637,39 +643,17 @@ export function makeSelectAggregateResolver(
 
         const result: Record<string, unknown> = { keys: remappedKeys };
 
-        // Pass through aggregate fields (count, sum, avg, min, max)
+        // Pass through aggregate fields (count, sum, avg, min, max, stddev, variance family)
         if ('count' in group) result.count = group.count;
-        if (group.sum) {
-          const sumObj = group.sum as Record<string, unknown>;
-          const remapped: Record<string, unknown> = {};
-          for (const [k, v] of Object.entries(sumObj)) {
-            remapped[toCamelCase(k)] = v;
+        for (const aggKey of ['sum', 'avg', 'min', 'max', 'stddev', 'stddevPop', 'stddevSamp', 'variance', 'varPop', 'varSamp'] as const) {
+          if (group[aggKey]) {
+            const obj = group[aggKey] as Record<string, unknown>;
+            const remapped: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(obj)) {
+              remapped[toCamelCase(k)] = v;
+            }
+            result[aggKey] = remapped;
           }
-          result.sum = remapped;
-        }
-        if (group.avg) {
-          const avgObj = group.avg as Record<string, unknown>;
-          const remapped: Record<string, unknown> = {};
-          for (const [k, v] of Object.entries(avgObj)) {
-            remapped[toCamelCase(k)] = v;
-          }
-          result.avg = remapped;
-        }
-        if (group.min) {
-          const minObj = group.min as Record<string, unknown>;
-          const remapped: Record<string, unknown> = {};
-          for (const [k, v] of Object.entries(minObj)) {
-            remapped[toCamelCase(k)] = v;
-          }
-          result.min = remapped;
-        }
-        if (group.max) {
-          const maxObj = group.max as Record<string, unknown>;
-          const remapped: Record<string, unknown> = {};
-          for (const [k, v] of Object.entries(maxObj)) {
-            remapped[toCamelCase(k)] = v;
-          }
-          result.max = remapped;
         }
 
         return result;

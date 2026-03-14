@@ -77,6 +77,12 @@ export interface AggregateSelection {
   avg?: string[];
   min?: string[];
   max?: string[];
+  stddev?: string[];
+  stddevPop?: string[];
+  stddevSamp?: string[];
+  variance?: string[];
+  varPop?: string[];
+  varSamp?: string[];
 }
 
 export interface SelectOptions {
@@ -774,6 +780,26 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
     }
   }
 
+  // Statistical aggregate functions (stddev, variance family)
+  const STAT_AGG_MAP: Array<{ key: keyof AggregateSelection; sqlFn: string }> = [
+    { key: 'stddev', sqlFn: 'stddev' },
+    { key: 'stddevPop', sqlFn: 'stddev_pop' },
+    { key: 'stddevSamp', sqlFn: 'stddev_samp' },
+    { key: 'variance', sqlFn: 'variance' },
+    { key: 'varPop', sqlFn: 'var_pop' },
+    { key: 'varSamp', sqlFn: 'var_samp' },
+  ];
+
+  for (const { key, sqlFn } of STAT_AGG_MAP) {
+    const fieldCols = agg[key] as string[] | undefined;
+    if (fieldCols && fieldCols.length > 0) {
+      const fnFields = fieldCols.map(
+        (c) => `'${c}', ${sqlFn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`,
+      ).join(', ');
+      aggFields.push(`'${key}', json_build_object(${fnFields})`);
+    }
+  }
+
   // ── GROUP BY path ──────────────────────────────────────────────────────
   if (opts.groupBy && opts.groupBy.length > 0) {
     // Filter groupBy columns against permissions
@@ -823,6 +849,27 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
         }
       }
 
+      // Statistical aggregate functions in GROUP BY
+      const STAT_AGG_MAP_GB: Array<{ key: keyof AggregateSelection; sqlFn: string }> = [
+        { key: 'stddev', sqlFn: 'stddev' },
+        { key: 'stddevPop', sqlFn: 'stddev_pop' },
+        { key: 'stddevSamp', sqlFn: 'stddev_samp' },
+        { key: 'variance', sqlFn: 'variance' },
+        { key: 'varPop', sqlFn: 'var_pop' },
+        { key: 'varSamp', sqlFn: 'var_samp' },
+      ];
+
+      for (const { key, sqlFn } of STAT_AGG_MAP_GB) {
+        const fieldCols = agg[key] as string[] | undefined;
+        if (fieldCols && fieldCols.length > 0) {
+          for (const c of fieldCols) {
+            innerAggFields.push(
+              `${sqlFn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)}) AS "_${key}_${c}_"`,
+            );
+          }
+        }
+      }
+
       const innerSql = [
         `SELECT ${innerAggFields.join(', ')}`,
         `FROM ${tableRef} ${quoteIdentifier(alias)}`,
@@ -853,6 +900,17 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
             (c) => `'${c}', ${groupedAlias}."_${fn}_${c}_"`,
           ).join(', ');
           outerJsonParts.push(`'${fn}', json_build_object(${fnParts})`);
+        }
+      }
+
+      // Statistical aggregate functions in outer JSON
+      for (const { key } of STAT_AGG_MAP_GB) {
+        const fieldCols = agg[key] as string[] | undefined;
+        if (fieldCols && fieldCols.length > 0) {
+          const fnParts = fieldCols.map(
+            (c) => `'${c}', ${groupedAlias}."_${key}_${c}_"`,
+          ).join(', ');
+          outerJsonParts.push(`'${key}', json_build_object(${fnParts})`);
         }
       }
 

@@ -191,6 +191,54 @@ describe('GraphQL Schema Generation', () => {
     });
   });
 
+  describe('Statistical aggregate types', () => {
+    it('should generate StddevFields type for tables with numeric columns', () => {
+      const typeMap = schema.getTypeMap();
+      const stddevType = typeMap['AccountStddevFields'] as GraphQLObjectType | undefined;
+      expect(stddevType).toBeDefined();
+      const fields = stddevType!.getFields();
+      expect(fields['balance']).toBeDefined();
+    });
+
+    it('should generate StddevPopFields type', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['AccountStddevPopFields']).toBeDefined();
+    });
+
+    it('should generate StddevSampFields type', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['AccountStddevSampFields']).toBeDefined();
+    });
+
+    it('should generate VarianceFields type', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['AccountVarianceFields']).toBeDefined();
+    });
+
+    it('should generate VarPopFields type', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['AccountVarPopFields']).toBeDefined();
+    });
+
+    it('should generate VarSampFields type', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['AccountVarSampFields']).toBeDefined();
+    });
+
+    it('should include statistical fields in AggregateFields type', () => {
+      const typeMap = schema.getTypeMap();
+      const aggType = typeMap['AccountAggregateFields'] as GraphQLObjectType | undefined;
+      expect(aggType).toBeDefined();
+      const fields = aggType!.getFields();
+      expect(fields['stddev']).toBeDefined();
+      expect(fields['stddevPop']).toBeDefined();
+      expect(fields['stddevSamp']).toBeDefined();
+      expect(fields['variance']).toBeDefined();
+      expect(fields['varPop']).toBeDefined();
+      expect(fields['varSamp']).toBeDefined();
+    });
+  });
+
   describe('Filter input types', () => {
     it('should generate BoolExp input type for client table', () => {
       const typeMap = schema.getTypeMap();
