@@ -166,32 +166,154 @@ function remapBoolExp(
 }
 
 /**
+ * Parse a direction string like 'asc', 'desc_nulls_first' etc.
+ */
+function parseDirection(direction: string): { direction: 'asc' | 'desc'; nulls?: 'first' | 'last' } {
+  const parts = direction.toLowerCase().split('_');
+  const dir = parts[0] === 'desc' ? 'desc' : 'asc';
+  let nulls: 'first' | 'last' | undefined;
+  if (parts.includes('nulls') && parts.includes('first')) {
+    nulls = 'first';
+  } else if (parts.includes('nulls') && parts.includes('last')) {
+    nulls = 'last';
+  }
+  return { direction: dir, nulls };
+}
+
+/** Map of aggregate function camelCase name -> SQL function name */
+const AGGREGATE_FN_MAP: Record<string, OrderByItem['aggregate'] extends { function: infer F } | undefined ? F : never> = {
+  count: 'count',
+  avg: 'avg',
+  max: 'max',
+  min: 'min',
+  sum: 'sum',
+  stddev: 'stddev',
+  stddevPop: 'stddev_pop',
+  stddevSamp: 'stddev_samp',
+  varPop: 'var_pop',
+  varSamp: 'var_samp',
+  variance: 'variance',
+};
+
+/**
  * Convert camelCase orderBy args from GraphQL to the OrderByItem[] the SQL compiler expects.
+ * Handles:
+ * - Simple column ordering: { fieldName: 'asc' }
+ * - Object relationship ordering: { relName: { remoteField: 'asc' } }
+ * - Array aggregate ordering: { relNameAggregate: { count: 'desc' } }
  */
 function remapOrderBy(
-  orderBy: Array<Record<string, string>> | undefined | null,
+  orderBy: Array<Record<string, unknown>> | undefined | null,
   columnMap: Map<string, string>,
+  table?: TableInfo,
+  allTables?: TableInfo[],
 ): OrderByItem[] | undefined {
   if (!orderBy || orderBy.length === 0) return undefined;
 
-  return orderBy.map((item) => {
-    // Each item has the shape { fieldName: 'asc' | 'desc' | 'asc_nulls_first' | ... }
-    for (const [camelKey, direction] of Object.entries(item)) {
-      const pgName = columnMap.get(camelKey) ?? camelKey;
-      // Parse direction string like 'asc_nulls_first'
-      const parts = direction.toLowerCase().split('_');
-      const dir = parts[0] === 'desc' ? 'desc' : 'asc';
-      let nulls: 'first' | 'last' | undefined;
-      if (parts.includes('nulls') && parts.includes('first')) {
-        nulls = 'first';
-      } else if (parts.includes('nulls') && parts.includes('last')) {
-        nulls = 'last';
+  const result: OrderByItem[] = [];
+
+  for (const item of orderBy) {
+    for (const [camelKey, value] of Object.entries(item)) {
+      if (typeof value === 'string') {
+        // Simple column ordering
+        const pgName = columnMap.get(camelKey) ?? camelKey;
+        const { direction, nulls } = parseDirection(value);
+        result.push({ column: pgName, direction, nulls });
+        continue;
       }
-      return { column: pgName, direction: dir as 'asc' | 'desc', nulls };
+
+      if (typeof value === 'object' && value !== null && table && allTables) {
+        const valueObj = value as Record<string, unknown>;
+
+        // Check if this is an aggregate ordering (relNameAggregate)
+        if (camelKey.endsWith('Aggregate')) {
+          const relName = camelKey.slice(0, -'Aggregate'.length);
+          const rel = table.relationships.find((r) => r.name === relName && r.type === 'array');
+          if (!rel) continue;
+
+          const remoteTable = allTables.find(
+            (t) => t.name === rel.remoteTable.name && t.schema === rel.remoteTable.schema,
+          );
+          if (!remoteTable) continue;
+
+          // Parse the aggregate ordering object
+          for (const [aggFnName, aggValue] of Object.entries(valueObj)) {
+            if (aggFnName === 'count' && typeof aggValue === 'string') {
+              const { direction, nulls } = parseDirection(aggValue);
+              result.push({
+                column: '',
+                direction,
+                nulls,
+                aggregate: {
+                  config: rel,
+                  remoteTable,
+                  function: 'count',
+                },
+              });
+            } else if (typeof aggValue === 'object' && aggValue !== null) {
+              // Per-function aggregate: e.g., { avg: { balance: 'desc' } }
+              const sqlFn = AGGREGATE_FN_MAP[aggFnName];
+              if (!sqlFn) continue;
+
+              const remoteColMap = camelToColumnMap(remoteTable);
+              for (const [colCamel, colDir] of Object.entries(aggValue as Record<string, string>)) {
+                const colPg = remoteColMap.get(colCamel) ?? colCamel;
+                const { direction, nulls } = parseDirection(colDir);
+                result.push({
+                  column: '',
+                  direction,
+                  nulls,
+                  aggregate: {
+                    config: rel,
+                    remoteTable,
+                    function: sqlFn,
+                    column: colPg,
+                  },
+                });
+              }
+            }
+          }
+          continue;
+        }
+
+        // Check if this is an object relationship ordering
+        const rel = table.relationships.find((r) => r.name === camelKey && r.type === 'object');
+        if (rel) {
+          const remoteTable = allTables.find(
+            (t) => t.name === rel.remoteTable.name && t.schema === rel.remoteTable.schema,
+          );
+          if (!remoteTable) continue;
+
+          // Recursively remap the nested ordering
+          const remoteColMap = camelToColumnMap(remoteTable);
+          const nestedItems = remapOrderBy(
+            [valueObj as Record<string, unknown>],
+            remoteColMap,
+            remoteTable,
+            allTables,
+          );
+
+          if (nestedItems && nestedItems.length > 0) {
+            for (const nested of nestedItems) {
+              result.push({
+                column: '',
+                direction: nested.direction,
+                nulls: nested.nulls,
+                relationship: {
+                  config: rel,
+                  remoteTable,
+                  orderByItem: nested,
+                },
+              });
+            }
+          }
+          continue;
+        }
+      }
     }
-    // Fallback (should never reach here)
-    return { column: '', direction: 'asc' as const };
-  });
+  }
+
+  return result.length > 0 ? result : undefined;
 }
 
 /**
@@ -419,7 +541,10 @@ export function makeSelectResolver(
     );
 
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
-    const orderBy = remapOrderBy(args.orderBy as Array<Record<string, string>> | undefined, columnMap);
+    const orderBy = remapOrderBy(
+      args.orderBy as Array<Record<string, unknown>> | undefined,
+      columnMap, table, context.tables,
+    );
     const limit = resolveLimit(args.limit as number | undefined, perm?.limit);
 
     // Extract distinctOn — enum values resolve to PG column names directly
@@ -570,7 +695,10 @@ export function makeSelectAggregateResolver(
     const nodeRelationships = nodesParsed?.relationships ?? [];
 
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
-    const orderBy = remapOrderBy(args.orderBy as Array<Record<string, string>> | undefined, columnMap);
+    const orderBy = remapOrderBy(
+      args.orderBy as Array<Record<string, unknown>> | undefined,
+      columnMap, table, context.tables,
+    );
     const limit = resolveLimit(args.limit as number | undefined, perm?.limit);
 
     // Extract groupBy — enum values resolve to PG column names directly

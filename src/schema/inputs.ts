@@ -33,7 +33,7 @@ import type {
   GraphQLFieldConfigMap,
   GraphQLScalarType,
 } from 'graphql';
-import type { TableInfo, ColumnInfo } from '../types.js';
+import type { TableInfo, ColumnInfo, RelationshipConfig } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
 import { toCamelCase, getTypeName, tableKey } from './type-builder.js';
@@ -195,10 +195,113 @@ export interface MutationInputTypes {
   updateManyInput: GraphQLInputObjectType | null;
 }
 
+// ─── Aggregate OrderBy Builders ─────────────────────────────────────────────
+
+/** Aggregate function names for per-field order types */
+const AGGREGATE_ORDER_FUNCTIONS = [
+  'avg', 'max', 'min', 'sum',
+  'stddev', 'stddevPop', 'stddevSamp',
+  'varPop', 'varSamp', 'variance',
+] as const;
+
+/**
+ * Build the AggregateOrderBy types for a table and register them in the orderByTypes map.
+ *
+ * Creates:
+ * - {Type}AggregateOrderBy — top-level aggregate ordering (count + per-function types)
+ * - {Type}AvgOrderBy, {Type}MaxOrderBy, etc. — per-function types with numeric columns
+ *
+ * Stored under key "{schema}.{table}.__aggregateOrderBy" in orderByTypes.
+ */
+function buildAggregateOrderByTypes(
+  table: TableInfo,
+  typeName: string,
+  enumNames: Set<string>,
+  orderByTypes: Map<string, GraphQLInputObjectType>,
+): void {
+  const key = tableKey(table.schema, table.name);
+  const aggKey = `${key}.__aggregateOrderBy`;
+
+  // Don't rebuild if already exists
+  if (orderByTypes.has(aggKey)) return;
+
+  const numericColumns = table.columns.filter((c) => isNumericColumn(c, enumNames));
+
+  // Build per-aggregate-function order types
+  const perFunctionTypes: Record<string, GraphQLInputObjectType> = {};
+
+  for (const fn of AGGREGATE_ORDER_FUNCTIONS) {
+    // Map function name to PascalCase for GraphQL type name
+    const fnPascal = fn.charAt(0).toUpperCase() + fn.slice(1);
+
+    // avg, sum, stddev*, var*, variance only apply to numeric columns
+    // max, min also apply to orderable types (text, date, etc.) but for consistency
+    // and matching Hasura behavior, we'll use numeric columns for all aggregate order types
+    const applicableColumns = numericColumns;
+
+    if (applicableColumns.length === 0) continue;
+
+    const fnType = new GraphQLInputObjectType({
+      name: `${typeName}${fnPascal}OrderBy`,
+      description: `Order by ${fn} aggregates of ${typeName}.`,
+      fields: () => {
+        const fields: GraphQLInputFieldConfigMap = {};
+        for (const col of applicableColumns) {
+          const fieldName = toCamelCase(col.name);
+          fields[fieldName] = { type: OrderByDirection };
+        }
+        return fields;
+      },
+    });
+
+    perFunctionTypes[fn] = fnType;
+  }
+
+  // Build the top-level AggregateOrderBy type
+  const aggOrderBy = new GraphQLInputObjectType({
+    name: `${typeName}AggregateOrderBy`,
+    description: `Aggregate ordering options for ${typeName}.`,
+    fields: () => {
+      const fields: GraphQLInputFieldConfigMap = {
+        count: { type: OrderByDirection },
+      };
+
+      for (const [fn, fnType] of Object.entries(perFunctionTypes)) {
+        fields[fn] = { type: fnType };
+      }
+
+      return fields;
+    },
+  });
+
+  orderByTypes.set(aggKey, aggOrderBy);
+}
+
+/**
+ * Pre-build AggregateOrderBy types for all tables.
+ * Must be called before building per-table OrderBy types so that parent
+ * OrderBy thunks can reference child AggregateOrderBy types.
+ */
+export function buildAllAggregateOrderByTypes(
+  tables: TableInfo[],
+  enumNames: Set<string>,
+  orderByTypes: Map<string, GraphQLInputObjectType>,
+): void {
+  for (const table of tables) {
+    const typeName = getTypeName(table);
+    buildAggregateOrderByTypes(table, typeName, enumNames, orderByTypes);
+  }
+}
+
 // ─── Builder ────────────────────────────────────────────────────────────────
 
 /**
  * Build all mutation input types, ordering, and aggregate types for a table.
+ *
+ * @param orderByTypes  Map of tableKey → OrderBy input type. Used by relationship ordering
+ *                      to reference other tables' OrderBy types. Also used to store this
+ *                      table's AggregateOrderBy types for use by parent tables.
+ * @param allTables     All tracked tables, needed to find remote tables for relationships.
  */
 export function buildMutationInputTypes(
   table: TableInfo,
@@ -206,6 +309,8 @@ export function buildMutationInputTypes(
   enumTypes: Map<string, GraphQLEnumType>,
   enumNames: Set<string>,
   filterType?: GraphQLInputObjectType,
+  orderByTypes?: Map<string, GraphQLInputObjectType>,
+  allTables?: TableInfo[],
 ): MutationInputTypes {
   const typeName = getTypeName(table);
   // ── InsertInput ────────────────────────────────────────────────────────
@@ -310,6 +415,38 @@ export function buildMutationInputTypes(
         const fieldName = toCamelCase(column.name);
         fields[fieldName] = { type: OrderByDirection };
       }
+
+      // Object relationship fields — allow ordering by related table columns
+      if (orderByTypes) {
+        for (const rel of table.relationships) {
+          if (rel.type === 'object') {
+            const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
+            const relOrderBy = orderByTypes.get(relKey);
+            if (relOrderBy) {
+              fields[rel.name] = {
+                type: relOrderBy,
+                description: `Order by ${rel.name} relationship fields.`,
+              };
+            }
+          }
+        }
+
+        // Array relationship aggregate fields — allow ordering by aggregate of related table
+        for (const rel of table.relationships) {
+          if (rel.type === 'array') {
+            const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
+            const aggOrderByKey = `${relKey}.__aggregateOrderBy`;
+            const aggOrderBy = orderByTypes.get(aggOrderByKey);
+            if (aggOrderBy) {
+              fields[`${rel.name}Aggregate`] = {
+                type: aggOrderBy,
+                description: `Order by aggregated values of the ${rel.name} array relationship.`,
+              };
+            }
+          }
+        }
+      }
+
       return fields;
     },
   });

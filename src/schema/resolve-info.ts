@@ -217,29 +217,148 @@ function remapBoolExp(
 }
 
 /**
+ * Parse a direction string like 'asc', 'desc_nulls_first' etc.
+ */
+function parseDirection(direction: string): { direction: 'asc' | 'desc'; nulls?: 'first' | 'last' } {
+  const parts = direction.toLowerCase().split('_');
+  const dir = parts[0] === 'desc' ? 'desc' : 'asc';
+  let nulls: 'first' | 'last' | undefined;
+  if (parts.includes('nulls') && parts.includes('first')) {
+    nulls = 'first';
+  } else if (parts.includes('nulls') && parts.includes('last')) {
+    nulls = 'last';
+  }
+  return { direction: dir, nulls };
+}
+
+/** Map of aggregate function camelCase name -> SQL function name */
+const AGGREGATE_FN_MAP: Record<string, string> = {
+  count: 'count',
+  avg: 'avg',
+  max: 'max',
+  min: 'min',
+  sum: 'sum',
+  stddev: 'stddev',
+  stddevPop: 'stddev_pop',
+  stddevSamp: 'stddev_samp',
+  varPop: 'var_pop',
+  varSamp: 'var_samp',
+  variance: 'variance',
+};
+
+/**
  * Convert camelCase orderBy args from GraphQL to the OrderByItem[] the SQL compiler expects.
+ * Supports nested relationship ordering and aggregate ordering.
  */
 function remapOrderBy(
-  orderBy: Array<Record<string, string>> | undefined | null,
+  orderBy: Array<Record<string, unknown>> | undefined | null,
   columnMap: Map<string, string>,
+  table?: TableInfo,
+  allTables?: TableInfo[],
 ): OrderByItem[] | undefined {
   if (!orderBy || !Array.isArray(orderBy) || orderBy.length === 0) return undefined;
 
-  return orderBy.map((item) => {
-    for (const [camelKey, direction] of Object.entries(item)) {
-      const pgName = columnMap.get(camelKey) ?? camelKey;
-      const parts = (direction as string).toLowerCase().split('_');
-      const dir = parts[0] === 'desc' ? 'desc' : 'asc';
-      let nulls: 'first' | 'last' | undefined;
-      if (parts.includes('nulls') && parts.includes('first')) {
-        nulls = 'first';
-      } else if (parts.includes('nulls') && parts.includes('last')) {
-        nulls = 'last';
+  const result: OrderByItem[] = [];
+
+  for (const item of orderBy) {
+    for (const [camelKey, value] of Object.entries(item)) {
+      if (typeof value === 'string') {
+        // Simple column ordering
+        const pgName = columnMap.get(camelKey) ?? camelKey;
+        const { direction, nulls } = parseDirection(value);
+        result.push({ column: pgName, direction, nulls });
+        continue;
       }
-      return { column: pgName, direction: dir as 'asc' | 'desc', nulls };
+
+      if (typeof value === 'object' && value !== null && table && allTables) {
+        const valueObj = value as Record<string, unknown>;
+
+        // Check if this is an aggregate ordering (relNameAggregate)
+        if (camelKey.endsWith('Aggregate')) {
+          const relName = camelKey.slice(0, -'Aggregate'.length);
+          const rel = table.relationships.find((r) => r.name === relName && r.type === 'array');
+          if (!rel) continue;
+
+          const remoteTable = allTables.find(
+            (t) => t.name === rel.remoteTable.name && t.schema === rel.remoteTable.schema,
+          );
+          if (!remoteTable) continue;
+
+          for (const [aggFnName, aggValue] of Object.entries(valueObj)) {
+            if (aggFnName === 'count' && typeof aggValue === 'string') {
+              const { direction, nulls } = parseDirection(aggValue);
+              result.push({
+                column: '',
+                direction,
+                nulls,
+                aggregate: {
+                  config: rel,
+                  remoteTable,
+                  function: 'count' as const,
+                },
+              });
+            } else if (typeof aggValue === 'object' && aggValue !== null) {
+              const sqlFn = AGGREGATE_FN_MAP[aggFnName];
+              if (!sqlFn) continue;
+
+              const remoteColMap = camelToColumnMap(remoteTable);
+              for (const [colCamel, colDir] of Object.entries(aggValue as Record<string, string>)) {
+                const colPg = remoteColMap.get(colCamel) ?? colCamel;
+                const { direction, nulls } = parseDirection(colDir);
+                result.push({
+                  column: '',
+                  direction,
+                  nulls,
+                  aggregate: {
+                    config: rel,
+                    remoteTable,
+                    function: sqlFn as OrderByItem['aggregate'] extends { function: infer F } | undefined ? F : never,
+                    column: colPg,
+                  },
+                });
+              }
+            }
+          }
+          continue;
+        }
+
+        // Check if this is an object relationship ordering
+        const rel = table.relationships.find((r) => r.name === camelKey && r.type === 'object');
+        if (rel) {
+          const remoteTable = allTables.find(
+            (t) => t.name === rel.remoteTable.name && t.schema === rel.remoteTable.schema,
+          );
+          if (!remoteTable) continue;
+
+          const remoteColMap = camelToColumnMap(remoteTable);
+          const nestedItems = remapOrderBy(
+            [valueObj as Record<string, unknown>],
+            remoteColMap,
+            remoteTable,
+            allTables,
+          );
+
+          if (nestedItems && nestedItems.length > 0) {
+            for (const nested of nestedItems) {
+              result.push({
+                column: '',
+                direction: nested.direction,
+                nulls: nested.nulls,
+                relationship: {
+                  config: rel,
+                  remoteTable,
+                  orderByItem: nested,
+                },
+              });
+            }
+          }
+          continue;
+        }
+      }
     }
-    return { column: '', direction: 'asc' as const };
-  });
+  }
+
+  return result.length > 0 ? result : undefined;
 }
 
 // ─── Main Parser ─────────────────────────────────────────────────────────────
@@ -375,8 +494,10 @@ function parseSelectionSet(
               const orderByArg = getArgumentValue(selection, 'orderBy', variableValues);
               if (orderByArg) {
                 srcfParsed.orderBy = remapOrderBy(
-                  orderByArg as Array<Record<string, string>>,
+                  orderByArg as Array<Record<string, unknown>>,
                   remoteColMap,
+                  returnTable,
+                  allTables,
                 );
               }
 
@@ -464,8 +585,10 @@ function parseSelectionSet(
           const orderByArg = getArgumentValue(selection, 'orderBy', variableValues);
           if (orderByArg) {
             relSelection.orderBy = remapOrderBy(
-              orderByArg as Array<Record<string, string>>,
+              orderByArg as Array<Record<string, unknown>>,
               remoteColMap,
+              remoteTable,
+              allTables,
             );
           }
 
