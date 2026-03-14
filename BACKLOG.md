@@ -453,15 +453,16 @@ Hasura generates stddev/variance aggregate field types. Hakkyra only has count/s
 - [x] REST aggregate endpoint support
 - [x] 15 new tests (8 SQL compiler + 7 GraphQL E2E)
 
-### P5.6 — Streaming Subscriptions (Medium)
+### P5.6 — Streaming Subscriptions (Medium) — COMPLETE
 
 Hasura supports cursor-based streaming subscriptions (`{table}Stream`) with `batchSize`, `cursor`, and `where` arguments.
 
-- [ ] Generate `{Table}StreamCursorInput` types (`initialValue` + `ordering`)
-- [ ] Generate `{Table}StreamCursorValueInput` types (all columns as optional fields)
-- [ ] Generate `CursorOrdering` enum (`ASC`, `DESC`)
-- [ ] Register `{table}Stream` subscription fields with `batchSize: Int!`, `cursor: [{Table}StreamCursorInput]!`, `where` args
-- [ ] Implement streaming: use cursor value to filter rows > cursor, batch delivery
+- [x] Generate `{Table}StreamCursorInput` types (`initialValue` + `ordering`)
+- [x] Generate `{Table}StreamCursorValueInput` types (all columns as optional fields)
+- [x] Generate `CursorOrdering` enum (`ASC`, `DESC`)
+- [x] Register `{table}Stream` subscription fields with `batchSize: Int!`, `cursor: [{Table}StreamCursorInput]!`, `where` args
+- [x] Implement streaming: use cursor value to filter rows > cursor, batch delivery
+- [x] 15 tests (13 schema + 2 E2E)
 
 ### P5.7 — Array Comparison Types (Medium) — COMPLETE
 
@@ -473,12 +474,14 @@ Hasura generates `StringArrayComparisonExp` (and likely others) for PostgreSQL a
 - [x] Map array columns to `[ScalarType!]` in object types
 - [x] 24 tests (11 schema + 13 E2E)
 
-### P5.8 — JSONB Path Argument (Medium)
+### P5.8 — JSONB Path Argument (Medium) — COMPLETE
 
 Hasura supports a `path: String` argument on JSONB fields to select nested JSON paths (e.g., `value(path: "nested.key")`).
 
-- [ ] Add optional `path: String` argument to JSONB-typed fields in object types
-- [ ] SQL compiler: when `path` is provided, emit `column #>> '{path,segments}'` or `column -> 'key' -> 'nested'`
+- [x] Add optional `path: String` argument to JSONB-typed fields in object types
+- [x] SQL compiler: when `path` is provided, emit `column #> $N::text[]` with parameterized path segments
+- [x] Support in select, selectByPk, relationships, computed fields, and mutation RETURNING clauses
+- [x] 13 tests (3 schema + 5 SQL compiler + 5 E2E)
 
 ### P5.9 — JSONB Cast Expression (Low) — COMPLETE
 
@@ -527,13 +530,14 @@ Change root type names to match Hasura.
 | Config loader | 19 | Pass |
 | Introspection | 30 | Pass |
 | Permissions | 33 | Pass |
-| SQL compiler | 30 | Pass |
-| Schema generator | 49 | Pass |
+| SQL compiler | 35 | Pass |
+| Schema generator | 52 | Pass |
 | REST filters | 30 | Pass |
-| Server / E2E | 69 | Pass |
+| Server / E2E | 74 | Pass |
 | Events | 9 | Pass |
 | Crons | 14 | Pass |
-| Subscriptions | 13 | Pass |
+| Subscriptions | 15 | Pass |
+| Streaming subscriptions | 13 | Pass |
 | Actions | 16 | Pass |
 | Async actions | 18 | Pass |
 | Computed fields | 17 | Pass |
@@ -551,4 +555,4 @@ Change root type names to match Hasura.
 | Tracked functions | 20 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
-| **Total** | **~850** | **27 suites, all passing** |
+| **Total** | **~880** | **29 suites, all passing** |
