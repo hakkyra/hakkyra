@@ -282,7 +282,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   }
 
   const queryType = new GraphQLObjectType({
-    name: 'Query',
+    name: 'query_root',
     fields: queryFields,
   });
 
@@ -421,7 +421,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   }
 
   const mutationType = new GraphQLObjectType({
-    name: 'Mutation',
+    name: 'mutation_root',
     fields: mutationFields,
   });
 
@@ -481,7 +481,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   // Only create subscription type if there are subscription fields
   const subscriptionType = Object.keys(subscriptionFields).length > 0
     ? new GraphQLObjectType({
-        name: 'Subscription',
+        name: 'subscription_root',
         fields: subscriptionFields,
       })
     : undefined;

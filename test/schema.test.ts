@@ -32,8 +32,8 @@ describe('GraphQL Schema Generation', () => {
     expect(schema).toBeInstanceOf(GraphQLSchema);
   });
 
-  describe('Query type', () => {
-    it('should have a Query type', () => {
+  describe('query_root type', () => {
+    it('should have a query_root type', () => {
       const queryType = schema.getQueryType();
       expect(queryType).toBeDefined();
     });
@@ -77,8 +77,8 @@ describe('GraphQL Schema Generation', () => {
     });
   });
 
-  describe('Mutation type', () => {
-    it('should have a Mutation type', () => {
+  describe('mutation_root type', () => {
+    it('should have a mutation_root type', () => {
       const mutationType = schema.getMutationType();
       expect(mutationType).toBeDefined();
     });
@@ -113,8 +113,8 @@ describe('GraphQL Schema Generation', () => {
     });
   });
 
-  describe('Subscription type', () => {
-    it('should have a Subscription type', () => {
+  describe('subscription_root type', () => {
+    it('should have a subscription_root type', () => {
       const subscriptionType = schema.getSubscriptionType();
       expect(subscriptionType).toBeDefined();
     });
