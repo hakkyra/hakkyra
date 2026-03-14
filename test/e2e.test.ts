@@ -1012,6 +1012,125 @@ describe('Custom Queries E2E', () => {
   });
 });
 
+// ─── Relationship Ordering (Phase 5.3) ──────────────────────────────────────
+
+describe('Relationship ordering', () => {
+  it('orders by object relationship field', async () => {
+    const { body } = await graphqlRequest(
+      `{
+        clients(orderBy: [{ currency: { name: asc } }, { username: asc }]) {
+          username
+          currency { name }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as Record<string, unknown[]>).clients;
+    expect(clients.length).toBe(4);
+
+    // British Pound < Euro < US Dollar
+    expect(field(clients[0] as Record<string, unknown>, 'username')).toBe('diana');
+    expect(field(clients[1] as Record<string, unknown>, 'username')).toBe('alice');
+    expect(field(clients[2] as Record<string, unknown>, 'username')).toBe('charlie');
+    expect(field(clients[3] as Record<string, unknown>, 'username')).toBe('bob');
+  });
+
+  it('orders by array relationship aggregate count', async () => {
+    const { body } = await graphqlRequest(
+      `{
+        clients(orderBy: [{ invoicesAggregate: { count: desc } }, { username: asc }]) {
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as Record<string, unknown[]>).clients;
+    expect(clients.length).toBe(4);
+
+    // alice has 2, bob=1, diana=1, charlie=0
+    expect(field(clients[0] as Record<string, unknown>, 'username')).toBe('alice');
+    expect(field(clients[1] as Record<string, unknown>, 'username')).toBe('bob');
+    expect(field(clients[2] as Record<string, unknown>, 'username')).toBe('diana');
+    expect(field(clients[3] as Record<string, unknown>, 'username')).toBe('charlie');
+  });
+
+  it('orders by array relationship aggregate sum', async () => {
+    const { body } = await graphqlRequest(
+      `{
+        clients(orderBy: [{ invoicesAggregate: { sum: { amount: desc_nulls_last } } }]) {
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as Record<string, unknown[]>).clients;
+    expect(clients.length).toBe(4);
+
+    // diana=5000 first, charlie=null last
+    expect(field(clients[0] as Record<string, unknown>, 'username')).toBe('diana');
+    expect(field(clients[3] as Record<string, unknown>, 'username')).toBe('charlie');
+  });
+
+  it('orders by deeply nested object relationship', async () => {
+    const { body } = await graphqlRequest(
+      `{
+        invoice(orderBy: [{ client: { currency: { name: asc } } }]) {
+          amount
+          client {
+            username
+            currency { name }
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const invoices = (body.data as Record<string, unknown[]>).invoice;
+    expect(invoices.length).toBeGreaterThanOrEqual(4);
+
+    // GBP(British Pound) < EUR(Euro) < USD(US Dollar)
+    // First invoice should belong to a GBP client (diana), last should be USD (bob)
+    const first = invoices[0] as Record<string, Record<string, unknown>>;
+    expect(first.client.currency.name).toBe('British Pound');
+    const last = invoices[invoices.length - 1] as Record<string, Record<string, unknown>>;
+    expect(last.client.currency.name).toBe('US Dollar');
+  });
+
+  it('orders by mixed relationship and column ordering', async () => {
+    const { body } = await graphqlRequest(
+      `{
+        clients(orderBy: [{ branch: { name: asc } }, { username: desc }]) {
+          username
+          branch { name }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as Record<string, unknown[]>).clients;
+    expect(clients.length).toBe(4);
+
+    // OtherBranch < TestBranch, then username DESC within each branch
+    expect(field(clients[0] as Record<string, unknown>, 'username')).toBe('diana');
+    expect(field(clients[1] as Record<string, unknown>, 'username')).toBe('charlie');
+    expect(field(clients[2] as Record<string, unknown>, 'username')).toBe('bob');
+    expect(field(clients[3] as Record<string, unknown>, 'username')).toBe('alice');
+  });
+});
+
 // ─── Health / Readiness ─────────────────────────────────────────────────────
 
 describe('Health endpoints', () => {

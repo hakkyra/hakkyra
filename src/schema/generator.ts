@@ -38,7 +38,7 @@ import {
 } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import { buildFilterTypes } from './filters.js';
-import { buildMutationInputTypes, OrderByDirection } from './inputs.js';
+import { buildMutationInputTypes, buildAllAggregateOrderByTypes, OrderByDirection } from './inputs.js';
 import type { MutationInputTypes } from './inputs.js';
 import {
   makeSelectResolver,
@@ -167,13 +167,19 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   }
 
   // ── Step 5: Build mutation input types for each table ──────────────────
+  // Pre-pass: build AggregateOrderBy types for all tables first.
+  // These are needed by parent tables' OrderBy thunks for array relationship aggregate ordering.
+  buildAllAggregateOrderByTypes(tables, enumNames, orderByTypes);
+
   const mutationInputsByTable = new Map<string, MutationInputTypes>();
 
   for (const table of tables) {
     const key = tableKey(table.schema, table.name);
     const objectType = typeRegistry.get(key)!;
     const filterType = filterTypes.get(key);
-    const mutInputs = buildMutationInputTypes(table, objectType, enumTypes, enumNames, filterType);
+    const mutInputs = buildMutationInputTypes(
+      table, objectType, enumTypes, enumNames, filterType, orderByTypes, tables,
+    );
     mutationInputsByTable.set(key, mutInputs);
     // Register orderBy types for use in array relationship args
     orderByTypes.set(key, mutInputs.orderBy);

@@ -27,6 +27,19 @@ export interface OrderByItem {
   column: string;
   direction: 'asc' | 'desc';
   nulls?: 'first' | 'last';
+  /** For object relationship ordering: nested order item on the related table */
+  relationship?: {
+    config: RelationshipConfig;
+    remoteTable: TableInfo;
+    orderByItem: OrderByItem;
+  };
+  /** For array relationship aggregate ordering */
+  aggregate?: {
+    config: RelationshipConfig;
+    remoteTable: TableInfo;
+    function: 'count' | 'avg' | 'max' | 'min' | 'sum' | 'stddev' | 'stddev_pop' | 'stddev_samp' | 'var_pop' | 'var_samp' | 'variance';
+    column?: string; // undefined for count
+  };
 }
 
 export interface ComputedFieldSelection {
@@ -175,6 +188,166 @@ export function filterColumns(
 
 // ─── ORDER BY ────────────────────────────────────────────────────────────────
 
+/**
+ * Flatten a nested object-relationship OrderByItem into the leaf column,
+ * collecting the chain of relationships along the way.
+ */
+function flattenRelationshipOrderBy(
+  item: OrderByItem,
+): { chain: Array<{ config: RelationshipConfig; remoteTable: TableInfo }>; leaf: OrderByItem } {
+  const chain: Array<{ config: RelationshipConfig; remoteTable: TableInfo }> = [];
+  let current = item;
+  while (current.relationship) {
+    chain.push({ config: current.relationship.config, remoteTable: current.relationship.remoteTable });
+    current = current.relationship.orderByItem;
+  }
+  return { chain, leaf: current };
+}
+
+/**
+ * Build the LEFT JOIN clauses needed for object-relationship ordering.
+ * Returns the JOIN SQL fragments and a mapping from chain signature to alias.
+ */
+function buildOrderByJoins(
+  orderBy: OrderByItem[],
+  parentAlias: string,
+  aliasCounter: AliasCounter,
+): { joinSql: string; joinAliases: Map<string, string> } {
+  const joinAliases = new Map<string, string>();
+  const joinParts: string[] = [];
+
+  for (const item of orderBy) {
+    if (!item.relationship) continue;
+
+    const { chain } = flattenRelationshipOrderBy(item);
+    let currentAlias = parentAlias;
+    let pathKey = '';
+
+    for (const link of chain) {
+      const rel = link.config;
+      const remote = link.remoteTable;
+      pathKey += `/${rel.name}`;
+
+      if (joinAliases.has(pathKey)) {
+        currentAlias = joinAliases.get(pathKey)!;
+        continue;
+      }
+
+      const joinAlias = aliasCounter.next();
+      joinAliases.set(pathKey, joinAlias);
+
+      const tableRef = quoteTableRef(remote.schema, remote.name);
+      const conditions = buildJoinConditions(rel, currentAlias, joinAlias);
+      joinParts.push(`LEFT JOIN ${tableRef} ${quoteIdentifier(joinAlias)} ON ${conditions.join(' AND ')}`);
+
+      currentAlias = joinAlias;
+    }
+  }
+
+  return { joinSql: joinParts.join(' '), joinAliases };
+}
+
+/**
+ * Build a correlated subquery expression for aggregate ordering.
+ */
+function buildAggregateOrderExpr(
+  item: OrderByItem,
+  parentAlias: string,
+  aliasCounter: AliasCounter,
+): string {
+  const agg = item.aggregate!;
+  const rel = agg.config;
+  const remote = agg.remoteTable;
+  const subAlias = aliasCounter.next();
+  const tableRef = quoteTableRef(remote.schema, remote.name);
+
+  // Build join conditions for the correlated subquery
+  const conditions = buildJoinConditions(rel, parentAlias, subAlias);
+  const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+
+  if (agg.function === 'count') {
+    return `(SELECT count(*) FROM ${tableRef} ${quoteIdentifier(subAlias)}${whereClause})`;
+  }
+
+  // For other aggregate functions, we need a column
+  const col = agg.column!;
+  const fnName = agg.function;
+  return `(SELECT ${fnName}(${quoteIdentifier(subAlias)}.${quoteIdentifier(col)}) FROM ${tableRef} ${quoteIdentifier(subAlias)}${whereClause})`;
+}
+
+/**
+ * Precompute all ORDER BY metadata: LEFT JOIN SQL for object relationships,
+ * the join alias map, and the ORDER BY clause string.
+ *
+ * This ensures a single pass through the alias counter, so JOIN aliases are
+ * consistent between the JOIN clause and the ORDER BY expressions.
+ */
+function compileOrderByFull(
+  orderBy: OrderByItem[],
+  alias: string,
+  aliasCounter: AliasCounter,
+): { joinSql: string; orderByClause: string } {
+  if (orderBy.length === 0) return { joinSql: '', orderByClause: '' };
+
+  const hasRelationship = orderBy.some((item) => item.relationship);
+  const hasAggregate = orderBy.some((item) => item.aggregate);
+
+  if (!hasRelationship && !hasAggregate) {
+    // Simple case: just column ordering, no JOINs needed
+    const parts = orderBy.map((item) => {
+      let clause = `${quoteIdentifier(alias)}.${quoteIdentifier(item.column)} ${item.direction.toUpperCase()}`;
+      if (item.nulls) {
+        clause += ` NULLS ${item.nulls.toUpperCase()}`;
+      }
+      return clause;
+    });
+    return { joinSql: '', orderByClause: ` ORDER BY ${parts.join(', ')}` };
+  }
+
+  // Build join aliases for object relationships (single pass)
+  const { joinSql, joinAliases } = hasRelationship
+    ? buildOrderByJoins(orderBy, alias, aliasCounter)
+    : { joinSql: '', joinAliases: new Map<string, string>() };
+
+  const parts = orderBy.map((item) => {
+    if (item.aggregate) {
+      // Aggregate ordering: correlated subquery
+      const expr = buildAggregateOrderExpr(item, alias, aliasCounter);
+      let clause = `${expr} ${item.direction.toUpperCase()}`;
+      if (item.nulls) {
+        clause += ` NULLS ${item.nulls.toUpperCase()}`;
+      }
+      return clause;
+    }
+
+    if (item.relationship) {
+      // Object relationship ordering: reference the joined column
+      const { chain, leaf } = flattenRelationshipOrderBy(item);
+      let pathKey = '';
+      for (const link of chain) {
+        pathKey += `/${link.config.name}`;
+      }
+      const joinAlias = joinAliases.get(pathKey)!;
+      let clause = `${quoteIdentifier(joinAlias)}.${quoteIdentifier(leaf.column)} ${leaf.direction.toUpperCase()}`;
+      if (leaf.nulls) {
+        clause += ` NULLS ${leaf.nulls.toUpperCase()}`;
+      }
+      return clause;
+    }
+
+    // Regular column ordering
+    let clause = `${quoteIdentifier(alias)}.${quoteIdentifier(item.column)} ${item.direction.toUpperCase()}`;
+    if (item.nulls) {
+      clause += ` NULLS ${item.nulls.toUpperCase()}`;
+    }
+    return clause;
+  });
+
+  const joinSqlPrefixed = joinSql ? ` ${joinSql}` : '';
+  return { joinSql: joinSqlPrefixed, orderByClause: ` ORDER BY ${parts.join(', ')}` };
+}
+
+// Keep the simple compileOrderBy for use by relationship subqueries (no JOINs needed there)
 function compileOrderBy(orderBy: OrderByItem[], alias: string): string {
   if (orderBy.length === 0) return '';
 
@@ -614,8 +787,10 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
     ? ensureDistinctOnInOrderBy(distinctOn, opts.orderBy)
     : opts.orderBy;
 
-  // ORDER BY
-  const orderByClause = effectiveOrderBy ? compileOrderBy(effectiveOrderBy, alias) : '';
+  // ORDER BY — compute JOINs and ORDER BY clause in a single pass
+  const { joinSql: orderByJoinsClause, orderByClause } = effectiveOrderBy
+    ? compileOrderByFull(effectiveOrderBy, alias, aliasCounter)
+    : { joinSql: '', orderByClause: '' };
 
   // LIMIT / OFFSET
   let limitOffsetClause = '';
@@ -633,7 +808,7 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
   if (orderByClause || limitOffsetClause || distinctOnClause) {
     const innerSql = [
       `SELECT ${distinctOnClause}${jsonFields ? `json_build_object(${jsonFields}) AS "_row_"` : `${quoteIdentifier(alias)}.*`}`,
-      `FROM ${tableRef} ${quoteIdentifier(alias)}`,
+      `FROM ${tableRef} ${quoteIdentifier(alias)}${orderByJoinsClause}`,
       whereClause ? whereClause.trim() : null,
       orderByClause ? orderByClause.trim() : null,
       limitOffsetClause ? limitOffsetClause.trim() : null,
