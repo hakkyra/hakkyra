@@ -206,7 +206,6 @@ export function buildMutationInputTypes(
   filterType?: GraphQLInputObjectType,
 ): MutationInputTypes {
   const typeName = getTypeName(table);
-
   // ── InsertInput ────────────────────────────────────────────────────────
   const insertInput = new GraphQLInputObjectType({
     name: `${typeName}InsertInput`,
@@ -420,7 +419,7 @@ export function buildMutationInputTypes(
 
   // ── GroupedAggregate ────────────────────────────────────────────────────
   const groupedAggregate = new GraphQLObjectType({
-    name: `${typeName}GroupedAggregate`,
+    name: `${typeName}GroupByAggregate`,
     description: `A single grouped aggregate result for ${typeName}.`,
     fields: {
       keys: {

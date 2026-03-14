@@ -279,7 +279,7 @@ export const RawActionSchema = z
     name: z.string(),
     definition: z
       .object({
-        kind: z.enum(['synchronous', 'asynchronous']).optional(),
+        kind: z.string().optional(),
         handler: z.string().optional(),
         handler_from_env: z.string().optional(),
         forward_client_headers: z.boolean().optional(),

@@ -178,8 +178,8 @@ export const ActionRelationshipSchema = z.object({
 export const ActionConfigSchema = z.object({
   name: z.string(),
   definition: z.object({
-    kind: z.enum(['synchronous', 'asynchronous']),
-    type: z.enum(['query', 'mutation']),
+    kind: z.enum(['synchronous', 'asynchronous']).default('synchronous'),
+    type: z.enum(['query', 'mutation']).default('mutation'),
     handler: z.string(),
     handlerFromEnv: z.string().optional(),
     forwardClientHeaders: z.boolean().optional(),

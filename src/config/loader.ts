@@ -625,8 +625,8 @@ function transformAction(raw: RawAction): ActionConfig {
   return {
     name: raw.name,
     definition: {
-      kind: raw.definition.kind ?? 'synchronous',
-      type: (raw.definition.type as 'query' | 'mutation') ?? 'mutation',
+      kind: raw.definition.kind || undefined,
+      type: raw.definition.type || undefined,
       handler,
       handlerFromEnv: raw.definition.handler_from_env,
       forwardClientHeaders: raw.definition.forward_client_headers,
