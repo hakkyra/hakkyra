@@ -82,17 +82,24 @@ describe('Permission Filter Compiler', () => {
   });
 
   describe('null check', () => {
-    it('should compile _is_null: true', () => {
-      const filter = compileFilter({ country_id: { _is_null: true } } as BoolExp);
+    it('should compile _isNull: true', () => {
+      const filter = compileFilter({ country_id: { _isNull: true } } as BoolExp);
       const result = filter.toSQL(session, 0);
       expect(result.sql).toContain('IS NULL');
       expect(result.params).toHaveLength(0);
     });
 
-    it('should compile _is_null: false', () => {
-      const filter = compileFilter({ country_id: { _is_null: false } } as BoolExp);
+    it('should compile _isNull: false', () => {
+      const filter = compileFilter({ country_id: { _isNull: false } } as BoolExp);
       const result = filter.toSQL(session, 0);
       expect(result.sql).toContain('IS NOT NULL');
+      expect(result.params).toHaveLength(0);
+    });
+
+    it('should compile _is_null from YAML metadata (compat alias)', () => {
+      const filter = compileFilter({ country_id: { _is_null: true } } as BoolExp);
+      const result = filter.toSQL(session, 0);
+      expect(result.sql).toContain('IS NULL');
       expect(result.params).toHaveLength(0);
     });
   });
@@ -121,7 +128,14 @@ describe('Permission Filter Compiler', () => {
       expect(result.params.length).toBe(1);
     });
 
-    it('should compile _has_key filter', () => {
+    it('should compile _hasKey filter', () => {
+      const filter = compileFilter({ metadata: { _hasKey: 'theme' } } as BoolExp);
+      const result = filter.toSQL(session, 0);
+      expect(result.sql).toContain('?');
+      expect(result.params).toEqual(['theme']);
+    });
+
+    it('should compile _has_key from YAML metadata (compat alias)', () => {
       const filter = compileFilter({ metadata: { _has_key: 'theme' } } as BoolExp);
       const result = filter.toSQL(session, 0);
       expect(result.sql).toContain('?');

@@ -311,7 +311,7 @@ describe('DISTINCT ON — E2E via GraphQL & REST', () => {
   it('should return distinct results via GraphQL', async () => {
     const query = `
       query {
-        clients(distinctOn: [status], orderBy: [{ status: asc }]) {
+        clients(distinctOn: [status], orderBy: [{ status: ASC }]) {
           status
         }
       }

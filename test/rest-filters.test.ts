@@ -37,7 +37,7 @@ describe('REST Filter Parsing', () => {
     it('should parse neq operator', () => {
       const result = parseRESTFilters({ status: 'neq.on_hold' });
       const where = result.where as Record<string, ColumnOperators>;
-      expect(where.status._ne).toBe('on_hold');
+      expect(where.status._neq).toBe('on_hold');
     });
   });
 
@@ -82,10 +82,10 @@ describe('REST Filter Parsing', () => {
       expect(where.active._eq).toBe(false);
     });
 
-    it('should parse is.null as _is_null: true', () => {
+    it('should parse is.null as _isNull: true', () => {
       const result = parseRESTFilters({ country_id: 'is.null' });
       const where = result.where as Record<string, ColumnOperators>;
-      expect(where.country_id._is_null).toBe(true);
+      expect(where.country_id._isNull).toBe(true);
     });
   });
 
@@ -93,7 +93,7 @@ describe('REST Filter Parsing', () => {
     it('should parse not.eq.on_hold', () => {
       const result = parseRESTFilters({ status: 'not.eq.on_hold' });
       const where = result.where as Record<string, ColumnOperators>;
-      expect(where.status._ne).toBe('on_hold');
+      expect(where.status._neq).toBe('on_hold');
     });
 
     it('should parse not.in.(archived,on_hold)', () => {

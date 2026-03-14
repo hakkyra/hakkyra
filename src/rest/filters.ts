@@ -31,7 +31,7 @@ export interface OrderByClause {
  */
 const SIMPLE_OPERATORS: Record<string, keyof ColumnOperators> = {
   eq: '_eq',
-  neq: '_ne',
+  neq: '_neq',
   gt: '_gt',
   gte: '_gte',
   lt: '_lt',
@@ -65,9 +65,9 @@ function coerceValue(raw: string): unknown {
  *
  * Examples:
  * - `eq.hello`         → { _eq: "hello" }
- * - `neq.42`           → { _ne: 42 }
+ * - `neq.42`           → { _neq: 42 }
  * - `in.(a,b,c)`       → { _in: ["a", "b", "c"] }
- * - `is.null`          → { _is_null: true }
+ * - `is.null`          → { _isNull: true }
  * - `is.true`          → { _eq: true }
  * - `like.*pattern*`   → { _like: "*pattern*" }
  */
@@ -91,7 +91,7 @@ function parseFilterValue(filterStr: string): ColumnOperators | null {
   if (operator === 'is') {
     const lowerVal = rawValue.toLowerCase();
     if (lowerVal === 'null') {
-      return { _is_null: true };
+      return { _isNull: true };
     }
     if (lowerVal === 'true') {
       return { _eq: true };
@@ -107,12 +107,12 @@ function parseFilterValue(filterStr: string): ColumnOperators | null {
     const inner = parseFilterValue(rawValue);
     if (!inner) return null;
     // Negate by wrapping — for common cases we can map directly
-    if ('_eq' in inner) return { _ne: inner._eq } as ColumnOperators;
-    if ('_ne' in inner) return { _eq: inner._ne } as ColumnOperators;
+    if ('_eq' in inner) return { _neq: inner._eq } as ColumnOperators;
+    if ('_neq' in inner) return { _eq: inner._neq } as ColumnOperators;
     if ('_in' in inner) return { _nin: inner._in } as ColumnOperators;
     if ('_like' in inner) return { _nlike: inner._like } as ColumnOperators;
     if ('_ilike' in inner) return { _nilike: inner._ilike } as ColumnOperators;
-    if ('_is_null' in inner) return { _is_null: !inner._is_null } as ColumnOperators;
+    if ('_isNull' in inner) return { _isNull: !inner._isNull } as ColumnOperators;
     return inner;
   }
 

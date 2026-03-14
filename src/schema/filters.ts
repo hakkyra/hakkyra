@@ -35,10 +35,10 @@ const comparisonTypeCache = new Map<string, GraphQLInputObjectType>();
 function baseComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
   return {
     _eq: { type: scalarType },
-    _ne: { type: scalarType },
+    _neq: { type: scalarType },
     _in: { type: new GraphQLList(new GraphQLNonNull(scalarType)) },
     _nin: { type: new GraphQLList(new GraphQLNonNull(scalarType)) },
-    _is_null: { type: GraphQLBoolean },
+    _isNull: { type: GraphQLBoolean },
   };
 }
 
@@ -75,10 +75,10 @@ function jsonbComparisonFields(scalarType: GraphQLInputType): Record<string, { t
   return {
     ...baseComparisonFields(scalarType),
     _contains: { type: scalarType },
-    _contained_in: { type: scalarType },
-    _has_key: { type: GraphQLString },
-    _has_keys_any: { type: new GraphQLList(new GraphQLNonNull(GraphQLString as unknown as GraphQLScalarType)) },
-    _has_keys_all: { type: new GraphQLList(new GraphQLNonNull(GraphQLString as unknown as GraphQLScalarType)) },
+    _containedIn: { type: scalarType },
+    _hasKey: { type: GraphQLString },
+    _hasKeysAny: { type: new GraphQLList(new GraphQLNonNull(GraphQLString as unknown as GraphQLScalarType)) },
+    _hasKeysAll: { type: new GraphQLList(new GraphQLNonNull(GraphQLString as unknown as GraphQLScalarType)) },
   };
 }
 

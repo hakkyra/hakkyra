@@ -256,7 +256,7 @@ describe('GraphQL E2E', () => {
       const { body } = await graphqlRequest(
         `query {
           clients(
-            orderBy: [{ username: asc }]
+            orderBy: [{ username: ASC }]
             limit: 2
           ) { id username }
         }`,

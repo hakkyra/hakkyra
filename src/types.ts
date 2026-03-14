@@ -167,14 +167,14 @@ export type ColumnBoolExps = {
 
 export interface ColumnOperators {
   _eq?: unknown;
-  _ne?: unknown;
+  _neq?: unknown;
   _gt?: unknown;
   _lt?: unknown;
   _gte?: unknown;
   _lte?: unknown;
   _in?: unknown[];
   _nin?: unknown[];
-  _is_null?: boolean;
+  _isNull?: boolean;
   _like?: string;
   _nlike?: string;
   _ilike?: string;
@@ -187,10 +187,10 @@ export interface ColumnOperators {
   _niregex?: string;
   // JSONB operators
   _contains?: unknown;
-  _contained_in?: unknown;
-  _has_key?: string;
-  _has_keys_any?: string[];
-  _has_keys_all?: string[];
+  _containedIn?: unknown;
+  _hasKey?: string;
+  _hasKeysAny?: string[];
+  _hasKeysAll?: string[];
 }
 
 // ─── Custom Root Fields ─────────────────────────────────────────────────────
