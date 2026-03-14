@@ -334,6 +334,72 @@ describe('stringify_numeric_types', () => {
   });
 });
 
+describe('JSONB _cast operator', () => {
+  const adminSession = makeSession('admin');
+
+  it('should compile _cast String with _like to (col)::text LIKE $N', () => {
+    const table = findTable('client_data');
+    const query = compileSelect({
+      table,
+      columns: ['id', 'key', 'value'],
+      where: { value: { _cast: { String: { _like: '%dark%' } } } } as BoolExp,
+      session: adminSession,
+    });
+    expect(query.sql).toContain('::text');
+    expect(query.sql).toContain('LIKE');
+    expect(query.params).toContain('%dark%');
+  });
+
+  it('should execute _cast String _like filter against real DB', async () => {
+    const pool = getPool();
+    const table = findTable('client_data');
+    const query = compileSelect({
+      table,
+      columns: ['id', 'key', 'value'],
+      where: { value: { _cast: { String: { _like: '%dark%' } } } } as BoolExp,
+      session: adminSession,
+    });
+    const result = await pool.query(query.sql, query.params);
+    const data = result.rows[0].data;
+    // The preferences row has {"theme": "dark", "notifications": true}
+    expect(data.length).toBeGreaterThanOrEqual(1);
+    for (const row of data) {
+      expect(row.key).toBe('preferences');
+    }
+  });
+
+  it('should compile _cast String with _ilike', () => {
+    const table = findTable('client_data');
+    const query = compileSelect({
+      table,
+      columns: ['id', 'key'],
+      where: { value: { _cast: { String: { _ilike: '%HELSINKI%' } } } } as BoolExp,
+      session: adminSession,
+    });
+    expect(query.sql).toContain('::text');
+    expect(query.sql).toContain('ILIKE');
+    expect(query.params).toContain('%HELSINKI%');
+  });
+
+  it('should combine _cast with other JSONB operators', () => {
+    const table = findTable('client_data');
+    const query = compileSelect({
+      table,
+      columns: ['id', 'key'],
+      where: {
+        value: {
+          _cast: { String: { _like: '%dark%' } },
+          _has_key: 'theme',
+        },
+      } as BoolExp,
+      session: adminSession,
+    });
+    expect(query.sql).toContain('::text');
+    expect(query.sql).toContain('LIKE');
+    expect(query.sql).toContain('?');
+  });
+});
+
 describe('SQL SELECT Aggregate', () => {
   const adminSession = makeSession('admin');
 

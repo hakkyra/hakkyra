@@ -191,6 +191,10 @@ export interface ColumnOperators {
   _has_key?: string;
   _has_keys_any?: string[];
   _has_keys_all?: string[];
+  // JSONB cast expression
+  _cast?: {
+    String?: ColumnOperators;
+  };
 }
 
 // ─── Custom Root Fields ─────────────────────────────────────────────────────
