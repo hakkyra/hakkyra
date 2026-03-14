@@ -1196,3 +1196,120 @@ describe('Health endpoints', () => {
     expect((body as { status: string }).status).toBe('ok');
   });
 });
+
+// ── Aggregate BoolExp Filter Tests ────────────────────────────────────────
+
+describe('Aggregate BoolExp (filter by array relationship aggregates)', () => {
+  it('filters clients by invoice count > 1 (only Alice has 2 invoices)', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(where: { invoicesAggregate: { count: { predicate: { _gt: 1 } } } }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients).toHaveLength(1);
+    expect(field(clients[0], 'id')).toBe(ALICE_ID);
+  });
+
+  it('filters clients by invoice count == 0 (only Charlie has no invoices)', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(where: { invoicesAggregate: { count: { predicate: { _eq: 0 } } } }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients).toHaveLength(1);
+    expect(field(clients[0], 'id')).toBe(CHARLIE_ID);
+  });
+
+  it('filters clients by account count >= 1 (all clients have accounts)', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(where: { accountsAggregate: { count: { predicate: { _gte: 1 } } } }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients).toHaveLength(4);
+  });
+
+  it('supports filter sub-field to count only specific rows', async () => {
+    // Count only invoices with state 'paid' -- Alice has 1 paid, Bob has 1, Diana has 1
+    // Filter clients where paid invoice count > 0
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(
+          where: {
+            invoicesAggregate: {
+              count: {
+                filter: { state: { _eq: PAID } }
+                predicate: { _gt: 0 }
+              }
+            }
+          }
+          orderBy: [{ username: ASC }]
+        ) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    // Alice (1 paid), Bob (1 paid), Diana (1 paid) = 3 clients
+    expect(clients).toHaveLength(3);
+    // Charlie should NOT be in the results
+    const ids = clients.map((c: AnyRow) => field(c, 'id'));
+    expect(ids).not.toContain(CHARLIE_ID);
+  });
+
+  it('can combine aggregate filter with regular column filter', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(
+          where: {
+            _and: [
+              { status: { _eq: ACTIVE } }
+              { invoicesAggregate: { count: { predicate: { _gt: 0 } } } }
+            ]
+          }
+        ) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    // All test clients are active, but Charlie has 0 invoices
+    expect(clients).toHaveLength(3);
+    const ids = clients.map((c: AnyRow) => field(c, 'id'));
+    expect(ids).not.toContain(CHARLIE_ID);
+  });
+});
