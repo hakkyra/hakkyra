@@ -13,6 +13,7 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 - **Permissions** — row-level and column-level security per role, compiled to SQL at startup, with inherited role support
 - **Authentication** — JWT (HS256, RS256, ES256, Ed25519), JWKS auto-rotation, webhook auth
 - **Relationships** — object and array relationships resolved in a single SQL query
+- **Table-based enums** — `is_enum: true` tables become GraphQL enum types; FK columns auto-typed
 - **Subscriptions** — real-time updates via WebSocket (graphql-ws protocol) with LISTEN/NOTIFY + Redis pub/sub fanout for multi-instance deployments
 - **Event triggers** — capture INSERT/UPDATE/DELETE changes and deliver webhooks with retry
 - **Cron triggers** — scheduled webhook invocations via pg-boss

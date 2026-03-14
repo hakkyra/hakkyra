@@ -18,7 +18,7 @@ import type { HakkyraConfig, TableInfo, CompiledPermission, SchemaModel } from '
 import { createConnectionManager } from './connections/manager.js';
 import type { ConnectionManager } from './connections/manager.js';
 import { introspectDatabase } from './introspection/introspector.js';
-import { mergeSchemaModel } from './introspection/merger.js';
+import { mergeSchemaModel, resolveTableEnums } from './introspection/merger.js';
 import { buildPermissionLookup } from './permissions/lookup.js';
 import type { PermissionLookup } from './permissions/lookup.js';
 import { generateSchema } from './schema/generator.js';
@@ -136,6 +136,9 @@ export async function createServer(
   // 3. Merge introspection with config -> SchemaModel
   const mergeResult = mergeSchemaModel(introspection, config);
   const schemaModel: SchemaModel = mergeResult.model;
+
+  // 3b. Resolve table-based enums (is_enum: true)
+  await resolveTableEnums(schemaModel, primaryPool);
 
   // Log merge warnings
   if (mergeResult.warnings.length > 0) {
@@ -634,6 +637,7 @@ export async function createServer(
         const newConfig = await loadConfig(options.metadataPath!, options.configPath);
         const newIntrospection = await introspectDatabase(primaryPool);
         const newMerge = mergeSchemaModel(newIntrospection, newConfig);
+        await resolveTableEnums(newMerge.model, primaryPool);
         const newPermLookup = buildPermissionLookup(newMerge.model.tables, newConfig.inheritedRoles);
         configureStringifyNumericTypes(newConfig.server.stringifyNumericTypes);
         const newSchema = generateSchema(newMerge.model, {

@@ -445,6 +445,7 @@ function transformTable(raw: RawTableYaml): TableInfo {
     eventTriggers,
     customRootFields,
     computedFields: computedFields.length > 0 ? computedFields : undefined,
+    isEnum: raw.is_enum || undefined,
   };
 }
 

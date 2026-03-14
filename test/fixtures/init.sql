@@ -44,6 +44,17 @@ CREATE TABLE role (
   description TEXT
 );
 
+-- Hasura-style table-based enum (is_enum: true)
+CREATE TABLE priority_type (
+  value TEXT PRIMARY KEY,
+  description TEXT
+);
+INSERT INTO priority_type (value, description) VALUES
+  ('low', 'Low priority'),
+  ('normal', 'Normal priority'),
+  ('high', 'High priority'),
+  ('urgent', 'Urgent priority');
+
 -- ─── Core entities ──────────────────────────────────────────────────────────
 
 CREATE TABLE client (
@@ -143,6 +154,7 @@ CREATE TABLE appointment (
   product_id UUID NOT NULL REFERENCES product(id),
   branch_id UUID NOT NULL REFERENCES branch(id),
   currency_id TEXT NOT NULL REFERENCES currency(id),
+  priority TEXT NOT NULL DEFAULT 'normal' REFERENCES priority_type(value),
   notes TEXT,
   active BOOLEAN DEFAULT true,
   discount_rate NUMERIC(20,8) DEFAULT 1,
@@ -366,9 +378,9 @@ INSERT INTO client_service (client_id, plan_item_id, currency_id, status, amount
   ('d0000000-0000-0000-0000-000000000002', 'bb000000-0000-0000-0000-000000000001', 'USD', 'pending', 50.00, 2000.00, 0);
 
 -- Appointments
-INSERT INTO appointment (client_id, product_id, branch_id, currency_id, active) VALUES
-  ('d0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'EUR', false),
-  ('d0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', 'EUR', true);
+INSERT INTO appointment (client_id, product_id, branch_id, currency_id, priority, active) VALUES
+  ('d0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'EUR', 'high', false),
+  ('d0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000001', 'EUR', 'normal', true);
 
 -- Admin users
 INSERT INTO "user" (email, name, role_id) VALUES

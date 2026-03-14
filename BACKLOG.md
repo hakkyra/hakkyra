@@ -174,7 +174,7 @@
 
 ### P1.12 — Test Infrastructure
 - [x] Docker Compose with PostgreSQL 17
-- [x] Test fixtures: 18 tables + 1 materialized view + 5 enums + 3 computed fields
+- [x] Test fixtures: 19 tables + 1 materialized view + 5 enums + 1 table-based enum + 3 computed fields
 - [x] YAML metadata in Hasura-compatible format (19 table configs, 5 roles, 3 inherited roles)
 - [x] Event triggers, cron triggers, actions, REST endpoints, query collections
 - [x] Seed data: fixture data for all tracked tables
@@ -536,6 +536,20 @@ Hasura supports inherited roles where a composite role inherits the union of per
 - [x] Tracked function permissions: check constituent roles when inherited role not directly listed
 - [x] Hot-reload support: inherited roles updated on config change
 
+### P5.13 — Table-Based Enums (`is_enum`) (Medium) — COMPLETE
+
+Hasura supports marking a table as `is_enum: true` in metadata, turning its primary key values into a GraphQL enum type. Columns with foreign keys to enum tables are typed as the enum instead of String.
+
+- [x] Parse `is_enum: true` from table YAML metadata (top-level field)
+- [x] Add `isEnum` flag to `TableInfo` interface
+- [x] Query enum table PK values from database at startup
+- [x] Build GraphQL enum types from table values (reuses existing PG enum pipeline)
+- [x] Override FK column types to use enum type (uppercase serialization: `'active'` → `ACTIVE`)
+- [x] Remove auto-detected relationships pointing to enum tables (FK becomes enum scalar)
+- [x] Exclude enum tables from queryable types (not exposed as GraphQL object types)
+- [x] Hot-reload support (resolveTableEnums called on config change)
+- [x] 3 E2E tests (enum value uppercasing, enum filtering, enum table not queryable)
+
 ---
 
 ## Test Summary
@@ -548,7 +562,7 @@ Hasura supports inherited roles where a composite role inherits the union of per
 | SQL compiler | 35 | Pass |
 | Schema generator | 52 | Pass |
 | REST filters | 30 | Pass |
-| Server / E2E | 74 | Pass |
+| Server / E2E | 79 | Pass |
 | Events | 9 | Pass |
 | Crons | 14 | Pass |
 | Subscriptions | 15 | Pass |
@@ -570,4 +584,4 @@ Hasura supports inherited roles where a composite role inherits the union of per
 | Tracked functions | 20 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
-| **Total** | **~884** | **29 suites, all passing** |
+| **Total** | **~889** | **29 suites, all passing** |

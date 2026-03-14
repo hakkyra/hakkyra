@@ -19,6 +19,7 @@ configuration:
     product_id: productId
     branch_id: branchId
     currency_id: currencyId
+    priority: priority
     notes: notes
     active: active
     discount_rate: discountRate

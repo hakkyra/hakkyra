@@ -76,6 +76,7 @@ export interface TableInfo {
   eventTriggers: EventTriggerConfig[];
   customRootFields?: CustomRootFields;
   computedFields?: ComputedFieldConfig[];
+  isEnum?: boolean;
 }
 
 // ─── Computed Fields ─────────────────────────────────────────────────────────

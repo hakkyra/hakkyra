@@ -3,8 +3,10 @@
  * the unified SchemaModel used by the rest of Hakkyra.
  */
 
+import type { Pool } from 'pg';
 import type {
   CustomQueryConfig,
+  EnumInfo,
   ForeignKeyInfo,
   HakkyraConfig,
   RelationshipConfig,
@@ -13,6 +15,7 @@ import type {
   TablePermissions,
 } from '../types.js';
 import type { IntrospectedTable, IntrospectionResult } from './introspector.js';
+import { quoteIdentifier } from '../sql/utils.js';
 
 // ─── Warnings ────────────────────────────────────────────────────────────────
 
@@ -273,6 +276,7 @@ export function mergeSchemaModel(
       eventTriggers: configTable?.eventTriggers ?? [],
       customRootFields: configTable?.customRootFields,
       computedFields: configTable?.computedFields,
+      isEnum: configTable?.isEnum,
     };
 
     mergedTables.push(tableInfo);
@@ -377,4 +381,86 @@ function validatePermissionColumns(
   for (const [role, perm] of Object.entries(permissions.update)) {
     checkColumns(perm.columns, `update[${role}]`);
   }
+}
+
+// ─── Table-based enum resolution ────────────────────────────────────────────
+
+/**
+ * Resolve Hasura-style table-based enums (is_enum: true).
+ *
+ * 1. Query each enum table to get its values (from the PK column).
+ * 2. Add EnumInfo entries to the schema model.
+ * 3. For columns with a FK to an enum table, override their udtName
+ *    so the existing type-mapping code treats them as enum columns.
+ * 4. Remove auto-detected relationships that point to enum tables
+ *    (the FK becomes an enum-typed scalar, not a relationship).
+ */
+export async function resolveTableEnums(
+  model: SchemaModel,
+  pool: Pool,
+): Promise<void> {
+  // Collect enum tables: { "public.my_enum_table" → TableInfo }
+  const enumTables = new Map<string, TableInfo>();
+  for (const table of model.tables) {
+    if (table.isEnum) {
+      enumTables.set(`${table.schema}.${table.name}`, table);
+    }
+  }
+
+  if (enumTables.size === 0) return;
+
+  // Query each enum table to get its values
+  for (const [key, table] of enumTables) {
+    // The PK column provides the enum values
+    const pkCol = table.primaryKey[0];
+    if (!pkCol) {
+      console.warn(`[hakkyra:enum] Enum table "${key}" has no primary key, skipping.`);
+      continue;
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT ${quoteIdentifier(pkCol)} AS "value" FROM ${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)} ORDER BY ${quoteIdentifier(pkCol)}`,
+      );
+      const values = result.rows.map((row: Record<string, unknown>) => String(row.value));
+
+      model.enums.push({
+        name: table.name,
+        schema: table.schema,
+        values,
+      });
+    } catch (err) {
+      console.warn(`[hakkyra:enum] Failed to query enum table "${key}":`, err);
+    }
+  }
+
+  // Build a set of enum table keys for quick lookup
+  const enumTableKeys = new Set(enumTables.keys());
+
+  // For each non-enum table, remap FK columns and remove enum-table relationships
+  for (const table of model.tables) {
+    if (table.isEnum) continue;
+
+    for (const fk of table.foreignKeys) {
+      const refKey = `${fk.referencedSchema}.${fk.referencedTable}`;
+      if (!enumTableKeys.has(refKey)) continue;
+
+      // Single-column FK to an enum table → remap the column's udtName
+      if (fk.columns.length === 1) {
+        const col = table.columns.find((c) => c.name === fk.columns[0]);
+        if (col) {
+          col.udtName = fk.referencedTable;
+        }
+      }
+    }
+
+    // Remove relationships that point to enum tables
+    table.relationships = table.relationships.filter((rel) => {
+      const remoteKey = `${rel.remoteTable.schema}.${rel.remoteTable.name}`;
+      return !enumTableKeys.has(remoteKey);
+    });
+  }
+
+  // Remove enum tables from the tables list (they're not queryable types)
+  model.tables = model.tables.filter((t) => !t.isEnum);
 }

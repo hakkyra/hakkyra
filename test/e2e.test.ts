@@ -274,6 +274,47 @@ describe('GraphQL E2E', () => {
     });
   });
 
+  // ── Table-based enum (is_enum: true) ─────────────────────────────────
+
+  describe('table-based enum (is_enum)', () => {
+    it('returns uppercased enum values for FK columns referencing enum tables', async () => {
+      const { body } = await graphqlRequest(
+        `query { appointments { id priority } }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      expect(body.errors).toBeUndefined();
+      const appointments = (body.data as { appointments: AnyRow[] }).appointments;
+      expect(appointments.length).toBeGreaterThan(0);
+      // priority_type values are 'high' and 'normal' in DB, should be UPPERCASED in GraphQL
+      const priorities = appointments.map((a) => field<string>(a, 'priority'));
+      expect(priorities).toContain('HIGH');
+      expect(priorities).toContain('NORMAL');
+    });
+
+    it('filters by enum value using uppercase', async () => {
+      const { body } = await graphqlRequest(
+        `query { appointments(where: { priority: { _eq: HIGH } }) { id priority } }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      expect(body.errors).toBeUndefined();
+      const appointments = (body.data as { appointments: AnyRow[] }).appointments;
+      expect(appointments.length).toBe(1);
+      expect(field(appointments[0], 'priority')).toBe('HIGH');
+    });
+
+    it('does not expose enum table as a queryable type', async () => {
+      const { body } = await graphqlRequest(
+        `query { priorityType { value } }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      // Should fail because the enum table is not a queryable type
+      expect(body.errors).toBeDefined();
+    });
+  });
+
   // ── JSONB _cast filter ────────────────────────────────────────────────
 
   describe('query with JSONB _cast filter', () => {

@@ -3,6 +3,7 @@
 - !include public_country.yaml
 - !include public_language.yaml
 - !include public_role.yaml
+- !include public_priority_type.yaml
 - !include public_client.yaml
 - !include public_client_data.yaml
 - !include public_account.yaml

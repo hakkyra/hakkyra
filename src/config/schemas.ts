@@ -245,6 +245,7 @@ export const RawTableYamlSchema = z
     update_permissions: z.array(RawUpdatePermissionEntrySchema).optional(),
     delete_permissions: z.array(RawDeletePermissionEntrySchema).optional(),
     event_triggers: z.array(RawEventTriggerSchema).optional(),
+    is_enum: z.boolean().optional(),
   })
   .passthrough();
 
