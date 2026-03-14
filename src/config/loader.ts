@@ -493,7 +493,7 @@ function transformTrackedFunction(raw: RawTrackedFunction): TrackedFunctionConfi
   return {
     name: raw.function.name,
     schema: raw.function.schema ?? 'public',
-    exposedAs: raw.configuration?.exposed_as ?? 'query',
+    exposedAs: raw.configuration?.exposed_as,
     customRootFields: raw.configuration?.custom_root_fields
       ? {
           function: raw.configuration.custom_root_fields.function,

@@ -388,7 +388,7 @@ export const ComputedFieldConfigSchema = z.object({
 export const TrackedFunctionConfigSchema = z.object({
   name: z.string(),
   schema: z.string().default('public'),
-  exposedAs: z.enum(['query', 'mutation']).default('query'),
+  exposedAs: z.enum(['query', 'mutation']).optional(),
   customRootFields: z.object({
     function: z.string().optional(),
     functionAggregate: z.string().optional(),

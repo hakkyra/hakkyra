@@ -224,7 +224,13 @@ export function resolveTrackedFunctions(
       userArgs.push({ name: argName, pgType: argType });
     }
 
-    result.push({ config, functionInfo: fn, returnTable, userArgs });
+    // Resolve exposedAs: if not explicitly set, default based on volatility
+    // (Hasura exposes volatile functions as mutations, stable/immutable as queries)
+    const resolvedConfig = config.exposedAs
+      ? config
+      : { ...config, exposedAs: fn.volatility === 'volatile' ? 'mutation' as const : 'query' as const };
+
+    result.push({ config: resolvedConfig, functionInfo: fn, returnTable, userArgs });
   }
 
   return result;

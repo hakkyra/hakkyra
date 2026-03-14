@@ -97,7 +97,7 @@ describe('Tracked Functions — Config Loading', () => {
     const fn = schemaModel.trackedFunctions.find((f) => f.name === 'search_clients');
     expect(fn).toBeDefined();
     expect(fn!.schema).toBe('public');
-    expect(fn!.exposedAs).toBe('query');
+    expect(fn!.exposedAs).toBeUndefined(); // resolved later based on volatility
     expect(fn!.permissions).toBeDefined();
     expect(fn!.permissions!.some((p) => p.role === 'backoffice')).toBe(true);
     expect(fn!.permissions!.some((p) => p.role === 'administrator')).toBe(true);
@@ -107,7 +107,7 @@ describe('Tracked Functions — Config Loading', () => {
     const fn = schemaModel.trackedFunctions.find((f) => f.name === 'deactivate_client');
     expect(fn).toBeDefined();
     expect(fn!.schema).toBe('public');
-    expect(fn!.exposedAs).toBe('mutation');
+    expect(fn!.exposedAs).toBe('mutation'); // explicitly set in metadata
     expect(fn!.permissions).toBeDefined();
     expect(fn!.permissions!.some((p) => p.role === 'administrator')).toBe(true);
   });
@@ -121,7 +121,7 @@ describe('Tracked Functions — Schema Generation', () => {
     expect(schemaModel.trackedFunctions.length).toBeGreaterThanOrEqual(2);
     const searchFn = schemaModel.trackedFunctions.find((f) => f.name === 'search_clients');
     expect(searchFn).toBeDefined();
-    expect(searchFn!.exposedAs).toBe('query');
+    expect(searchFn!.exposedAs).toBeUndefined(); // resolved later based on volatility
   });
 
   it('should register deactivateClient as a mutation in the schema model', () => {
