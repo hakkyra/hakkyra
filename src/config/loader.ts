@@ -182,6 +182,7 @@ export async function loadConfig(
   const cronTriggers = await loadCronTriggers(absMetadataDir);
   const apiConfig = await loadApiConfig(absMetadataDir);
   const serverConfig = await loadServerConfig(serverConfigPath);
+  const inheritedRoles = await loadInheritedRoles(absMetadataDir);
 
   const tableAliases = apiConfig?.table_aliases ?? {};
   for (const table of tables) {
@@ -212,6 +213,7 @@ export async function loadConfig(
     customQueries: transformCustomQueries(apiConfig),
     apiDocs: transformDocsConfig(apiConfig),
     tableAliases,
+    inheritedRoles,
     jobQueue: transformJobQueueConfig(serverConfig),
     redis: transformRedisConfig(serverConfig),
     eventLogRetentionDays: serverConfig?.event_log?.retention_days,
@@ -648,6 +650,28 @@ function transformHeader(raw: RawHeader): WebhookHeader {
     value: raw.value,
     valueFromEnv: raw.value_from_env,
   };
+}
+
+// ─── Inherited Roles ─────────────────────────────────────────────────────────
+
+async function loadInheritedRoles(
+  metadataDir: string,
+): Promise<Record<string, string[]>> {
+  const filePath = path.join(metadataDir, 'inherited_roles.yaml');
+  const raw = await readYamlIfExists(filePath);
+  if (!raw || !Array.isArray(raw)) return {};
+
+  const result: Record<string, string[]> = {};
+  for (const entry of raw) {
+    if (entry && typeof entry === 'object' && 'role_name' in entry && 'role_set' in entry) {
+      const roleName = entry.role_name as string;
+      const roleSet = entry.role_set as string[];
+      if (typeof roleName === 'string' && Array.isArray(roleSet)) {
+        result[roleName] = roleSet;
+      }
+    }
+  }
+  return result;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────

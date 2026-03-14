@@ -420,6 +420,7 @@ export const HakkyraConfigSchema = z.object({
   customQueries: z.array(CustomQueryConfigSchema),
   apiDocs: APIDocsConfigSchema,
   tableAliases: z.record(z.string(), z.string()),
+  inheritedRoles: z.record(z.string(), z.array(z.string())).default({}),
   jobQueue: JobQueueConfigSchema.optional(),
   redis: RedisConfigSchema.optional(),
   eventLogRetentionDays: z.number().default(7),

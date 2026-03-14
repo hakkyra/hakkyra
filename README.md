@@ -10,7 +10,7 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 
 - **GraphQL API** — auto-generated queries, mutations, and subscriptions for every tracked table
 - **REST API** — CRUD endpoints with PostgREST-style filtering and pagination
-- **Permissions** — row-level and column-level security per role, compiled to SQL at startup
+- **Permissions** — row-level and column-level security per role, compiled to SQL at startup, with inherited role support
 - **Authentication** — JWT (HS256, RS256, ES256, Ed25519), JWKS auto-rotation, webhook auth
 - **Relationships** — object and array relationships resolved in a single SQL query
 - **Subscriptions** — real-time updates via WebSocket (graphql-ws protocol) with LISTEN/NOTIFY + Redis pub/sub fanout for multi-instance deployments

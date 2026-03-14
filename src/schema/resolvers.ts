@@ -52,6 +52,9 @@ export interface ResolverContext {
   /** Permission lookup — returns compiled permissions for a table + role. */
   permissionLookup: ResolverPermissionLookup;
 
+  /** Inherited roles mapping (role_name → constituent role_set). */
+  inheritedRoles: Record<string, string[]>;
+
   /** All tracked tables (for relationship resolution). */
   tables: TableInfo[];
 

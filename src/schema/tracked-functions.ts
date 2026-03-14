@@ -665,11 +665,30 @@ function extractFuncArgs(
   return result;
 }
 
+/**
+ * Check if a role has permission for a tracked function, including inherited roles.
+ * An inherited role has access if any of its constituent roles has access.
+ */
+function hasRolePermission(
+  role: string,
+  permissions: { role: string }[],
+  inheritedRoles: Record<string, string[]>,
+): boolean {
+  // Direct match
+  if (permissions.some((p) => p.role === role)) return true;
+  // Inherited role: check constituent roles
+  const roleSet = inheritedRoles[role];
+  if (roleSet) {
+    return roleSet.some((r) => permissions.some((p) => p.role === r));
+  }
+  return false;
+}
+
 function makeTrackedFunctionResolver(
   trackedFn: TrackedFunctionInfo,
 ): (parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: import('graphql').GraphQLResolveInfo) => Promise<unknown> {
   return async (_parent, args, context, info) => {
-    const { auth, queryWithSession, permissionLookup, tables, functions } = context;
+    const { auth, queryWithSession, permissionLookup, inheritedRoles, tables, functions } = context;
     const { config, functionInfo: fn, returnTable } = trackedFn;
     if (!returnTable) throw new Error(`No return table for function ${config.name}`);
 
@@ -680,7 +699,7 @@ function makeTrackedFunctionResolver(
           `Permission denied: no roles have access to function "${config.name}"`,
         );
       }
-      const hasPerm = config.permissions.some((p) => p.role === auth.role);
+      const hasPerm = hasRolePermission(auth.role, config.permissions, inheritedRoles);
       if (!hasPerm) {
         throw new Error(
           `Permission denied: role "${auth.role}" does not have access to function "${config.name}"`,
@@ -759,7 +778,7 @@ function makeTrackedFunctionAggregateResolver(
   trackedFn: TrackedFunctionInfo,
 ): (parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: import('graphql').GraphQLResolveInfo) => Promise<unknown> {
   return async (_parent, args, context, info) => {
-    const { auth, queryWithSession, permissionLookup } = context;
+    const { auth, queryWithSession, permissionLookup, inheritedRoles } = context;
     const { config, functionInfo: fn, returnTable } = trackedFn;
     if (!returnTable) throw new Error(`No return table for function ${config.name}`);
 
@@ -770,7 +789,7 @@ function makeTrackedFunctionAggregateResolver(
           `Permission denied: no roles have access to function "${config.name}"`,
         );
       }
-      const hasPerm = config.permissions.some((p) => p.role === auth.role);
+      const hasPerm = hasRolePermission(auth.role, config.permissions, inheritedRoles);
       if (!hasPerm) {
         throw new Error(
           `Permission denied: role "${auth.role}" does not have access to function "${config.name}"`,

@@ -144,8 +144,8 @@ export async function createServer(
     }
   }
 
-  // 4. Compile permissions
-  const permissionLookup = buildPermissionLookup(schemaModel.tables);
+  // 4. Compile permissions (with inherited role expansion)
+  const permissionLookup = buildPermissionLookup(schemaModel.tables, config.inheritedRoles);
 
   // 4b. Configure numeric type stringification before schema generation
   configureStringifyNumericTypes(config.server.stringifyNumericTypes);
@@ -277,7 +277,10 @@ export async function createServer(
   // 7b. Build the resolver permission lookup adapter
   const resolverPermissionLookup = createResolverPermissionLookup(permissionLookup);
 
-  // 7c. Create query cache for compiled SQL templates
+  // 7c. Mutable ref for inherited roles (updated on hot-reload)
+  const inheritedRolesRef: { current: Record<string, string[]> } = { current: config.inheritedRoles };
+
+  // 7d. Create query cache for compiled SQL templates
   const queryCache = createQueryCache(config.queryCache.maxSize);
 
   // 7d. Mutable references for services initialized after Mercurius registration.
@@ -322,6 +325,7 @@ export async function createServer(
           return result;
         },
         permissionLookup: resolverPermissionLookup,
+        inheritedRoles: inheritedRolesRef.current,
         tables: schemaModel.tables,
         functions: schemaModel.functions,
         queryCache,
@@ -376,6 +380,7 @@ export async function createServer(
             return result;
           },
           permissionLookup: resolverPermissionLookup,
+          inheritedRoles: inheritedRolesRef.current,
           tables: schemaModel.tables,
           functions: schemaModel.functions,
           queryCache,
@@ -629,7 +634,7 @@ export async function createServer(
         const newConfig = await loadConfig(options.metadataPath!, options.configPath);
         const newIntrospection = await introspectDatabase(primaryPool);
         const newMerge = mergeSchemaModel(newIntrospection, newConfig);
-        const newPermLookup = buildPermissionLookup(newMerge.model.tables);
+        const newPermLookup = buildPermissionLookup(newMerge.model.tables, newConfig.inheritedRoles);
         configureStringifyNumericTypes(newConfig.server.stringifyNumericTypes);
         const newSchema = generateSchema(newMerge.model, {
           actions: newConfig.actions,
@@ -681,9 +686,10 @@ export async function createServer(
         // Replace schema in Mercurius
         server.graphql.replaceSchema(newCjsSchema);
 
-        // Update permission lookup
+        // Update permission lookup and inherited roles
         const newResolverPL = createResolverPermissionLookup(newPermLookup);
         Object.assign(resolverPermissionLookup, newResolverPL);
+        inheritedRolesRef.current = newConfig.inheritedRoles;
 
         // Clear query cache on schema change
         queryCache.clear();

@@ -521,6 +521,20 @@ Change root type names to match Hasura.
 - [x] Rename `Subscription` → `subscription_root`
 - [x] `schema { query: query_root, ... }` declaration emitted automatically by `printSchema`
 
+### P5.12 — Inherited Roles (Medium) — COMPLETE
+
+Hasura supports inherited roles where a composite role inherits the union of permissions from its constituent roles (`inherited_roles.yaml`).
+
+- [x] Load `inherited_roles.yaml` from metadata directory (`role_name` → `role_set` mapping)
+- [x] Store inherited roles in `HakkyraConfig` as `Record<string, string[]>`
+- [x] Table permissions: merge constituent role permissions at `buildPermissionLookup` time
+  - [x] SELECT: columns = union, filter = OR, allowAggregations = any, limit = max
+  - [x] INSERT: columns = union, check = OR
+  - [x] UPDATE: columns = union, filter = OR, check = OR
+  - [x] DELETE: filter = OR
+- [x] Tracked function permissions: check constituent roles when inherited role not directly listed
+- [x] Hot-reload support: inherited roles updated on config change
+
 ---
 
 ## Test Summary
