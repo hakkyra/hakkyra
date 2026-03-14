@@ -389,7 +389,7 @@ describe('JSONB _cast operator', () => {
       where: {
         value: {
           _cast: { String: { _like: '%dark%' } },
-          _has_key: 'theme',
+          _hasKey: 'theme',
         },
       } as BoolExp,
       session: adminSession,

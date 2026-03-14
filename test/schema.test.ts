@@ -259,9 +259,9 @@ describe('GraphQL Schema Generation', () => {
       expect((stringFieldType as GraphQLInputObjectType).name).toBe('StringComparisonExp');
     });
 
-    it('should include _cast field in JSONComparisonExp', () => {
+    it('should include _cast field in JsonbComparisonExp', () => {
       const typeMap = schema.getTypeMap();
-      const jsonCompType = typeMap['JSONComparisonExp'] as GraphQLInputObjectType | undefined;
+      const jsonCompType = typeMap['JsonbComparisonExp'] as GraphQLInputObjectType | undefined;
       expect(jsonCompType).toBeDefined();
       const fields = jsonCompType!.getFields();
       expect(fields['_cast']).toBeDefined();
