@@ -320,7 +320,7 @@ describe('GraphQL GROUP BY', () => {
   it('groups with WHERE filter', async () => {
     const token = await tokens.backoffice();
     const { status, body } = await graphqlRequest(
-      `query($branchId: UUID!) {
+      `query($branchId: Uuid!) {
         clientsAggregate(
           where: { branchId: { _eq: $branchId } }
           groupBy: [status]

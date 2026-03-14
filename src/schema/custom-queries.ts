@@ -96,27 +96,28 @@ const BUILTIN_SCALARS: Record<string, GraphQLScalarType> = {
 function paramTypeToGraphQL(typeName: string): GraphQLInputType {
   // Check PG type name mappings
   const pgMappings: Record<string, string> = {
-    uuid: 'UUID',
+    uuid: 'Uuid',
     int: 'Int',
     int2: 'Int',
     int4: 'Int',
-    int8: 'BigInt',
+    int8: 'Bigint',
     integer: 'Int',
-    bigint: 'BigInt',
+    bigint: 'Bigint',
     float: 'Float',
     float4: 'Float',
     float8: 'Float',
-    numeric: 'BigDecimal',
-    decimal: 'BigDecimal',
+    numeric: 'Numeric',
+    decimal: 'Numeric',
     text: 'String',
     varchar: 'String',
     char: 'String',
+    bpchar: 'Bpchar',
     bool: 'Boolean',
     boolean: 'Boolean',
-    json: 'JSON',
-    jsonb: 'JSON',
-    timestamp: 'DateTime',
-    timestamptz: 'DateTime',
+    json: 'json',
+    jsonb: 'Jsonb',
+    timestamp: 'Timestamptz',
+    timestamptz: 'Timestamptz',
     date: 'Date',
     time: 'Time',
     bytea: 'Bytea',
@@ -153,8 +154,8 @@ function returnFieldTypeToGraphQL(typeName: string): GraphQLOutputType {
  * Maps common column name patterns to their likely GraphQL types.
  */
 const COLUMN_TYPE_HINTS: Record<string, string> = {
-  id: 'UUID',
-  uuid: 'UUID',
+  id: 'Uuid',
+  uuid: 'Uuid',
   email: 'String',
   username: 'String',
   name: 'String',
@@ -179,10 +180,10 @@ function inferReturnFieldType(fieldName: string): GraphQLOutputType {
 
   // Check suffix patterns
   if (normalized.endsWith('_id') || normalized === 'id') {
-    return returnFieldTypeToGraphQL('UUID');
+    return returnFieldTypeToGraphQL('Uuid');
   }
   if (normalized.endsWith('_at') || normalized.endsWith('_date')) {
-    return returnFieldTypeToGraphQL('DateTime');
+    return returnFieldTypeToGraphQL('Timestamptz');
   }
   if (normalized.endsWith('_count') || normalized.endsWith('_total') ||
       normalized === 'total_sessions' || normalized === 'deposit_count') {
@@ -191,7 +192,7 @@ function inferReturnFieldType(fieldName: string): GraphQLOutputType {
   if (normalized.includes('balance') || normalized.includes('amount') ||
       normalized.includes('total_deposits') || normalized.includes('total_balance') ||
       normalized.includes('total_bonus')) {
-    return returnFieldTypeToGraphQL('BigDecimal');
+    return returnFieldTypeToGraphQL('Numeric');
   }
 
   // Fallback
@@ -314,7 +315,7 @@ function getOrCreateOutputType(
   // If no columns could be parsed, add a generic JSON result field
   if (Object.keys(fields).length === 0) {
     fields['result'] = {
-      type: customScalars['JSON'] as unknown as GraphQLOutputType,
+      type: customScalars['json'] as unknown as GraphQLOutputType,
     };
   }
 

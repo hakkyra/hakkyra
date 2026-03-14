@@ -8,16 +8,18 @@ export type GraphQLScalarName =
   | 'Float'
   | 'String'
   | 'Boolean'
-  | 'BigInt'
-  | 'BigDecimal'
-  | 'UUID'
-  | 'JSON'
-  | 'DateTime'
+  | 'Bigint'
+  | 'Numeric'
+  | 'Uuid'
+  | 'json'
+  | 'Jsonb'
+  | 'Timestamptz'
   | 'Date'
   | 'Time'
   | 'Interval'
   | 'Bytea'
-  | 'Inet';
+  | 'Inet'
+  | 'Bpchar';
 
 export interface GraphQLTypeName {
   /** The base scalar or enum name, e.g. "Int", "String", "MyEnum" */
@@ -76,15 +78,15 @@ const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> =
   serial4: { name: 'Int', isCustomScalar: false },
 
   // Big integer
-  int8: { name: 'BigInt', isCustomScalar: true },
-  bigserial: { name: 'BigInt', isCustomScalar: true },
-  serial8: { name: 'BigInt', isCustomScalar: true },
+  int8: { name: 'Bigint', isCustomScalar: true },
+  bigserial: { name: 'Bigint', isCustomScalar: true },
+  serial8: { name: 'Bigint', isCustomScalar: true },
 
   // Floating point
   float4: { name: 'Float', isCustomScalar: false },
   float8: { name: 'Float', isCustomScalar: false },
-  numeric: { name: 'BigDecimal', isCustomScalar: true },
-  money: { name: 'BigDecimal', isCustomScalar: true },
+  numeric: { name: 'Numeric', isCustomScalar: true },
+  money: { name: 'Numeric', isCustomScalar: true },
 
   // Boolean
   bool: { name: 'Boolean', isCustomScalar: false },
@@ -93,21 +95,21 @@ const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> =
   text: { name: 'String', isCustomScalar: false },
   varchar: { name: 'String', isCustomScalar: false },
   char: { name: 'String', isCustomScalar: false },
-  bpchar: { name: 'String', isCustomScalar: false },
+  bpchar: { name: 'Bpchar', isCustomScalar: true },
   name: { name: 'String', isCustomScalar: false },
   citext: { name: 'String', isCustomScalar: false },
   xml: { name: 'String', isCustomScalar: false },
 
   // UUID
-  uuid: { name: 'UUID', isCustomScalar: true },
+  uuid: { name: 'Uuid', isCustomScalar: true },
 
   // JSON
-  json: { name: 'JSON', isCustomScalar: true },
-  jsonb: { name: 'JSON', isCustomScalar: true },
+  json: { name: 'json', isCustomScalar: true },
+  jsonb: { name: 'Jsonb', isCustomScalar: true },
 
   // Timestamps & dates
-  timestamp: { name: 'DateTime', isCustomScalar: true },
-  timestamptz: { name: 'DateTime', isCustomScalar: true },
+  timestamp: { name: 'Timestamptz', isCustomScalar: true },
+  timestamptz: { name: 'Timestamptz', isCustomScalar: true },
   date: { name: 'Date', isCustomScalar: true },
   time: { name: 'Time', isCustomScalar: true },
   timetz: { name: 'Time', isCustomScalar: true },
@@ -121,14 +123,14 @@ const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> =
   cidr: { name: 'Inet', isCustomScalar: true },
   macaddr: { name: 'String', isCustomScalar: false },
 
-  // Geometric (expose as JSON for now)
-  point: { name: 'JSON', isCustomScalar: true },
-  line: { name: 'JSON', isCustomScalar: true },
-  lseg: { name: 'JSON', isCustomScalar: true },
-  box: { name: 'JSON', isCustomScalar: true },
-  path: { name: 'JSON', isCustomScalar: true },
-  polygon: { name: 'JSON', isCustomScalar: true },
-  circle: { name: 'JSON', isCustomScalar: true },
+  // Geometric (expose as json for now)
+  point: { name: 'json', isCustomScalar: true },
+  line: { name: 'json', isCustomScalar: true },
+  lseg: { name: 'json', isCustomScalar: true },
+  box: { name: 'json', isCustomScalar: true },
+  path: { name: 'json', isCustomScalar: true },
+  polygon: { name: 'json', isCustomScalar: true },
+  circle: { name: 'json', isCustomScalar: true },
 
   // OID
   oid: { name: 'Int', isCustomScalar: false },

@@ -135,12 +135,12 @@ describe('Async Actions', () => {
     });
 
     it('registers async action result query field', () => {
-      expect(sdl).toContain('requestVerificationResult(id: UUID!): RequestVerificationAsyncResult');
+      expect(sdl).toContain('requestVerificationResult(id: Uuid!): RequestVerificationAsyncResult');
     });
 
     it('generates AsyncActionId type', () => {
       expect(sdl).toContain('type AsyncActionId');
-      expect(sdl).toMatch(/type AsyncActionId\s*\{[^}]*actionId:\s*UUID!/);
+      expect(sdl).toMatch(/type AsyncActionId\s*\{[^}]*actionId:\s*Uuid!/);
     });
 
     it('generates AsyncActionStatus enum', () => {
@@ -153,11 +153,11 @@ describe('Async Actions', () => {
 
     it('generates per-action async result type with action output type', () => {
       expect(sdl).toContain('type RequestVerificationAsyncResult');
-      expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*id:\s*UUID!/);
+      expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*id:\s*Uuid!/);
       expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*status:\s*AsyncActionStatus!/);
       // output field should reference the action's original output type
       expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*output:\s*VerificationRequestResult/);
-      expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*errors:\s*JSONB/);
+      expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*errors:\s*Jsonb/);
       expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*createdAt:\s*Timestamptz!/);
     });
 
@@ -385,7 +385,7 @@ describe('Async Actions', () => {
 
       // Query the result
       const { body: queryBody } = await gql(
-        `query($id: UUID!) {
+        `query($id: Uuid!) {
           requestVerificationResult(id: $id) {
             id
             status
@@ -419,7 +419,7 @@ describe('Async Actions', () => {
       const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
 
       const { body } = await gql(
-        `query($id: UUID!) {
+        `query($id: Uuid!) {
           requestVerificationResult(id: $id) {
             id
             status
@@ -463,7 +463,7 @@ describe('Async Actions', () => {
       const token = await createJWT({ role: 'administrator', allowedRoles: ['administrator'] });
 
       const { body } = await gql(
-        `query($id: UUID!) {
+        `query($id: Uuid!) {
           requestVerificationResult(id: $id) {
             id
             status
@@ -510,7 +510,7 @@ describe('Async Actions', () => {
 
       // Query result as admin
       const { body: queryBody } = await gql(
-        `query($id: UUID!) {
+        `query($id: Uuid!) {
           requestVerificationResult(id: $id) {
             id
             status

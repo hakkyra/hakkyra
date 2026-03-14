@@ -161,24 +161,24 @@ describe('GraphQL Schema Generation', () => {
   });
 
   describe('Custom scalars', () => {
-    it('should register UUID scalar type', () => {
+    it('should register Uuid scalar type', () => {
       const typeMap = schema.getTypeMap();
-      expect(typeMap['UUID']).toBeDefined();
+      expect(typeMap['Uuid']).toBeDefined();
     });
 
-    it('should register DateTime scalar type', () => {
+    it('should register Timestamptz scalar type', () => {
       const typeMap = schema.getTypeMap();
-      expect(typeMap['DateTime']).toBeDefined();
+      expect(typeMap['Timestamptz']).toBeDefined();
     });
 
-    it('should register JSON scalar type', () => {
+    it('should register json scalar type', () => {
       const typeMap = schema.getTypeMap();
-      expect(typeMap['JSON']).toBeDefined();
+      expect(typeMap['json']).toBeDefined();
     });
 
-    it('should register BigDecimal scalar type', () => {
+    it('should register Numeric scalar type', () => {
       const typeMap = schema.getTypeMap();
-      expect(typeMap['BigDecimal']).toBeDefined();
+      expect(typeMap['Numeric']).toBeDefined();
     });
   });
 

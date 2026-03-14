@@ -221,7 +221,7 @@ describe('Computed Fields — SQL Compiler', () => {
 describe('Computed Fields — E2E via GraphQL', () => {
   it('admin can query client with totalBalance computed field', async () => {
     const { status, body } = await graphqlRequest(
-      `query($id: UUID!) {
+      `query($id: Uuid!) {
         clientByPk(id: $id) {
           id
           username
@@ -243,7 +243,7 @@ describe('Computed Fields — E2E via GraphQL', () => {
   it('backoffice role can query computed field (allowed in permissions)', async () => {
     const token = await tokens.backoffice();
     const { status, body } = await graphqlRequest(
-      `query($id: UUID!) {
+      `query($id: Uuid!) {
         clientByPk(id: $id) {
           id
           username
@@ -283,7 +283,7 @@ describe('Computed Fields — E2E via GraphQL', () => {
 
   it('admin can query account with total computed field', async () => {
     const { status, body } = await graphqlRequest(
-      `query($id: UUID!) {
+      `query($id: Uuid!) {
         account(where: { id: { _eq: $id } }) {
           id
           balance
@@ -323,7 +323,7 @@ describe('Computed Fields — E2E via GraphQL', () => {
   it('computed fields work alongside regular columns and relationships', async () => {
     const token = await tokens.backoffice();
     const { status, body } = await graphqlRequest(
-      `query($id: UUID!) {
+      `query($id: Uuid!) {
         clientByPk(id: $id) {
           id
           username
@@ -376,7 +376,7 @@ describe('Computed Fields — E2E via GraphQL', () => {
 
   it('queries without computed fields still work normally', async () => {
     const { status, body } = await graphqlRequest(
-      `query($id: UUID!) {
+      `query($id: Uuid!) {
         clientByPk(id: $id) {
           id
           username

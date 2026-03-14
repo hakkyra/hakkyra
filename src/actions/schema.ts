@@ -72,16 +72,24 @@ const SCALAR_MAP: Record<string, GraphQLOutputType & GraphQLInputType> = {
   Int: GraphQLInt,
   Float: GraphQLFloat,
   Boolean: GraphQLBoolean,
-  uuid: customScalars['UUID']!,
-  UUID: customScalars['UUID']!,
-  JSON: customScalars['JSON']!,
-  JSONB: customScalars['JSONB']!,
-  DateTime: customScalars['DateTime']!,
+  // New canonical names
+  uuid: customScalars['Uuid']!,
+  Uuid: customScalars['Uuid']!,
+  json: customScalars['json']!,
+  Jsonb: customScalars['Jsonb']!,
   Timestamptz: customScalars['Timestamptz']!,
   Date: customScalars['Date']!,
   Time: customScalars['Time']!,
-  BigInt: customScalars['BigInt']!,
-  BigDecimal: customScalars['BigDecimal']!,
+  Bigint: customScalars['Bigint']!,
+  Numeric: customScalars['Numeric']!,
+  Bpchar: customScalars['Bpchar']!,
+  // Backwards-compat aliases for action SDL parsing
+  UUID: customScalars['Uuid']!,
+  JSON: customScalars['json']!,
+  JSONB: customScalars['Jsonb']!,
+  DateTime: customScalars['Timestamptz']!,
+  BigInt: customScalars['Bigint']!,
+  BigDecimal: customScalars['Numeric']!,
 };
 
 function resolveOutputType(
@@ -207,12 +215,12 @@ const AsyncActionStatusEnum = new GraphQLEnumType({
   },
 });
 
-/** The return type for async action mutations: { actionId: UUID! } */
+/** The return type for async action mutations: { actionId: Uuid! } */
 const AsyncActionIdType = new GraphQLObjectType({
   name: 'AsyncActionId',
   description: 'Return type for async action mutations',
   fields: {
-    actionId: { type: new GraphQLNonNull(customScalars['UUID']!) },
+    actionId: { type: new GraphQLNonNull(customScalars['Uuid']!) },
   },
 });
 
@@ -500,7 +508,7 @@ export function buildActionFields(
     if (isAsync) {
       hasAsyncActions = true;
 
-      // ── Async action: mutation returns { actionId: UUID! } ────────────
+      // ── Async action: mutation returns { actionId: Uuid! } ────────────
       const mutationFieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
         type: new GraphQLNonNull(AsyncActionIdType),
         args: inputType
@@ -520,10 +528,10 @@ export function buildActionFields(
         name: resultTypeName,
         description: `Async action result for ${actionConfig.name}`,
         fields: {
-          id: { type: new GraphQLNonNull(customScalars['UUID']!) },
+          id: { type: new GraphQLNonNull(customScalars['Uuid']!) },
           status: { type: new GraphQLNonNull(AsyncActionStatusEnum) },
           output: { type: returnType },
-          errors: { type: customScalars['JSONB']! },
+          errors: { type: customScalars['Jsonb']! },
           createdAt: { type: new GraphQLNonNull(customScalars['Timestamptz']!) },
         },
       });
@@ -532,7 +540,7 @@ export function buildActionFields(
       const resultQueryFieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
         type: asyncResultType,
         args: {
-          id: { type: new GraphQLNonNull(customScalars['UUID']!) },
+          id: { type: new GraphQLNonNull(customScalars['Uuid']!) },
         },
         description: `Check the status and result of async action "${actionConfig.name}"`,
         resolve: makeAsyncActionResultResolver(actionConfig),

@@ -171,7 +171,7 @@ function resolveOutputScalarType(
 
 // ─── Numeric Check ──────────────────────────────────────────────────────────
 
-const NUMERIC_GRAPHQL_TYPES = new Set(['Int', 'Float', 'BigInt', 'BigDecimal']);
+const NUMERIC_GRAPHQL_TYPES = new Set(['Int', 'Float', 'Bigint', 'Numeric']);
 
 function isNumericColumn(column: ColumnInfo, enumNames: Set<string>): boolean {
   const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
@@ -360,7 +360,7 @@ export function buildMutationInputTypes(
       for (const column of table.columns) {
         // Min/Max work on any ordered type
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
-        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'DateTime', 'Date', 'Time'].includes(mapping.name)) {
+        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
           const fieldName = toCamelCase(column.name);
           fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
         }
@@ -379,7 +379,7 @@ export function buildMutationInputTypes(
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of table.columns) {
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
-        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'DateTime', 'Date', 'Time'].includes(mapping.name)) {
+        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
           const fieldName = toCamelCase(column.name);
           fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
         }

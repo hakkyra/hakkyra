@@ -85,7 +85,7 @@ type ScheduleConsultationResult {
   appointmentId: uuid!
   confirmationUrl: String!
   reference: String!
-  expiresAt: DateTime
+  expiresAt: Timestamptz
 }
 
 # ── Action: processService ─────────────────────────────────────────────────────
