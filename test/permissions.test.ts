@@ -4,7 +4,7 @@ import { buildPermissionLookup } from '../src/permissions/lookup.js';
 import { loadConfig } from '../src/config/loader.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
-import type { BoolExp, SchemaModel } from '../src/types.js';
+import type { BoolExp, ComputedFieldConfig, SchemaModel } from '../src/types.js';
 import {
   getPool, closePool, waitForDb, makeSession,
   METADATA_DIR, SERVER_CONFIG_PATH, TEST_DB_URL, ALICE_ID,
@@ -235,6 +235,56 @@ describe('Permission Filter Compiler', () => {
       const result = filter.toSQL(session, 3);
       expect(result.sql).toContain('$4');
       expect(result.params).toEqual(['active']);
+    });
+  });
+
+  describe('computed field references', () => {
+    const computedFields: ComputedFieldConfig[] = [
+      { name: 'visible', function: { name: 'campaign_player_visible', schema: 'public' } },
+    ];
+
+    it('should emit function call for computed field in _eq filter', () => {
+      const filter = compileFilter(
+        { visible: { _eq: true } } as BoolExp,
+        computedFields,
+      );
+      const result = filter.toSQL(session, 0, 't0');
+      expect(result.sql).toContain('"public"."campaign_player_visible"("t0")');
+      expect(result.sql).toContain('= $1');
+      expect(result.params).toEqual([true]);
+    });
+
+    it('should emit function call for computed field in _and filter', () => {
+      const filter = compileFilter(
+        { _and: [{ visible: { _eq: true } }, { state: { _eq: 'active' } }] } as BoolExp,
+        computedFields,
+      );
+      const result = filter.toSQL(session, 0, 't0');
+      expect(result.sql).toContain('"public"."campaign_player_visible"("t0")');
+      expect(result.sql).toContain('"t0"."state"');
+    });
+
+    it('should use default schema when schema is omitted', () => {
+      const cfs: ComputedFieldConfig[] = [
+        { name: 'end_time', function: { name: 'campaign_player_end_time' } },
+      ];
+      const filter = compileFilter(
+        { end_time: { _isNull: false } } as BoolExp,
+        cfs,
+      );
+      const result = filter.toSQL(session, 0, 't0');
+      expect(result.sql).toContain('"public"."campaign_player_end_time"("t0")');
+      expect(result.sql).toContain('IS NOT NULL');
+    });
+
+    it('should not affect regular columns when computed fields are provided', () => {
+      const filter = compileFilter(
+        { status: { _eq: 'active' } } as BoolExp,
+        computedFields,
+      );
+      const result = filter.toSQL(session, 0, 't0');
+      expect(result.sql).toContain('"t0"."status"');
+      expect(result.sql).not.toContain('campaign_player_visible');
     });
   });
 });

@@ -11,6 +11,7 @@
 import type {
   CompiledFilter,
   CompiledPermission,
+  ComputedFieldConfig,
   Operation,
   SessionVariables,
   TableInfo,
@@ -73,9 +74,10 @@ export interface PermissionLookup {
  */
 function compileSelectPermission(
   perm: NonNullable<TableInfo['permissions']['select'][string]>,
+  computedFields?: ComputedFieldConfig[],
 ): NonNullable<CompiledPermission['select']> {
   return {
-    filter: compileFilter(perm.filter),
+    filter: compileFilter(perm.filter, computedFields),
     columns: perm.columns,
     limit: perm.limit,
     allowAggregations: perm.allowAggregations ?? false,
@@ -88,9 +90,10 @@ function compileSelectPermission(
  */
 function compileInsertPermission(
   perm: NonNullable<TableInfo['permissions']['insert'][string]>,
+  computedFields?: ComputedFieldConfig[],
 ): NonNullable<CompiledPermission['insert']> {
   return {
-    check: compileFilter(perm.check),
+    check: compileFilter(perm.check, computedFields),
     columns: perm.columns,
     presets: perm.set ?? {},
   };
@@ -101,10 +104,11 @@ function compileInsertPermission(
  */
 function compileUpdatePermission(
   perm: NonNullable<TableInfo['permissions']['update'][string]>,
+  computedFields?: ComputedFieldConfig[],
 ): NonNullable<CompiledPermission['update']> {
   return {
-    filter: compileFilter(perm.filter),
-    check: perm.check ? compileFilter(perm.check) : undefined,
+    filter: compileFilter(perm.filter, computedFields),
+    check: perm.check ? compileFilter(perm.check, computedFields) : undefined,
     columns: perm.columns,
     presets: perm.set ?? {},
   };
@@ -115,9 +119,10 @@ function compileUpdatePermission(
  */
 function compileDeletePermission(
   perm: NonNullable<TableInfo['permissions']['delete'][string]>,
+  computedFields?: ComputedFieldConfig[],
 ): NonNullable<CompiledPermission['delete']> {
   return {
-    filter: compileFilter(perm.filter),
+    filter: compileFilter(perm.filter, computedFields),
   };
 }
 
@@ -278,22 +283,22 @@ export function buildPermissionLookup(
 
       const selectPerm = permissions.select[role];
       if (selectPerm) {
-        compiled.select = compileSelectPermission(selectPerm);
+        compiled.select = compileSelectPermission(selectPerm, table.computedFields);
       }
 
       const insertPerm = permissions.insert[role];
       if (insertPerm) {
-        compiled.insert = compileInsertPermission(insertPerm);
+        compiled.insert = compileInsertPermission(insertPerm, table.computedFields);
       }
 
       const updatePerm = permissions.update[role];
       if (updatePerm) {
-        compiled.update = compileUpdatePermission(updatePerm);
+        compiled.update = compileUpdatePermission(updatePerm, table.computedFields);
       }
 
       const deletePerm = permissions.delete[role];
       if (deletePerm) {
-        compiled.delete = compileDeletePermission(deletePerm);
+        compiled.delete = compileDeletePermission(deletePerm, table.computedFields);
       }
 
       // Store the compiled permission under each operation key for O(1) lookup.

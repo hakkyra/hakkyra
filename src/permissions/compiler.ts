@@ -12,6 +12,7 @@ import type {
   BoolExp,
   ColumnOperators,
   CompiledFilter,
+  ComputedFieldConfig,
   ExistsExp,
   SessionVariables,
 } from '../types.js';
@@ -231,12 +232,26 @@ function existsNode(tableName: string, tableSchema: string, whereNode: FilterNod
 }
 
 /**
+ * Build a SQL reference for a computed field: "schema"."fn_name"("alias").
+ */
+function computedFieldRef(cf: ComputedFieldConfig, tableAlias?: string): string {
+  const fnSchema = cf.function.schema ?? 'public';
+  const funcRef = `${quoteIdent(fnSchema)}.${quoteIdent(cf.function.name)}`;
+  if (tableAlias) {
+    return `${funcRef}(${quoteIdent(tableAlias)})`;
+  }
+  return `${funcRef}(*)`;
+}
+
+/**
  * A single column comparison node.
+ * If `computedField` is provided, the column reference is replaced with a function call.
  */
 function comparisonNode(
   column: string,
   operatorKey: string,
   rawValue: unknown,
+  computedField?: ComputedFieldConfig,
 ): FilterNode {
   const op = OPERATOR_MAP[operatorKey];
   if (!op) {
@@ -245,7 +260,9 @@ function comparisonNode(
 
   return {
     toSQL(session, paramOffset, tableAlias) {
-      const col = qualifyColumn(column, tableAlias);
+      const col = computedField
+        ? computedFieldRef(computedField, tableAlias)
+        : qualifyColumn(column, tableAlias);
 
       // ── IS NULL / IS NOT NULL ────────────────────────────────────────
       if (op.mode === 'is_null') {
@@ -347,8 +364,15 @@ function isColumnOperators(value: unknown): value is ColumnOperators {
  *
  * This is called once at startup; the resulting tree is then evaluated
  * with different sessions at query time.
+ *
+ * @param computedFieldMap - Optional map of computed field name → config,
+ *   so that BoolExp keys referencing computed fields emit function calls
+ *   instead of column references.
  */
-function parseBoolExp(filter: BoolExp): FilterNode {
+function parseBoolExp(
+  filter: BoolExp,
+  computedFieldMap?: Map<string, ComputedFieldConfig>,
+): FilterNode {
   // Empty object = no restriction
   const keys = Object.keys(filter);
   if (keys.length === 0) {
@@ -357,17 +381,21 @@ function parseBoolExp(filter: BoolExp): FilterNode {
 
   // ── Logical operators ─────────────────────────────────────────────────
   if ('_and' in filter) {
-    const children = (filter as { _and: BoolExp[] })._and.map(parseBoolExp);
+    const children = (filter as { _and: BoolExp[] })._and.map(
+      (sub) => parseBoolExp(sub, computedFieldMap),
+    );
     return andNode(children);
   }
 
   if ('_or' in filter) {
-    const children = (filter as { _or: BoolExp[] })._or.map(parseBoolExp);
+    const children = (filter as { _or: BoolExp[] })._or.map(
+      (sub) => parseBoolExp(sub, computedFieldMap),
+    );
     return orNode(children);
   }
 
   if ('_not' in filter) {
-    const child = parseBoolExp((filter as { _not: BoolExp })._not);
+    const child = parseBoolExp((filter as { _not: BoolExp })._not, computedFieldMap);
     return notNode(child);
   }
 
@@ -385,10 +413,12 @@ function parseBoolExp(filter: BoolExp): FilterNode {
 
   for (const [column, ops] of Object.entries(filter)) {
     if (isColumnOperators(ops)) {
+      // Check if this key refers to a computed field
+      const cf = computedFieldMap?.get(column);
       // Column with one or more comparison operators
       for (const [opKey, opValue] of Object.entries(ops as Record<string, unknown>)) {
         if (COLUMN_OPERATOR_KEYS.has(opKey) && opValue !== undefined) {
-          children.push(comparisonNode(column, opKey, opValue));
+          children.push(comparisonNode(column, opKey, opValue, cf));
         }
       }
     } else {
@@ -420,6 +450,10 @@ function parseBoolExp(filter: BoolExp): FilterNode {
  * The compiled filter can be evaluated multiple times with different sessions,
  * always producing parameterized SQL.
  *
+ * @param computedFields - Optional array of computed field configs for the table.
+ *   When a BoolExp key matches a computed field name, the compiler emits a
+ *   function call (e.g. `"public"."fn"("t0")`) instead of a column reference.
+ *
  * @example
  * ```ts
  * const filter = compileFilter({ user_id: { _eq: 'X-Hasura-User-Id' } });
@@ -428,8 +462,14 @@ function parseBoolExp(filter: BoolExp): FilterNode {
  * // params: ['42']
  * ```
  */
-export function compileFilter(filter: BoolExp): CompiledFilter {
-  const node = parseBoolExp(filter);
+export function compileFilter(
+  filter: BoolExp,
+  computedFields?: ComputedFieldConfig[],
+): CompiledFilter {
+  const cfMap = computedFields && computedFields.length > 0
+    ? new Map(computedFields.map((cf) => [cf.name, cf]))
+    : undefined;
+  const node = parseBoolExp(filter, cfMap);
   return {
     toSQL(session: SessionVariables, paramOffset: number, tableAlias?: string) {
       return node.toSQL(session, paramOffset, tableAlias);

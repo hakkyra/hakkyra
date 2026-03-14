@@ -58,13 +58,14 @@
 - [x] Logical operators (_and, _or, _not)
 - [x] Relationship operator (_exists)
 - [x] Session variable resolution (X-Hasura-* → JWT claim values)
+- [x] Computed field references in permission filters (emit function calls instead of column refs)
 - [x] Column-level permission enforcement (allowed columns per role per operation)
 - [x] Column presets (set) for insert/update
 - [x] Row limit enforcement
 - [x] Aggregation permission flag
 - [x] Admin role bypass
 - [x] Permission lookup: Map<table+role+operation, CompiledPermission>
-- [x] Unit tests: all operators, session variable substitution, edge cases (31 tests)
+- [x] Unit tests: all operators, session variable substitution, computed fields, edge cases (37 tests)
 
 ### P1.6 — SQL Query Compiler (`src/sql/`)
 - [x] SELECT compiler with json_build_object response shaping
@@ -543,7 +544,7 @@ Hasura supports inherited roles where a composite role inherits the union of per
 |-------|-------|--------|
 | Config loader | 19 | Pass |
 | Introspection | 30 | Pass |
-| Permissions | 33 | Pass |
+| Permissions | 37 | Pass |
 | SQL compiler | 35 | Pass |
 | Schema generator | 52 | Pass |
 | REST filters | 30 | Pass |
@@ -569,4 +570,4 @@ Hasura supports inherited roles where a composite role inherits the union of per
 | Tracked functions | 20 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
-| **Total** | **~880** | **29 suites, all passing** |
+| **Total** | **~884** | **29 suites, all passing** |
