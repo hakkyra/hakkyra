@@ -384,15 +384,148 @@ Move all hardcoded default values to Zod `.default()` in `src/config/schemas-int
 
 ---
 
+## Phase 5: Hasura Schema Compatibility
+
+Gaps identified by comparing Hasura's GraphQL schema (extracted with admin rights from production metadata) against Hakkyra's live SDL. These are the differences that prevent Hakkyra from being a drop-in replacement.
+
+### P5.1 — Operator & Naming Convention (Critical) — COMPLETE
+
+Change all operators and enums to match Hasura's exact naming.
+
+- [x] Rename `_ne` → `_neq` (all comparison types)
+- [x] Rename `_is_null` → `_isNull` (all comparison types)
+- [x] Rename `_contained_in` → `_containedIn` (JSONB comparison)
+- [x] Rename `_has_key` → `_hasKey` (JSONB comparison)
+- [x] Rename `_has_keys_all` → `_hasKeysAll` (JSONB comparison)
+- [x] Rename `_has_keys_any` → `_hasKeysAny` (JSONB comparison)
+- [x] OrderBy enum: change to UPPER_CASE values (`ASC`, `DESC`, `ASC_NULLS_FIRST`, `ASC_NULLS_LAST`, `DESC_NULLS_FIRST`, `DESC_NULLS_LAST`)
+- [x] Update all tests to use new operator/enum names
+- [x] Permission compiler accepts both old YAML names and new GraphQL names via compat aliases
+
+### P5.2 — Tracked Functions as Root Fields (Critical)
+
+Hasura exposes PostgreSQL functions as top-level Query/Mutation fields. The metadata tracks 39 functions. The schema exposes `latestWins(args: LatestWinsArgs): [BigWin!]!` and `acceptContractWithToken(args: AcceptContractWithTokenArgs!): PlayerContract` as examples.
+
+- [ ] Load `functions.yaml` from Hasura metadata (already has `!include` support)
+- [ ] Parse function metadata: `function.name`, `function.schema`, `configuration.exposed_as` (query/mutation), `configuration.custom_root_fields`, `permissions`
+- [ ] Introspect PG function signatures: input args → GraphQL input type, return type → existing table type
+- [ ] Generate `{functionName}Args` input type from function parameters
+- [ ] Register function as Query root field (default) or Mutation root field (`exposed_as: mutation`)
+- [ ] Support function aggregate variant (`{functionName}Aggregate`) for functions returning SETOF table
+- [ ] Permission enforcement per role on function fields
+- [ ] Wire resolver: call function via SQL `SELECT * FROM schema.function_name(args)`, map result to table type
+
+### P5.3 — Relationship Ordering (High)
+
+Hasura allows ordering by nested relationship fields (e.g., `orderBy: { currency: { name: asc } }`) and by array relationship aggregates (e.g., `orderBy: { gamesAggregate: { count: desc } }`).
+
+- [ ] Support object relationship fields in OrderBy input types (e.g., `BigWinOrderBy.currency: CurrencyOrderBy`)
+- [ ] Generate `{Table}AggregateOrderBy` types for array relationships
+- [ ] Generate per-function aggregate order types (`{Table}AvgOrderBy`, `{Table}MaxOrderBy`, `{Table}MinOrderBy`, `{Table}SumOrderBy`, etc.)
+- [ ] Add `{rel}Aggregate: {Rel}AggregateOrderBy` field to parent OrderBy types
+- [ ] SQL compiler: translate relationship ordering to subquery ORDER BY
+
+### P5.4 — Aggregate BoolExp — Filter by Array Relationship Aggregates (High)
+
+Hasura allows filtering parent rows by aggregate values of their array relationships (e.g., "find game_integrations where count of currencies > 5").
+
+- [ ] Generate `{Table}AggregateBoolExp` types for each array relationship
+- [ ] Generate `{table}AggregateBoolExpCount` helper input (lowercase-start name, Hasura convention)
+- [ ] Add `{rel}Aggregate: {Rel}AggregateBoolExp` field to parent BoolExp types
+- [ ] SQL compiler: translate aggregate bool_exp to `HAVING`/correlated subquery
+
+### P5.5 — Statistical Aggregate Functions (Medium) — COMPLETE
+
+Hasura generates stddev/variance aggregate field types. Hakkyra only has count/sum/avg/min/max.
+
+- [x] `stddev` — sample standard deviation
+- [x] `stddevPop` — population standard deviation
+- [x] `stddevSamp` — sample standard deviation (alias)
+- [x] `variance` — sample variance
+- [x] `varPop` — population variance
+- [x] `varSamp` — sample variance (alias)
+- [x] Generate `{Table}StddevFields`, `{Table}StddevPopFields`, `{Table}StddevSampFields`, `{Table}VarPopFields`, `{Table}VarSampFields`, `{Table}VarianceFields` types
+- [x] SQL compiler: emit `stddev()`, `stddev_pop()`, `stddev_samp()`, `variance()`, `var_pop()`, `var_samp()`
+- [x] Support in GROUP BY aggregations
+- [x] REST aggregate endpoint support
+- [x] 15 new tests (8 SQL compiler + 7 GraphQL E2E)
+
+### P5.6 — Streaming Subscriptions (Medium)
+
+Hasura supports cursor-based streaming subscriptions (`{table}Stream`) with `batchSize`, `cursor`, and `where` arguments.
+
+- [ ] Generate `{Table}StreamCursorInput` types (`initialValue` + `ordering`)
+- [ ] Generate `{Table}StreamCursorValueInput` types (all columns as optional fields)
+- [ ] Generate `CursorOrdering` enum (`ASC`, `DESC`)
+- [ ] Register `{table}Stream` subscription fields with `batchSize: Int!`, `cursor: [{Table}StreamCursorInput]!`, `where` args
+- [ ] Implement streaming: use cursor value to filter rows > cursor, batch delivery
+
+### P5.7 — Array Comparison Types (Medium)
+
+Hasura generates `StringArrayComparisonExp` (and likely others) for PostgreSQL array columns (`text[]`, `int[]`, etc.).
+
+- [ ] Detect PostgreSQL array column types during introspection
+- [ ] Generate `{ScalarType}ArrayComparisonExp` input types with Hasura operators: `_contains`, `_containedIn`, `_eq`, `_neq`, `_gt`, `_gte`, `_lt`, `_lte`, `_in`, `_nin`, `_isNull`
+- [ ] SQL compiler: translate array operators to PG operators (`@>`, `<@`, `=`, etc.)
+- [ ] Map array columns to `[ScalarType!]` in object types
+
+### P5.8 — JSONB Path Argument (Medium)
+
+Hasura supports a `path: String` argument on JSONB fields to select nested JSON paths (e.g., `value(path: "nested.key")`).
+
+- [ ] Add optional `path: String` argument to JSONB-typed fields in object types
+- [ ] SQL compiler: when `path` is provided, emit `column #>> '{path,segments}'` or `column -> 'key' -> 'nested'`
+
+### P5.9 — JSONB Cast Expression (Low)
+
+Hasura's `JsonbComparisonExp` has a `_cast` field (`JsonbCastExp { String: StringComparisonExp }`) allowing you to cast JSONB to string for string comparison operators.
+
+- [ ] Generate `JsonbCastExp` input type
+- [ ] Add `_cast: JsonbCastExp` to JSONBComparisonExp
+- [ ] SQL compiler: emit `(column)::text` cast when `_cast.String` is used
+
+### P5.10 — Scalar Type Naming (Low)
+
+Rename scalars to match Hasura's exact names.
+
+| Hasura | Hakkyra (current) | Action |
+|--------|-------------------|--------|
+| `Uuid` | `UUID` | Rename to `Uuid` |
+| `Bigint` | `BigInt` | Rename to `Bigint` |
+| `Numeric` | `BigDecimal` | Rename to `Numeric` |
+| `numeric` (lowercase) | — | Add lowercase `numeric` scalar |
+| `Jsonb` | `JSONB` | Rename to `Jsonb` |
+| `json` (lowercase) | `JSON` | Rename to `json` |
+| `Bpchar` | `String` | Add `Bpchar` scalar (behaves like String with text operators) |
+| `Timestamptz` | `DateTime` / `Timestamptz` | Use `Timestamptz` only |
+
+- [ ] Rename all scalar types to match Hasura naming
+- [ ] Add `Bpchar` scalar with `BpcharComparisonExp` (same operators as StringComparisonExp)
+- [ ] Add `numeric` (lowercase) scalar for action input types
+- [ ] Generate `NumericComparisonExp` instead of `BigDecimalComparisonExp`
+- [ ] Generate `BigintComparisonExp`, `BpcharComparisonExp`, `UuidComparisonExp`, `TimestamptzComparisonExp` with Hasura-matching names
+- [ ] Update type-map to use Hasura scalar names
+
+### P5.11 — Root Type Naming (Low)
+
+Change root type names to match Hasura.
+
+- [ ] Rename `Query` → `query_root`
+- [ ] Rename `Mutation` → `mutation_root`
+- [ ] Rename `Subscription` → `subscription_root`
+- [ ] Add explicit `schema { query: query_root, mutation: mutation_root, subscription: subscription_root }` declaration
+
+---
+
 ## Test Summary
 
 | Suite | Tests | Status |
 |-------|-------|--------|
 | Config loader | 19 | Pass |
 | Introspection | 30 | Pass |
-| Permissions | 31 | Pass |
+| Permissions | 33 | Pass |
 | SQL compiler | 24 | Pass |
-| Schema generator | 34 | Pass |
+| Schema generator | 41 | Pass |
 | REST filters | 30 | Pass |
 | Server / E2E | 59 | Pass |
 | Events | 9 | Pass |
@@ -410,5 +543,6 @@ Move all hardcoded default values to Zod `.default()` in `src/config/schemas-int
 | Action transforms | 32 | Pass |
 | Batch operations | 26 | Pass |
 | Action relationships | 13 | Pass |
+| Statistical aggregates | 15 | Pass |
 | Zod schemas | 237 | Pass |
-| **Total** | **728** | **23 suites, all passing** |
+| **Total** | **750** | **24 suites, all passing** |
