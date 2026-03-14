@@ -291,7 +291,8 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
   const whereParts: string[] = [];
 
   // User-provided WHERE
-  const userWhere = compileWhere(opts.where, params, alias, opts.session);
+  const updateColumnLookup = new Map(opts.table.columns.map(c => [c.name, c]));
+  const userWhere = compileWhere(opts.where, params, alias, opts.session, updateColumnLookup);
   if (userWhere) whereParts.push(userWhere);
 
   // Permission filter

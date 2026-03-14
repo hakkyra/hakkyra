@@ -164,7 +164,8 @@ function buildOnConflictSQL(
   if (oc.where) {
     // Compile the where clause — use the table name as alias since DO UPDATE
     // SET ... WHERE references the target table columns directly
-    const whereSQL = compileWhere(oc.where, params, table.name, session);
+    const insertColumnLookup = new Map(table.columns.map(c => [c.name, c]));
+    const whereSQL = compileWhere(oc.where, params, table.name, session, insertColumnLookup);
     if (whereSQL) {
       whereClause = ` WHERE ${whereSQL}`;
     }
