@@ -486,6 +486,46 @@ describe('Tracked Functions — camelCase remapping', () => {
   });
 });
 
+describe('Tracked Functions — Optional args', () => {
+  it('should accept a SETOF function call without args argument', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClients {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    // Should not get a validation error — args is optional
+    expect(body.errors).toBeUndefined();
+    expect(body.data).toBeDefined();
+    const data = body.data as { searchClients: AnyRow[] };
+    expect(Array.isArray(data.searchClients)).toBe(true);
+  });
+
+  it('should accept an aggregate function call without args argument', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsAggregate {
+          aggregate {
+            count
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsAggregate: { aggregate: { count: number } } };
+    expect(data.searchClientsAggregate.aggregate).toBeDefined();
+    expect(typeof data.searchClientsAggregate.aggregate.count).toBe('number');
+  });
+});
+
 describe('Tracked Functions — Aggregate', () => {
   it('should execute aggregate on a SETOF function', async () => {
     const { body } = await graphqlRequest(

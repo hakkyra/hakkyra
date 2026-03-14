@@ -284,8 +284,8 @@ export function buildTrackedFunctionFields(
     const fieldArgs: GraphQLFieldConfigArgumentMap = {};
 
     if (argsInputType) {
-      // Hasura makes args required when there are user arguments
-      fieldArgs['args'] = { type: new GraphQLNonNull(argsInputType) };
+      // Hasura makes args optional even when there are user arguments
+      fieldArgs['args'] = { type: argsInputType };
     }
 
     if (fn.isSetReturning) {
@@ -334,7 +334,7 @@ export function buildTrackedFunctionFields(
         if (aggType) {
           const aggArgs: GraphQLFieldConfigArgumentMap = {};
           if (argsInputType) {
-            aggArgs['args'] = { type: new GraphQLNonNull(argsInputType) };
+            aggArgs['args'] = { type: argsInputType };
           }
           const filterType2 = filterTypes.get(key);
           if (filterType2) {
