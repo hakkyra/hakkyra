@@ -243,7 +243,7 @@ describe('Tracked Functions — E2E Query Resolution', () => {
       `query {
         searchClients(
           args: { searchTerm: "" }
-          orderBy: [{ username: asc }]
+          orderBy: [{ username: ASC }]
         ) {
           username
         }

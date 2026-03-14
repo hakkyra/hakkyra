@@ -1018,7 +1018,7 @@ describe('Relationship ordering', () => {
   it('orders by object relationship field', async () => {
     const { body } = await graphqlRequest(
       `{
-        clients(orderBy: [{ currency: { name: asc } }, { username: asc }]) {
+        clients(orderBy: [{ currency: { name: ASC } }, { username: ASC }]) {
           username
           currency { name }
         }
@@ -1041,7 +1041,7 @@ describe('Relationship ordering', () => {
   it('orders by array relationship aggregate count', async () => {
     const { body } = await graphqlRequest(
       `{
-        clients(orderBy: [{ invoicesAggregate: { count: desc } }, { username: asc }]) {
+        clients(orderBy: [{ invoicesAggregate: { count: DESC } }, { username: ASC }]) {
           username
         }
       }`,
@@ -1063,7 +1063,7 @@ describe('Relationship ordering', () => {
   it('orders by array relationship aggregate sum', async () => {
     const { body } = await graphqlRequest(
       `{
-        clients(orderBy: [{ invoicesAggregate: { sum: { amount: desc_nulls_last } } }]) {
+        clients(orderBy: [{ invoicesAggregate: { sum: { amount: DESC_NULLS_LAST } } }]) {
           username
         }
       }`,
@@ -1083,7 +1083,7 @@ describe('Relationship ordering', () => {
   it('orders by deeply nested object relationship', async () => {
     const { body } = await graphqlRequest(
       `{
-        invoice(orderBy: [{ client: { currency: { name: asc } } }]) {
+        invoice(orderBy: [{ client: { currency: { name: ASC } } }]) {
           amount
           client {
             username
@@ -1110,7 +1110,7 @@ describe('Relationship ordering', () => {
   it('orders by mixed relationship and column ordering', async () => {
     const { body } = await graphqlRequest(
       `{
-        clients(orderBy: [{ branch: { name: asc } }, { username: desc }]) {
+        clients(orderBy: [{ branch: { name: ASC } }, { username: DESC }]) {
           username
           branch { name }
         }
