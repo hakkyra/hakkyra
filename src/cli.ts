@@ -61,12 +61,14 @@ Examples:
 // ─── Arg parsing for start/dev ──────────────────────────────────────────────
 
 function parseStartArgs(args: string[], forceDevMode: boolean): StartOptions {
+  const explicit = new Set<string>();
   const options: StartOptions = {
     port: 3000,
     host: '0.0.0.0',
     configPath: CONFIG_DEFAULTS.configPath,
     metadataPath: CONFIG_DEFAULTS.metadataPath,
     devMode: forceDevMode,
+    explicit,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -79,6 +81,7 @@ function parseStartArgs(args: string[], forceDevMode: boolean): StartOptions {
           const port = parseInt(next, 10);
           if (!Number.isNaN(port) && port > 0 && port <= 65535) {
             options.port = port;
+            explicit.add('port');
           } else {
             console.error(`Invalid port: ${next}`);
             process.exit(1);
@@ -90,6 +93,7 @@ function parseStartArgs(args: string[], forceDevMode: boolean): StartOptions {
       case '--host':
         if (next) {
           options.host = next;
+          explicit.add('host');
           i++;
         }
         break;

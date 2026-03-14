@@ -15,6 +15,8 @@ export interface StartOptions {
   configPath: string;
   metadataPath: string;
   devMode: boolean;
+  /** Which options were explicitly set via CLI flags */
+  explicit?: Set<string>;
 }
 
 export async function startServer(options: StartOptions): Promise<void> {
@@ -31,9 +33,9 @@ export async function startServer(options: StartOptions): Promise<void> {
     process.exit(1);
   }
 
-  // Override server config with CLI args
-  config.server.port = options.port;
-  config.server.host = options.host;
+  // Override server config with explicitly provided CLI args
+  if (options.explicit?.has('port')) config.server.port = options.port;
+  if (options.explicit?.has('host')) config.server.host = options.host;
 
   // Validate environment variables before starting
   const envResult = validateEnvironment(config);
