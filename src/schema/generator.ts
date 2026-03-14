@@ -58,6 +58,8 @@ import {
   makeSubscriptionSelectByPkSubscribe,
 } from './subscription-resolvers.js';
 import { buildCustomQueryFields } from './custom-queries.js';
+import { resolveTrackedFunctions, buildTrackedFunctionFields } from './tracked-functions.js';
+import type { TrackedFunctionConfig } from '../types.js';
 
 // ─── Root Field Naming ──────────────────────────────────────────────────────
 
@@ -134,6 +136,7 @@ function buildEnumTypes(enums: EnumInfo[]): Map<string, GraphQLEnumType> {
 export interface GenerateSchemaOptions {
   actions?: ActionConfig[];
   actionsGraphql?: string;
+  trackedFunctions?: TrackedFunctionConfig[];
 }
 
 export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptions): GraphQLSchema {
@@ -185,11 +188,38 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     orderByTypes.set(key, mutInputs.orderBy);
   }
 
+  // Collect selectColumnEnums and aggregate types for tracked functions
+  const selectColumnEnumsByTable = new Map<string, import('graphql').GraphQLEnumType>();
+  const aggregateTypesByTable = new Map<string, GraphQLObjectType>();
+
+  for (const table of tables) {
+    const key = tableKey(table.schema, table.name);
+    const mutInputs = mutationInputsByTable.get(key)!;
+    selectColumnEnumsByTable.set(key, mutInputs.selectColumnEnum);
+    aggregateTypesByTable.set(key, mutInputs.selectAggregateFields);
+  }
+
   // ── Step 5b: Build custom query fields ──────────────────────────────────
   const customFields = buildCustomQueryFields(
     customQueries ?? [],
     typeRegistry,
     tables,
+  );
+
+  // ── Step 5c: Build tracked function fields ─────────────────────────────
+  const trackedFunctionConfigs = options?.trackedFunctions ?? model.trackedFunctions ?? [];
+  const resolvedTrackedFunctions = resolveTrackedFunctions(
+    trackedFunctionConfigs,
+    functions,
+    tables,
+  );
+  const trackedFunctionFields = buildTrackedFunctionFields(
+    resolvedTrackedFunctions,
+    typeRegistry,
+    filterTypes,
+    orderByTypes,
+    selectColumnEnumsByTable,
+    aggregateTypesByTable,
   );
 
   // ── Step 6: Build Query type ───────────────────────────────────────────
@@ -274,7 +304,12 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     queryFields[name] = fieldConfig;
   }
 
-  // ── Step 5c: Build action fields ────────────────────────────────────────
+  // Add tracked function query fields to Query
+  for (const [name, fieldConfig] of Object.entries(trackedFunctionFields.queryFields)) {
+    queryFields[name] = fieldConfig;
+  }
+
+  // ── Step 5d: Build action fields ────────────────────────────────────────
   const actionFields = (options?.actions?.length && options?.actionsGraphql)
     ? buildActionFields(options.actions, options.actionsGraphql, {
         tables,
@@ -418,6 +453,11 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
   // Add custom mutation fields to Mutation
   for (const [name, fieldConfig] of Object.entries(customFields.mutationFields)) {
+    mutationFields[name] = fieldConfig;
+  }
+
+  // Add tracked function mutation fields to Mutation
+  for (const [name, fieldConfig] of Object.entries(trackedFunctionFields.mutationFields)) {
     mutationFields[name] = fieldConfig;
   }
 

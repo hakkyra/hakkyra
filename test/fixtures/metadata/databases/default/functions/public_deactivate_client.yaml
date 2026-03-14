@@ -1,0 +1,7 @@
+function:
+  name: deactivate_client
+  schema: public
+configuration:
+  exposed_as: mutation
+permissions:
+  - role: administrator

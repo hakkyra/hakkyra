@@ -24,6 +24,7 @@ import type {
   RedisConfig,
   BoolExp,
   ComputedFieldConfig,
+  TrackedFunctionConfig,
 } from '../types.js';
 import type {
   RawTableYaml,
@@ -36,6 +37,7 @@ import type {
   RawApiConfig,
   RawServerConfig,
   RawDatabaseEntry,
+  RawTrackedFunction,
 } from './types.js';
 import { IncludeRef } from './types.js';
 import {
@@ -43,6 +45,7 @@ import {
   RawDatabaseEntrySchema,
   RawDatabasesYamlSchema,
   RawTableYamlSchema,
+  RawTrackedFunctionSchema,
   RawActionSchema,
   RawActionsYamlSchema,
   RawCronTriggerSchema,
@@ -173,6 +176,7 @@ export async function loadConfig(
   const version = await loadVersion(absMetadataDir);
   const databases = await loadDatabases(absMetadataDir);
   const tables = await loadAllTables(absMetadataDir);
+  const trackedFunctions = await loadAllFunctions(absMetadataDir);
   const actions = await loadActions(absMetadataDir);
   const actionsGraphql = await loadActionsGraphql(absMetadataDir);
   const cronTriggers = await loadCronTriggers(absMetadataDir);
@@ -200,6 +204,7 @@ export async function loadConfig(
     auth: transformAuth(serverConfig),
     databases: transformDatabases(databases, serverConfig),
     tables,
+    trackedFunctions,
     actions,
     actionsGraphql: actionsGraphql ?? undefined,
     cronTriggers,
@@ -438,6 +443,63 @@ function transformTable(raw: RawTableYaml): TableInfo {
     eventTriggers,
     customRootFields,
     computedFields: computedFields.length > 0 ? computedFields : undefined,
+  };
+}
+
+// ─── Tracked Functions ───────────────────────────────────────────────────────
+
+async function loadAllFunctions(metadataDir: string): Promise<TrackedFunctionConfig[]> {
+  const trackedFunctions: TrackedFunctionConfig[] = [];
+
+  const databasesDir = path.join(metadataDir, 'databases');
+  if (!(await fileExists(databasesDir))) return trackedFunctions;
+
+  let entries: string[];
+  try {
+    entries = await fs.readdir(databasesDir);
+  } catch {
+    return trackedFunctions;
+  }
+
+  for (const dbName of entries) {
+    const dbDir = path.join(databasesDir, dbName);
+    const stat = await fs.stat(dbDir);
+    if (!stat.isDirectory()) continue;
+
+    const functionsDir = path.join(dbDir, 'functions');
+    if (!(await fileExists(functionsDir))) continue;
+
+    const functionsYamlPath = path.join(functionsDir, 'functions.yaml');
+    const rawFunctionsIndex = await readYamlIfExists(functionsYamlPath);
+    if (!rawFunctionsIndex) continue;
+
+    const resolved = await resolveIncludes(rawFunctionsIndex, functionsDir);
+    const rawFunctions = Array.isArray(resolved) ? resolved : [resolved];
+
+    for (const rawFunction of rawFunctions) {
+      if (!rawFunction || typeof rawFunction !== 'object') continue;
+      const functionConfig = RawTrackedFunctionSchema.parse(rawFunction);
+      if (!functionConfig.function) continue;
+      trackedFunctions.push(transformTrackedFunction(functionConfig));
+    }
+  }
+
+  return trackedFunctions;
+}
+
+function transformTrackedFunction(raw: RawTrackedFunction): TrackedFunctionConfig {
+  return {
+    name: raw.function.name,
+    schema: raw.function.schema ?? 'public',
+    exposedAs: raw.configuration?.exposed_as ?? 'query',
+    customRootFields: raw.configuration?.custom_root_fields
+      ? {
+          function: raw.configuration.custom_root_fields.function,
+          functionAggregate: raw.configuration.custom_root_fields.function_aggregate,
+        }
+      : undefined,
+    sessionArgument: raw.configuration?.session_argument,
+    permissions: raw.permissions,
   };
 }
 

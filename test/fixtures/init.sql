@@ -253,6 +253,20 @@ RETURNS TEXT AS $$
   END
 $$ LANGUAGE SQL IMMUTABLE;
 
+-- ─── Tracked function: SETOF query ───────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION search_clients(search_term text)
+RETURNS SETOF client AS $$
+  SELECT * FROM client WHERE first_name ILIKE '%' || search_term || '%' OR last_name ILIKE '%' || search_term || '%' OR username ILIKE '%' || search_term || '%' OR email ILIKE '%' || search_term || '%'
+$$ LANGUAGE SQL STABLE;
+
+-- ─── Tracked function: mutation (single row) ────────────────────────────
+
+CREATE OR REPLACE FUNCTION deactivate_client(client_uuid uuid)
+RETURNS client AS $$
+  UPDATE client SET status = 'inactive' WHERE id = client_uuid RETURNING *
+$$ LANGUAGE SQL VOLATILE;
+
 -- ─── Indexes ────────────────────────────────────────────────────────────────
 
 CREATE INDEX idx_client_branch ON client(branch_id);

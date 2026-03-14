@@ -150,10 +150,11 @@ export async function createServer(
   // 4b. Configure numeric type stringification before schema generation
   configureStringifyNumericTypes(config.server.stringifyNumericTypes);
 
-  // 5. Generate GraphQL schema (with action fields if configured)
+  // 5. Generate GraphQL schema (with action fields and tracked functions if configured)
   const graphqlSchema = generateSchema(schemaModel, {
     actions: config.actions,
     actionsGraphql: config.actionsGraphql,
+    trackedFunctions: config.trackedFunctions,
   });
 
   // 6. Create Fastify server
