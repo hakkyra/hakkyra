@@ -270,6 +270,56 @@ describe('GraphQL Schema Generation', () => {
     });
   });
 
+  describe('Aggregate BoolExp types', () => {
+    it('should generate AggregateBoolExp type for tables that are array relationship targets', () => {
+      const typeMap = schema.getTypeMap();
+      // Account is a target of client.accounts array relationship
+      expect(typeMap['AccountAggregateBoolExp']).toBeDefined();
+    });
+
+    it('should generate lowercase-start AggregateBoolExpCount type', () => {
+      const typeMap = schema.getTypeMap();
+      // Must use lowercase-start naming per Hasura convention
+      expect(typeMap['accountAggregateBoolExpCount']).toBeDefined();
+    });
+
+    it('should have count field on AggregateBoolExp', () => {
+      const typeMap = schema.getTypeMap();
+      const aggType = typeMap['AccountAggregateBoolExp'] as GraphQLInputObjectType | undefined;
+      expect(aggType).toBeDefined();
+      const fields = aggType!.getFields();
+      expect(fields['count']).toBeDefined();
+    });
+
+    it('should have predicate as non-null IntComparisonExp on count type', () => {
+      const typeMap = schema.getTypeMap();
+      const countType = typeMap['accountAggregateBoolExpCount'] as GraphQLInputObjectType | undefined;
+      expect(countType).toBeDefined();
+      const fields = countType!.getFields();
+      expect(fields['predicate']).toBeDefined();
+      expect(fields['predicate'].type).toBeInstanceOf(GraphQLNonNull);
+    });
+
+    it('should have filter, distinct, and arguments fields on count type', () => {
+      const typeMap = schema.getTypeMap();
+      const countType = typeMap['accountAggregateBoolExpCount'] as GraphQLInputObjectType | undefined;
+      expect(countType).toBeDefined();
+      const fields = countType!.getFields();
+      expect(fields['filter']).toBeDefined();
+      expect(fields['distinct']).toBeDefined();
+      expect(fields['arguments']).toBeDefined();
+    });
+
+    it('should have aggregate filter field on parent BoolExp for array relationships', () => {
+      const typeMap = schema.getTypeMap();
+      const clientBoolExp = typeMap['ClientBoolExp'] as GraphQLInputObjectType | undefined;
+      expect(clientBoolExp).toBeDefined();
+      const fields = clientBoolExp!.getFields();
+      // Client has array relationship 'accounts' -> should have 'accountsAggregate'
+      expect(fields['accountsAggregate']).toBeDefined();
+    });
+  });
+
   describe('Custom queries', () => {
     it('should register custom query fields in the Query type', () => {
       const queryType = schema.getQueryType()!;

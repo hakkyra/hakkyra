@@ -148,7 +148,10 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   const enumNames = new Set(enums.map((e) => e.name));
 
   // ── Step 2: Build filter types (needed by object types for array rel args)
-  const filterTypes = buildFilterTypes(tables, typeRegistry, enumTypes, enumNames);
+  // Create a shared selectColumnEnums map that will be populated during buildMutationInputTypes.
+  // The filter types use thunks (lazy fields), so the map will be populated by the time they execute.
+  const selectColumnEnums = new Map<string, GraphQLEnumType>();
+  const filterTypes = buildFilterTypes(tables, typeRegistry, enumTypes, enumNames, selectColumnEnums);
 
   // ── Step 3: Build OrderBy types for each table (needed by array rel args)
   const orderByTypes = new Map<string, GraphQLInputObjectType>();
@@ -186,6 +189,8 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     mutationInputsByTable.set(key, mutInputs);
     // Register orderBy types for use in array relationship args
     orderByTypes.set(key, mutInputs.orderBy);
+    // Populate the selectColumnEnums map for aggregate BoolExp types (used by filter thunks)
+    selectColumnEnums.set(key, mutInputs.selectColumnEnum);
   }
 
   // Collect selectColumnEnums and aggregate types for tracked functions

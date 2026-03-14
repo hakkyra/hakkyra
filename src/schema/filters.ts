@@ -265,6 +265,11 @@ function columnComparisonType(
  * - _or: [<TypeName>BoolExp]
  * - _not: <TypeName>BoolExp
  * - Relationship fields referencing the related table's BoolExp
+ * - Aggregate filter fields for array relationships (e.g., accountsAggregate)
+ *
+ * @param selectColumnEnums - Optional map of select column enums, populated lazily by generator.ts.
+ *   Used by aggregate BoolExp count types for the `arguments` field. Because BoolExp types use
+ *   thunks, the map will be populated by the time the thunks execute.
  *
  * Returns a Map keyed by "schema.table" for easy lookup.
  */
@@ -273,8 +278,76 @@ export function buildFilterTypes(
   _typeRegistry: TypeRegistry,
   enumTypes: Map<string, GraphQLEnumType>,
   enumNames: Set<string>,
+  selectColumnEnums?: Map<string, GraphQLEnumType>,
 ): Map<string, GraphQLInputObjectType> {
   const filterTypes = new Map<string, GraphQLInputObjectType>();
+  const aggregateBoolExpTypes = new Map<string, GraphQLInputObjectType>();
+
+  // Determine which tables are targets of array relationships
+  const arrayRelTargets = new Set<string>();
+  for (const table of tables) {
+    for (const rel of table.relationships) {
+      if (rel.type === 'array') {
+        arrayRelTargets.add(tableKey(rel.remoteTable.schema, rel.remoteTable.name));
+      }
+    }
+  }
+
+  // Build AggregateBoolExp types for tables that are targets of array relationships
+  for (const table of tables) {
+    const key = tableKey(table.schema, table.name);
+    if (!arrayRelTargets.has(key)) continue;
+
+    const typeName = getTypeName(table);
+    // Lowercase-start naming: GameIntegrationCurrency -> gameIntegrationCurrency
+    const lcTypeName = typeName[0].toLowerCase() + typeName.slice(1);
+
+    // Build the count helper type (lowercase-start name per Hasura convention)
+    const countType = new GraphQLInputObjectType({
+      name: `${lcTypeName}AggregateBoolExpCount`,
+      description: `Count aggregate filter for ${typeName}.`,
+      fields: () => {
+        const fields: Record<string, { type: GraphQLInputType }> = {};
+
+        // arguments: [SelectColumn!] (optional)
+        if (selectColumnEnums) {
+          const selectEnum = selectColumnEnums.get(key);
+          if (selectEnum) {
+            fields['arguments'] = {
+              type: new GraphQLList(new GraphQLNonNull(selectEnum)),
+            };
+          }
+        }
+
+        // distinct: Boolean (optional)
+        fields['distinct'] = { type: GraphQLBoolean };
+
+        // filter: BoolExp (optional) -- references the remote table's BoolExp
+        const remoteBoolExp = filterTypes.get(key);
+        if (remoteBoolExp) {
+          fields['filter'] = { type: remoteBoolExp };
+        }
+
+        // predicate: IntComparisonExp! (required)
+        fields['predicate'] = {
+          type: new GraphQLNonNull(getComparisonType('Int')),
+        };
+
+        return fields;
+      },
+    });
+
+    // Build the aggregate BoolExp wrapper type
+    const aggBoolExpType = new GraphQLInputObjectType({
+      name: `${typeName}AggregateBoolExp`,
+      description: `Aggregate boolean expression filter for ${typeName}.`,
+      fields: {
+        count: { type: countType },
+      },
+    });
+
+    aggregateBoolExpTypes.set(key, aggBoolExpType);
+  }
 
   // Phase 1: Create all BoolExp types with lazy field resolution.
   // This is necessary because tables can reference each other's BoolExp
@@ -307,12 +380,20 @@ export function buildFilterTypes(
           type: boolExpType,
         };
 
-        // Relationship traversal filters
+        // Relationship traversal filters + aggregate filters for array relationships
         for (const rel of table.relationships) {
           const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
           const relBoolExp = filterTypes.get(relKey);
           if (relBoolExp) {
             fields[rel.name] = { type: relBoolExp };
+          }
+
+          // Aggregate filter for array relationships
+          if (rel.type === 'array') {
+            const aggBoolExp = aggregateBoolExpTypes.get(relKey);
+            if (aggBoolExp) {
+              fields[`${rel.name}Aggregate`] = { type: aggBoolExp };
+            }
           }
         }
 

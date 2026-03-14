@@ -49,6 +49,9 @@ function resolveValue(value: unknown, session?: SessionVariables): unknown {
 /** Alias counter for _exists subqueries within a single WHERE compilation. */
 let existsAliasCounter = 0;
 
+/** Alias counter for aggregate filter subqueries within a single WHERE compilation. */
+let aggAliasCounter = 0;
+
 /**
  * Compile column-level operators into SQL fragments.
  *
@@ -300,6 +303,58 @@ function compileBoolExp(
     return `EXISTS (SELECT 1 FROM ${subTable} ${quoteIdentifier(subAlias)}${whereClause})`;
   }
 
+  // ── _aggregateFilter (internal, emitted by resolver's remapBoolExp) ──
+
+  if ('_aggregateFilter' in exp) {
+    const agg = (exp as Record<string, unknown>)['_aggregateFilter'] as {
+      function: string;
+      arguments?: string[];
+      distinct?: boolean;
+      filter?: BoolExp;
+      predicate: Record<string, unknown>;
+      columnMapping: Record<string, string>;
+      remoteSchema: string;
+      remoteTable: string;
+    };
+
+    const subAlias = `_agg_${aggAliasCounter++}`;
+
+    // Build join conditions from column mapping
+    const joinConds = Object.entries(agg.columnMapping)
+      .map(([local, remote]) =>
+        `${quoteIdentifier(subAlias)}.${quoteIdentifier(remote)} = ${quoteIdentifier(tableAlias)}.${quoteIdentifier(local)}`,
+      )
+      .join(' AND ');
+
+    // Build aggregate expression
+    let aggExpr: string;
+    if (agg.function === 'count') {
+      if (agg.arguments && agg.arguments.length > 0) {
+        const cols = agg.arguments.map((c) => `${quoteIdentifier(subAlias)}.${quoteIdentifier(c)}`).join(', ');
+        aggExpr = agg.distinct ? `COUNT(DISTINCT ${cols})` : `COUNT(${cols})`;
+      } else {
+        aggExpr = agg.distinct ? 'COUNT(DISTINCT *)' : 'COUNT(*)';
+      }
+    } else {
+      aggExpr = 'COUNT(*)';
+    }
+
+    // Build optional sub-filter
+    let filterClause = '';
+    if (agg.filter) {
+      const filterSQL = compileBoolExp(agg.filter, params, subAlias, session);
+      if (filterSQL) filterClause = ` AND ${filterSQL}`;
+    }
+
+    // Build correlated subquery
+    const subquery = `(SELECT ${aggExpr} FROM ${quoteTableRef(agg.remoteSchema, agg.remoteTable)} ${quoteIdentifier(subAlias)} WHERE ${joinConds}${filterClause})`;
+
+    // Apply predicate using existing compileColumnOperators
+    const predClauses = compileColumnOperators(subquery, agg.predicate as ColumnOperators, params, session);
+    if (predClauses.length === 0) return '';
+    return predClauses.join(' AND ');
+  }
+
   // ── Column-level expressions (implicit AND across all keys) ──
 
   const clauses: string[] = [];
@@ -362,7 +417,8 @@ export function compileWhere(
   columnLookup?: Map<string, ColumnInfo>,
 ): string {
   if (!boolExp) return '';
-  // Reset the _exists alias counter for each top-level compilation
+  // Reset alias counters for each top-level compilation
   existsAliasCounter = 0;
+  aggAliasCounter = 0;
   return compileBoolExp(boolExp, params, tableAlias, session, columnLookup);
 }

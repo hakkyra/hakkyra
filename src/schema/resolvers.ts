@@ -123,10 +123,15 @@ function remapKeys(
  * Recursively remap camelCase keys in a BoolExp to snake_case column names.
  * Logical operators (_and, _or, _not) and comparison operators (_eq, _gt, etc.)
  * are preserved as-is; only column-level keys are remapped.
+ *
+ * When `table` and `allTables` are provided, aggregate filter keys (e.g., `accountsAggregate`)
+ * are detected and converted into internal `_aggregateFilter` entries for the SQL compiler.
  */
 function remapBoolExp(
   boolExp: BoolExp | undefined | null,
   columnMap: Map<string, string>,
+  table?: TableInfo,
+  allTables?: TableInfo[],
 ): BoolExp | undefined {
   if (!boolExp || typeof boolExp !== 'object') return undefined;
 
@@ -136,19 +141,19 @@ function remapBoolExp(
   // _and: recursively remap each child
   if ('_and' in boolExp) {
     const typed = boolExp as { _and: BoolExp[] };
-    return { _and: typed._and.map((sub) => remapBoolExp(sub, columnMap) ?? ({} as BoolExp)) };
+    return { _and: typed._and.map((sub) => remapBoolExp(sub, columnMap, table, allTables) ?? ({} as BoolExp)) };
   }
 
   // _or: recursively remap each child
   if ('_or' in boolExp) {
     const typed = boolExp as { _or: BoolExp[] };
-    return { _or: typed._or.map((sub) => remapBoolExp(sub, columnMap) ?? ({} as BoolExp)) };
+    return { _or: typed._or.map((sub) => remapBoolExp(sub, columnMap, table, allTables) ?? ({} as BoolExp)) };
   }
 
   // _not: recursively remap child
   if ('_not' in boolExp) {
     const typed = boolExp as { _not: BoolExp };
-    return { _not: remapBoolExp(typed._not, columnMap) ?? ({} as BoolExp) };
+    return { _not: remapBoolExp(typed._not, columnMap, table, allTables) ?? ({} as BoolExp) };
   }
 
   // _exists: pass through (table-level, not column-level)
@@ -156,12 +161,91 @@ function remapBoolExp(
     return boolExp;
   }
 
+  // Build a map of aggregate filter key -> relationship config for quick lookup
+  const aggRelMap = new Map<string, TableInfo['relationships'][number]>();
+  if (table && allTables) {
+    for (const rel of table.relationships) {
+      if (rel.type === 'array') {
+        aggRelMap.set(`${rel.name}Aggregate`, rel);
+      }
+    }
+  }
+
   // Column-level: remap keys from camelCase to snake_case
   const result: Record<string, unknown> = {};
+  const aggregateFilters: unknown[] = [];
+
   for (const [key, value] of Object.entries(boolExp as Record<string, unknown>)) {
+    // Check for aggregate filter keys (e.g., accountsAggregate)
+    const aggRel = aggRelMap.get(key);
+    if (aggRel && value && typeof value === 'object') {
+      const aggValue = value as Record<string, unknown>;
+
+      // Currently only 'count' is supported
+      if (aggValue.count && typeof aggValue.count === 'object') {
+        const countSpec = aggValue.count as Record<string, unknown>;
+        const remoteTable = allTables!.find(
+          (t) => t.name === aggRel.remoteTable.name && t.schema === aggRel.remoteTable.schema,
+        );
+        if (!remoteTable) continue;
+
+        // Build column mapping from the relationship config
+        const colMapping: Record<string, string> = {};
+        if (aggRel.columnMapping) {
+          for (const [localCol, remoteCol] of Object.entries(aggRel.columnMapping)) {
+            colMapping[localCol] = remoteCol;
+          }
+        } else if (aggRel.localColumns && aggRel.remoteColumns) {
+          for (let i = 0; i < aggRel.localColumns.length; i++) {
+            colMapping[aggRel.localColumns[i]] = aggRel.remoteColumns[i];
+          }
+        }
+
+        // Remap the filter sub-expression if present
+        let remappedFilter: BoolExp | undefined;
+        if (countSpec.filter) {
+          const remoteColMap = camelToColumnMap(remoteTable);
+          remappedFilter = remapBoolExp(
+            countSpec.filter as BoolExp,
+            remoteColMap,
+            remoteTable,
+            allTables,
+          );
+        }
+
+        aggregateFilters.push({
+          _aggregateFilter: {
+            function: 'count',
+            arguments: countSpec.arguments as string[] | undefined,
+            distinct: countSpec.distinct as boolean | undefined,
+            filter: remappedFilter,
+            predicate: countSpec.predicate,
+            columnMapping: colMapping,
+            remoteSchema: remoteTable.schema,
+            remoteTable: remoteTable.name,
+          },
+        });
+      }
+      continue;
+    }
+
     const pgName = columnMap.get(key) ?? key;
     result[pgName] = value;
   }
+
+  // If we have aggregate filters, combine them with regular filters using _and
+  if (aggregateFilters.length > 0) {
+    const parts: BoolExp[] = [];
+    if (Object.keys(result).length > 0) {
+      parts.push(result as BoolExp);
+    }
+    for (const af of aggregateFilters) {
+      parts.push(af as BoolExp);
+    }
+    if (parts.length === 1) return parts[0];
+    return { _and: parts };
+  }
+
   return result as BoolExp;
 }
 
@@ -540,7 +624,7 @@ export function makeSelectResolver(
       auth.isAdmin,
     );
 
-    const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
+    const where = remapBoolExp(args.where as BoolExp | undefined, columnMap, table, context.tables);
     const orderBy = remapOrderBy(
       args.orderBy as Array<Record<string, unknown>> | undefined,
       columnMap, table, context.tables,
@@ -694,7 +778,7 @@ export function makeSelectAggregateResolver(
       : getAllowedColumns(table, perm?.columns);
     const nodeRelationships = nodesParsed?.relationships ?? [];
 
-    const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
+    const where = remapBoolExp(args.where as BoolExp | undefined, columnMap, table, context.tables);
     const orderBy = remapOrderBy(
       args.orderBy as Array<Record<string, unknown>> | undefined,
       columnMap, table, context.tables,
@@ -1038,7 +1122,7 @@ export function makeUpdateResolver(
       return { affectedRows: 0, returning: [] };
     }
 
-    const where = remapBoolExp(args.where as BoolExp | undefined, columnMap) ?? ({} as BoolExp);
+    const where = remapBoolExp(args.where as BoolExp | undefined, columnMap, table, context.tables) ?? ({} as BoolExp);
     const returningColumns = getReturningColumns(table);
 
     // Parse returning selection set for relationships
@@ -1264,7 +1348,7 @@ export function makeDeleteResolver(
       throw permissionDenied('delete', `${table.schema}.${table.name}`, auth.role);
     }
 
-    const where = remapBoolExp(args.where as BoolExp | undefined, columnMap) ?? ({} as BoolExp);
+    const where = remapBoolExp(args.where as BoolExp | undefined, columnMap, table, context.tables) ?? ({} as BoolExp);
     const returningColumns = getReturningColumns(table);
 
     // Parse returning selection set for relationships
