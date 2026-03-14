@@ -70,10 +70,26 @@ function stringComparisonFields(scalarType: GraphQLInputType): Record<string, { 
   };
 }
 
+/** JSONB cast expression input type (singleton) */
+let jsonbCastExpType: GraphQLInputObjectType | undefined;
+
+function getJsonbCastExpType(): GraphQLInputObjectType {
+  if (jsonbCastExpType) return jsonbCastExpType;
+  jsonbCastExpType = new GraphQLInputObjectType({
+    name: 'JsonbCastExp',
+    description: 'Cast JSONB values to other types for comparison.',
+    fields: () => ({
+      String: { type: getComparisonType('String') },
+    }),
+  });
+  return jsonbCastExpType;
+}
+
 /** Operators for JSONB types */
 function jsonbComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
   return {
     ...baseComparisonFields(scalarType),
+    _cast: { type: getJsonbCastExpType() },
     _contains: { type: scalarType },
     _containedIn: { type: scalarType },
     _hasKey: { type: GraphQLString },
@@ -251,4 +267,5 @@ export function buildFilterTypes(
  */
 export function resetComparisonTypeCache(): void {
   comparisonTypeCache.clear();
+  jsonbCastExpType = undefined;
 }

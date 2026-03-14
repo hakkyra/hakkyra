@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { GraphQLSchema, GraphQLObjectType, GraphQLNonNull, GraphQLList } from 'graphql';
+import { GraphQLSchema, GraphQLObjectType, GraphQLInputObjectType, GraphQLNonNull, GraphQLList } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
 import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
@@ -246,6 +246,27 @@ describe('GraphQL Schema Generation', () => {
         n.includes('BoolExp') && n.includes('Client'),
       );
       expect(filterTypeNames.length).toBeGreaterThan(0);
+    });
+
+    it('should generate JsonbCastExp type with String field', () => {
+      const typeMap = schema.getTypeMap();
+      const castType = typeMap['JsonbCastExp'] as GraphQLInputObjectType | undefined;
+      expect(castType).toBeDefined();
+      const fields = castType!.getFields();
+      expect(fields['String']).toBeDefined();
+      // The String field should reference StringComparisonExp
+      const stringFieldType = fields['String'].type;
+      expect((stringFieldType as GraphQLInputObjectType).name).toBe('StringComparisonExp');
+    });
+
+    it('should include _cast field in JSONComparisonExp', () => {
+      const typeMap = schema.getTypeMap();
+      const jsonCompType = typeMap['JSONComparisonExp'] as GraphQLInputObjectType | undefined;
+      expect(jsonCompType).toBeDefined();
+      const fields = jsonCompType!.getFields();
+      expect(fields['_cast']).toBeDefined();
+      const castFieldType = fields['_cast'].type;
+      expect((castFieldType as GraphQLInputObjectType).name).toBe('JsonbCastExp');
     });
   });
 

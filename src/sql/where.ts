@@ -160,6 +160,17 @@ function compileColumnOperators(
     clauses.push(`${columnRef} !~* ${params.add(resolveValue(ops._niregex, session))}`);
   }
 
+  // ── JSONB cast expression ──
+
+  if (ops._cast !== undefined) {
+    const castOps = (ops._cast as { String?: ColumnOperators }).String;
+    if (castOps) {
+      const castRef = `(${columnRef})::text`;
+      const castClauses = compileColumnOperators(castRef, castOps, params, session);
+      clauses.push(...castClauses);
+    }
+  }
+
   // ── JSONB operators ──
 
   if (ops._contains !== undefined) {

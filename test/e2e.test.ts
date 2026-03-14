@@ -274,6 +274,56 @@ describe('GraphQL E2E', () => {
     });
   });
 
+  // ── JSONB _cast filter ────────────────────────────────────────────────
+
+  describe('query with JSONB _cast filter', () => {
+    it('filters clientData by _cast String _like on JSONB value', async () => {
+      const token = await tokens.backoffice();
+      const { status, body } = await graphqlRequest(
+        `query {
+          clientData(where: { value: { _cast: { String: { _like: "%dark%" } } } }) {
+            id
+            key
+            value
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const rows = (body.data as { clientData: AnyRow[] }).clientData;
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+      for (const row of rows) {
+        expect(field(row, 'key')).toBe('preferences');
+        const val = field<Record<string, unknown>>(row, 'value');
+        expect(val.theme).toBe('dark');
+      }
+    });
+
+    it('filters clientData by _cast String _ilike on JSONB value', async () => {
+      const token = await tokens.backoffice();
+      const { status, body } = await graphqlRequest(
+        `query {
+          clientData(where: { value: { _cast: { String: { _ilike: "%HELSINKI%" } } } }) {
+            id
+            key
+            value
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const rows = (body.data as { clientData: AnyRow[] }).clientData;
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+      for (const row of rows) {
+        expect(field(row, 'key')).toBe('address');
+      }
+    });
+  });
+
   // ── Aggregates ─────────────────────────────────────────────────────────
 
   describe('query aggregates', () => {
