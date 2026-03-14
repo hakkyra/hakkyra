@@ -6,6 +6,7 @@ import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
 import { compileSelect, compileSelectByPk } from '../src/sql/select.js';
+import { configureStringifyNumericTypes } from '../src/introspection/type-map.js';
 import type { ComputedFieldSelection } from '../src/sql/select.js';
 import type { SchemaModel, TableInfo, BoolExp, FunctionInfo } from '../src/types.js';
 import {
@@ -343,6 +344,34 @@ describe('Computed Fields — E2E via GraphQL', () => {
     expect(Number(client.totalBalance)).toBe(1700);
     expect(client.branch).toBeDefined();
     expect(Array.isArray(client.accounts)).toBe(true);
+  });
+
+  it('computed fields preserve numeric precision with stringify_numeric_types', async () => {
+    const pool = getPool();
+    const table = findTable('account');
+    const cfSel = buildCFSelection(table, 'total');
+
+    configureStringifyNumericTypes(true);
+    try {
+      const query = compileSelect({
+        table,
+        columns: ['id'],
+        where: { client_id: { _eq: ALICE_ID } } as BoolExp,
+        computedFields: [cfSel],
+        session: makeSession('admin'),
+      });
+
+      // The SQL should cast the computed field result to text
+      expect(query.sql).toContain('::text');
+
+      const result = await pool.query(query.sql, query.params);
+      const data = result.rows[0].data;
+      // The computed field should be a string preserving decimal places
+      expect(typeof data[0].total).toBe('string');
+      expect(data[0].total).toMatch(/\./);
+    } finally {
+      configureStringifyNumericTypes(false);
+    }
   });
 
   it('queries without computed fields still work normally', async () => {

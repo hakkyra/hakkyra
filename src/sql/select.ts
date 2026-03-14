@@ -273,7 +273,11 @@ export function buildJsonFields(
       const fnSchema = cf.config.function.schema ?? 'public';
       const fnName = cf.config.function.name;
       const funcRef = `${quoteIdentifier(fnSchema)}.${quoteIdentifier(fnName)}`;
-      fields.push(`'${cf.config.name}', ${funcRef}(${quoteIdentifier(alias)})`);
+      const funcCall = `${funcRef}(${quoteIdentifier(alias)})`;
+      const expr = shouldCastToText(cf.functionInfo.returnType)
+        ? `(${funcCall})::text`
+        : funcCall;
+      fields.push(`'${cf.config.name}', ${expr}`);
     }
   }
 
