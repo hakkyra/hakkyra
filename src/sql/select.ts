@@ -19,6 +19,7 @@ import type {
 } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
+import { shouldCastToText } from '../introspection/type-map.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -259,7 +260,11 @@ export function buildJsonFields(
 
   // Scalar columns
   for (const col of columns) {
-    fields.push(`'${col.name}', ${quoteIdentifier(alias)}.${quoteIdentifier(col.name)}`);
+    const colRef = `${quoteIdentifier(alias)}.${quoteIdentifier(col.name)}`;
+    // When stringify_numeric_types is enabled, cast numeric columns to text
+    // so json_build_object emits a JSON string, preserving precision and trailing zeros.
+    const expr = shouldCastToText(col.udtName) ? `(${colRef})::text` : colRef;
+    fields.push(`'${col.name}', ${expr}`);
   }
 
   // Computed fields — call PG function with table row as argument

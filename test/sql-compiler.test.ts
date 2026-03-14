@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../src/sql/select.js';
+import { configureStringifyNumericTypes } from '../src/introspection/type-map.js';
 import { compileInsertOne, compileInsert } from '../src/sql/insert.js';
 import { compileUpdateByPk } from '../src/sql/update.js';
 import { compileDeleteByPk } from '../src/sql/delete.js';
@@ -283,6 +284,53 @@ describe('SQL SELECT with Relationships', () => {
     const data = result.rows[0].data;
     expect(data[0].accounts[0].currency).toBeDefined();
     expect(data[0].accounts[0].currency.id).toBe('EUR');
+  });
+});
+
+describe('stringify_numeric_types', () => {
+  const adminSession = makeSession('admin');
+
+  it('should preserve numeric precision when stringify_numeric_types is enabled', async () => {
+    const pool = getPool();
+    const table = findTable('account');
+
+    // Enable stringify_numeric_types
+    configureStringifyNumericTypes(true);
+    try {
+      const query = compileSelect({
+        table,
+        columns: ['id', 'balance'],
+        limit: 1,
+        session: adminSession,
+      });
+
+      // The SQL should cast numeric columns to text
+      expect(query.sql).toContain('::text');
+
+      const result = await pool.query(query.sql, query.params);
+      const row = result.rows[0].data[0];
+
+      // balance is NUMERIC(20,4) — the value should be a string preserving decimal places
+      expect(typeof row.balance).toBe('string');
+      expect(row.balance).toMatch(/\.\d{4}$/);
+    } finally {
+      // Restore default
+      configureStringifyNumericTypes(false);
+    }
+  });
+
+  it('should NOT cast numeric columns to text when stringify_numeric_types is disabled', () => {
+    const table = findTable('account');
+
+    configureStringifyNumericTypes(false);
+    const query = compileSelect({
+      table,
+      columns: ['id', 'balance'],
+      session: adminSession,
+    });
+
+    // Should not have ::text cast for balance
+    expect(query.sql).not.toMatch(/"balance"\)::text/);
   });
 });
 

@@ -53,6 +53,18 @@ export function configureStringifyNumericTypes(enabled: boolean): void {
 }
 
 /**
+ * Check if a PostgreSQL column type should be cast to text in SQL output
+ * when `stringify_numeric_types` is enabled. This ensures values like
+ * "0.0000000000" are preserved as-is in json_build_object() output
+ * instead of being truncated by JSON number parsing.
+ */
+export function shouldCastToText(udtName: string): boolean {
+  if (!stringifyNumericOverrides) return false;
+  const baseType = udtName.startsWith('_') ? udtName.slice(1) : udtName;
+  return baseType in stringifyNumericOverrides;
+}
+
+/**
  * Mapping from PostgreSQL udt_name (without leading underscore for arrays)
  * to GraphQL scalar name and whether it's custom.
  */
