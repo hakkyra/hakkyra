@@ -381,6 +381,22 @@ export const ComputedFieldConfigSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// TrackedFunctionConfig
+// ---------------------------------------------------------------------------
+
+export const TrackedFunctionConfigSchema = z.object({
+  name: z.string(),
+  schema: z.string().default('public'),
+  exposedAs: z.enum(['query', 'mutation']).default('query'),
+  customRootFields: z.object({
+    function: z.string().optional(),
+    functionAggregate: z.string().optional(),
+  }).optional(),
+  sessionArgument: z.string().optional(),
+  permissions: z.array(z.object({ role: z.string() })).optional(),
+});
+
+// ---------------------------------------------------------------------------
 // HakkyraConfig (top-level)
 // ---------------------------------------------------------------------------
 
@@ -395,6 +411,7 @@ export const HakkyraConfigSchema = z.object({
   auth: AuthConfigSchema,
   databases: DatabasesConfigSchema,
   tables: z.array(z.any()), // TableInfo contains introspection data — not validated
+  trackedFunctions: z.array(TrackedFunctionConfigSchema).default([]),
   actions: z.array(ActionConfigSchema),
   actionsGraphql: z.string().optional(),
   cronTriggers: z.array(CronTriggerConfigSchema),

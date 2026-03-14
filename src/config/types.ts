@@ -31,6 +31,7 @@ import type {
   RawCustomQuerySchema,
   RawRESTOverrideSchema,
   RawServerConfigSchema,
+  RawTrackedFunctionSchema,
 } from './schemas.js';
 
 // ─── Hasura metadata version ────────────────────────────────────────────────
@@ -80,6 +81,10 @@ export type RawCronTrigger = z.infer<typeof RawCronTriggerSchema>;
 export type RawApiConfig = z.infer<typeof RawApiConfigSchema>;
 export type RawCustomQuery = z.infer<typeof RawCustomQuerySchema>;
 export type RawRESTOverride = z.infer<typeof RawRESTOverrideSchema>;
+
+// ─── Tracked Functions ───────────────────────────────────────────────────────
+
+export type RawTrackedFunction = z.infer<typeof RawTrackedFunctionSchema>;
 
 // ─── Server config (standalone) ─────────────────────────────────────────────
 

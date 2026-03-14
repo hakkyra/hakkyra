@@ -283,6 +283,7 @@ export function mergeSchemaModel(
     enums: introspection.enums,
     functions: introspection.functions,
     customQueries: config.customQueries ?? [],
+    trackedFunctions: config.trackedFunctions ?? [],
   };
 
   return { model, warnings };

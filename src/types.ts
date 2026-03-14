@@ -32,6 +32,7 @@ import {
   DatabasesConfigSchema,
   PoolConfigSchema,
   ComputedFieldConfigSchema,
+  TrackedFunctionConfigSchema,
   HakkyraConfigSchema,
 } from './config/schemas-internal.js';
 
@@ -57,6 +58,7 @@ export interface SchemaModel {
   enums: EnumInfo[];
   functions: FunctionInfo[];
   customQueries: CustomQueryConfig[];
+  trackedFunctions: TrackedFunctionConfig[];
 }
 
 export interface TableInfo {
@@ -79,6 +81,10 @@ export interface TableInfo {
 // ─── Computed Fields ─────────────────────────────────────────────────────────
 
 export type ComputedFieldConfig = z.infer<typeof ComputedFieldConfigSchema>;
+
+// ─── Tracked Functions ───────────────────────────────────────────────────────
+
+export type TrackedFunctionConfig = z.infer<typeof TrackedFunctionConfigSchema>;
 
 export interface ColumnInfo {
   name: string;

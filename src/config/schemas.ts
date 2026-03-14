@@ -400,6 +400,34 @@ export const RawApiConfigSchema = z
   })
   .passthrough();
 
+// ─── Tracked Functions ──────────────────────────────────────────────────
+
+export const RawTrackedFunctionSchema = z
+  .object({
+    function: z.object({
+      name: z.string(),
+      schema: z.string().optional(),
+    }),
+    configuration: z
+      .object({
+        exposed_as: z.enum(['query', 'mutation']).optional(),
+        custom_root_fields: z
+          .object({
+            function: z.string().optional(),
+            function_aggregate: z.string().optional(),
+          })
+          .passthrough()
+          .optional(),
+        session_argument: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    permissions: z
+      .array(z.object({ role: z.string() }).passthrough())
+      .optional(),
+  })
+  .passthrough();
+
 // ─── Server config (standalone) ─────────────────────────────────────────────
 
 const DbPoolSchema = z
