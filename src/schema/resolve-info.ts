@@ -20,6 +20,8 @@ import type {
   TableInfo,
   BoolExp,
   SessionVariables,
+  FunctionInfo,
+  CompiledFilter,
 } from '../types.js';
 import type { RelationshipSelection, OrderByItem } from '../sql/select.js';
 import type { ResolverPermissionLookup } from './resolvers.js';
@@ -32,8 +34,39 @@ export interface ParsedSelection {
   columns: string[];
   /** Nested relationship selections */
   relationships: RelationshipSelection[];
-  /** Computed field names requested */
+  /** Scalar computed field names requested */
   computedFields?: string[];
+  /** Set-returning computed field selections (array computed fields) */
+  setReturningComputedFields?: SetReturningComputedFieldParsed[];
+}
+
+export interface SetReturningComputedFieldParsed {
+  /** snake_case computed field name */
+  name: string;
+  /** The table that the function returns rows from */
+  remoteTable: TableInfo;
+  /** Requested columns from the return table */
+  columns: string[];
+  /** Nested relationship selections from the return table */
+  relationships: RelationshipSelection[];
+  /** Nested scalar computed field names from the return table */
+  computedFields?: string[];
+  /** Nested set-returning computed fields from the return table */
+  setReturningComputedFields?: SetReturningComputedFieldParsed[];
+  /** User-provided where filter */
+  where?: BoolExp;
+  /** User-provided order by */
+  orderBy?: OrderByItem[];
+  /** User-provided limit */
+  limit?: number;
+  /** User-provided offset */
+  offset?: number;
+  /** Permissions on the return table */
+  permission?: {
+    filter: CompiledFilter;
+    columns: string[] | '*';
+    limit?: number;
+  };
 }
 
 // ─── camelCase → snake_case column map ───────────────────────────────────────
@@ -228,6 +261,7 @@ export function parseResolveInfo(
   allTables: TableInfo[],
   permissionLookup: ResolverPermissionLookup,
   session: SessionVariables,
+  functions?: FunctionInfo[],
 ): ParsedSelection {
   const fieldNode = info.fieldNodes[0];
   if (!fieldNode.selectionSet) {
@@ -243,6 +277,7 @@ export function parseResolveInfo(
     session,
     info.variableValues as Record<string, unknown>,
     info.fragments,
+    functions,
   );
 }
 
@@ -259,6 +294,7 @@ function parseSelectionSet(
   session: SessionVariables,
   variableValues: Record<string, unknown>,
   fragments: GraphQLResolveInfo['fragments'],
+  functions?: FunctionInfo[],
 ): ParsedSelection {
   const colMap = camelToColumnMap(table);
   const relMap = relationshipMap(table);
@@ -266,6 +302,7 @@ function parseSelectionSet(
   const columnSet = new Set<string>();
   const relationships: RelationshipSelection[] = [];
   const computedFieldSet = new Set<string>();
+  const setReturningComputedFieldList: SetReturningComputedFieldParsed[] = [];
 
   for (const selection of selections) {
     if (selection.kind === 'Field') {
@@ -276,10 +313,89 @@ function parseSelectionSet(
 
       // Check if it's a computed field
       if (cfNames.has(fieldName)) {
-        // Find the original computed field name (snake_case)
+        // Find the original computed field config (snake_case)
         const cf = table.computedFields?.find((c) => toCamelCase(c.name) === fieldName);
         if (cf) {
-          computedFieldSet.add(cf.name);
+          // Check if it's a set-returning computed field by looking up the function
+          const fnSchema = cf.function.schema ?? 'public';
+          const fn = functions?.find(
+            (f) => f.name === cf.function.name && f.schema === fnSchema,
+          );
+
+          if (fn?.isSetReturning && selection.selectionSet) {
+            // Find the return table
+            const returnTable = allTables.find(
+              (t) => t.name === fn.returnType || `${t.schema}.${t.name}` === fn.returnType,
+            );
+
+            if (returnTable) {
+              // Parse sub-selections recursively against the return table
+              const subParsed = parseSelectionSet(
+                selection.selectionSet.selections,
+                selection,
+                returnTable,
+                allTables,
+                permissionLookup,
+                session,
+                variableValues,
+                fragments,
+                functions,
+              );
+
+              // Look up permissions for the return table
+              const remotePerm = session.isAdmin
+                ? undefined
+                : permissionLookup.getSelect(returnTable.schema, returnTable.name, session.role);
+
+              // Skip if non-admin and no permission on the return table
+              if (!session.isAdmin && !remotePerm) continue;
+
+              const srcfParsed: SetReturningComputedFieldParsed = {
+                name: cf.name,
+                remoteTable: returnTable,
+                columns: subParsed.columns,
+                relationships: subParsed.relationships,
+                computedFields: subParsed.computedFields,
+                setReturningComputedFields: subParsed.setReturningComputedFields,
+                permission: remotePerm ? {
+                  filter: remotePerm.filter,
+                  columns: remotePerm.columns,
+                  limit: remotePerm.limit,
+                } : undefined,
+              };
+
+              // Parse arguments (where, orderBy, limit, offset)
+              const remoteColMap = camelToColumnMap(returnTable);
+
+              const whereArg = getArgumentValue(selection, 'where', variableValues);
+              if (whereArg) {
+                srcfParsed.where = remapBoolExp(whereArg as BoolExp, remoteColMap);
+              }
+
+              const orderByArg = getArgumentValue(selection, 'orderBy', variableValues);
+              if (orderByArg) {
+                srcfParsed.orderBy = remapOrderBy(
+                  orderByArg as Array<Record<string, string>>,
+                  remoteColMap,
+                );
+              }
+
+              const limitArg = getArgumentValue(selection, 'limit', variableValues);
+              if (limitArg !== undefined && limitArg !== null) {
+                srcfParsed.limit = limitArg as number;
+              }
+
+              const offsetArg = getArgumentValue(selection, 'offset', variableValues);
+              if (offsetArg !== undefined && offsetArg !== null) {
+                srcfParsed.offset = offsetArg as number;
+              }
+
+              setReturningComputedFieldList.push(srcfParsed);
+            }
+          } else {
+            // Scalar computed field
+            computedFieldSet.add(cf.name);
+          }
         }
         continue;
       }
@@ -386,6 +502,7 @@ function parseSelectionSet(
           session,
           variableValues,
           fragments,
+          functions,
         );
         for (const col of fragmentResult.columns) {
           columnSet.add(col);
@@ -395,6 +512,9 @@ function parseSelectionSet(
           for (const cf of fragmentResult.computedFields) {
             computedFieldSet.add(cf);
           }
+        }
+        if (fragmentResult.setReturningComputedFields) {
+          setReturningComputedFieldList.push(...fragmentResult.setReturningComputedFields);
         }
       }
     } else if (selection.kind === 'InlineFragment') {
@@ -409,6 +529,7 @@ function parseSelectionSet(
         session,
         variableValues,
         fragments,
+        functions,
       );
       for (const col of fragmentResult.columns) {
         columnSet.add(col);
@@ -418,6 +539,9 @@ function parseSelectionSet(
         for (const cf of fragmentResult.computedFields) {
           computedFieldSet.add(cf);
         }
+      }
+      if (fragmentResult.setReturningComputedFields) {
+        setReturningComputedFieldList.push(...fragmentResult.setReturningComputedFields);
       }
     }
   }
@@ -431,6 +555,7 @@ function parseSelectionSet(
     columns: Array.from(columnSet),
     relationships,
     computedFields: computedFieldSet.size > 0 ? Array.from(computedFieldSet) : undefined,
+    setReturningComputedFields: setReturningComputedFieldList.length > 0 ? setReturningComputedFieldList : undefined,
   };
 }
 
@@ -450,6 +575,7 @@ export function parseReturningInfo(
   allTables: TableInfo[],
   permissionLookup: ResolverPermissionLookup,
   session: SessionVariables,
+  functions?: FunctionInfo[],
 ): ParsedSelection | null {
   const fieldNode = info.fieldNodes[0];
   if (!fieldNode.selectionSet) return null;
@@ -470,6 +596,7 @@ export function parseReturningInfo(
         session,
         variableValues,
         info.fragments,
+        functions,
       );
     }
   }
@@ -492,6 +619,7 @@ export function parseAggregateNodesInfo(
   allTables: TableInfo[],
   permissionLookup: ResolverPermissionLookup,
   session: SessionVariables,
+  functions?: FunctionInfo[],
 ): ParsedSelection | null {
   const fieldNode = info.fieldNodes[0];
   if (!fieldNode.selectionSet) return null;
@@ -512,6 +640,7 @@ export function parseAggregateNodesInfo(
         session,
         variableValues,
         info.fragments,
+        functions,
       );
     }
   }

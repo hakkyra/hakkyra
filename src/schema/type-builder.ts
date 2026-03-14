@@ -268,24 +268,90 @@ export function buildObjectType(
           const fn = functions.find(
             (f) => f.name === cf.function.name && f.schema === (cf.function.schema ?? 'public'),
           );
-          if (!fn) continue;
+          if (!fn) {
+            console.warn(
+              `[hakkyra:schema] Computed field "${cf.name}" on ${table.schema}.${table.name}: ` +
+              `function ${cf.function.schema ?? 'public'}.${cf.function.name} not found in introspection — skipping`,
+            );
+            continue;
+          }
 
-          // TODO: Handle set-returning functions (array computed fields)
-          if (fn.isSetReturning) continue;
+          if (fn.isSetReturning) {
+            // Set-returning computed field — look up return type as a tracked table
+            const fnSchema = cf.function.schema ?? 'public';
+            let returnTableKey: string | undefined;
 
-          // Map the PG return type to a GraphQL type
-          const mapping = pgTypeToGraphQL(fn.returnType, false, enumNames);
-          const fieldType = resolveScalarType(mapping.name, mapping.isList, enumTypes);
+            // Try same schema as the function first
+            const sameSchemaKey = tableKey(fnSchema, fn.returnType);
+            if (typeRegistry.has(sameSchemaKey)) {
+              returnTableKey = sameSchemaKey;
+            } else {
+              // Search all tracked tables for a name match
+              for (const key of typeRegistry.keys()) {
+                if (key.endsWith(`.${fn.returnType}`)) {
+                  returnTableKey = key;
+                  break;
+                }
+              }
+            }
 
-          fields[fieldName] = {
-            type: fieldType,
-            description: cf.comment ?? `Computed field from ${cf.function.schema ?? 'public'}.${cf.function.name}`,
-            extensions: {
-              isComputedField: true,
-              computedFieldConfig: cf,
-              functionInfo: fn,
-            },
-          };
+            if (!returnTableKey) {
+              console.warn(
+                `[hakkyra:schema] Computed field "${cf.name}" on ${table.schema}.${table.name}: ` +
+                `return table "${fn.returnType}" for set-returning function not tracked — skipping`,
+              );
+              continue;
+            }
+
+            const returnTableType = typeRegistry.get(returnTableKey)!;
+
+            // Build array-like arguments (where, orderBy, limit, offset)
+            const args: GraphQLFieldConfigArgumentMap = {};
+
+            const relFilterType = filterTypes?.get(returnTableKey);
+            if (relFilterType) {
+              args['where'] = { type: relFilterType };
+            }
+
+            const relOrderByType = orderByTypes?.get(returnTableKey);
+            if (relOrderByType) {
+              args['orderBy'] = {
+                type: new GraphQLList(new GraphQLNonNull(relOrderByType)),
+              };
+            }
+
+            args['limit'] = { type: GraphQLInt };
+            args['offset'] = { type: GraphQLInt };
+
+            fields[fieldName] = {
+              type: new GraphQLNonNull(
+                new GraphQLList(new GraphQLNonNull(returnTableType)),
+              ),
+              args,
+              description: cf.comment ?? `Computed field (set-returning) from ${cf.function.schema ?? 'public'}.${cf.function.name}`,
+              extensions: {
+                isComputedField: true,
+                isSetReturning: true,
+                computedFieldConfig: cf,
+                functionInfo: fn,
+                returnTableKey,
+              },
+            };
+          } else {
+            // Scalar computed field — map PG return type to a GraphQL scalar
+            const mapping = pgTypeToGraphQL(fn.returnType, false, enumNames);
+            const fieldType = resolveScalarType(mapping.name, mapping.isList, enumTypes);
+
+            fields[fieldName] = {
+              type: fieldType,
+              description: cf.comment ?? `Computed field from ${cf.function.schema ?? 'public'}.${cf.function.name}`,
+              extensions: {
+                isComputedField: true,
+                computedFieldConfig: cf,
+                functionInfo: fn,
+              },
+            };
+          }
         }
       }
 

@@ -33,6 +33,25 @@ export interface ComputedFieldSelection {
   functionInfo: FunctionInfo;
 }
 
+export interface SetReturningComputedFieldSelection {
+  config: ComputedFieldConfig;
+  functionInfo: FunctionInfo;
+  remoteTable: TableInfo;
+  columns: string[];
+  where?: BoolExp;
+  orderBy?: OrderByItem[];
+  limit?: number;
+  offset?: number;
+  relationships?: RelationshipSelection[];
+  computedFields?: ComputedFieldSelection[];
+  setReturningComputedFields?: SetReturningComputedFieldSelection[];
+  permission?: {
+    filter: CompiledFilter;
+    columns: string[] | '*';
+    limit?: number;
+  };
+}
+
 export interface RelationshipSelection {
   relationship: RelationshipConfig;
   remoteTable: TableInfo;
@@ -43,6 +62,7 @@ export interface RelationshipSelection {
   offset?: number;
   relationships?: RelationshipSelection[];
   computedFields?: ComputedFieldSelection[];
+  setReturningComputedFields?: SetReturningComputedFieldSelection[];
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -68,6 +88,7 @@ export interface SelectOptions {
   offset?: number;
   relationships?: RelationshipSelection[];
   computedFields?: ComputedFieldSelection[];
+  setReturningComputedFields?: SetReturningComputedFieldSelection[];
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -82,6 +103,7 @@ export interface SelectByPkOptions {
   columns: string[];
   relationships?: RelationshipSelection[];
   computedFields?: ComputedFieldSelection[];
+  setReturningComputedFields?: SetReturningComputedFieldSelection[];
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -231,6 +253,7 @@ export function buildJsonFields(
   session: SessionVariables,
   aliasCounter: AliasCounter,
   computedFields?: ComputedFieldSelection[],
+  setReturningComputedFields?: SetReturningComputedFieldSelection[],
 ): string {
   const fields: string[] = [];
 
@@ -246,6 +269,20 @@ export function buildJsonFields(
       const fnName = cf.config.function.name;
       const funcRef = `${quoteIdentifier(fnSchema)}.${quoteIdentifier(fnName)}`;
       fields.push(`'${cf.config.name}', ${funcRef}(${quoteIdentifier(alias)})`);
+    }
+  }
+
+  // Set-returning computed fields — lateral subquery over PG function
+  if (setReturningComputedFields) {
+    for (const srcf of setReturningComputedFields) {
+      const subquery = buildSetReturningComputedFieldSubquery(
+        srcf,
+        alias,
+        params,
+        session,
+        aliasCounter,
+      );
+      fields.push(`'${srcf.config.name}', (${subquery})`);
     }
   }
 
@@ -302,6 +339,7 @@ function buildRelationshipSubquery(
     session,
     aliasCounter,
     relSel.computedFields,
+    relSel.setReturningComputedFields,
   );
 
   // Build the join condition from the relationship mapping
@@ -402,6 +440,93 @@ function buildJoinConditions(
   return conditions;
 }
 
+// ─── Set-Returning Computed Field Subquery ───────────────────────────────────
+
+/**
+ * Build a subquery for a set-returning computed field.
+ *
+ * Similar to array relationship subqueries but uses the PG function call
+ * as the FROM source instead of a table with join conditions.
+ * e.g., SELECT coalesce(json_agg(json_build_object(...)), '[]'::json)
+ *        FROM "public"."game_visible_brands"("t0") "t1" WHERE ...
+ */
+function buildSetReturningComputedFieldSubquery(
+  selection: SetReturningComputedFieldSelection,
+  parentAlias: string,
+  params: ParamCollector,
+  session: SessionVariables,
+  aliasCounter: AliasCounter,
+): string {
+  const subAlias = aliasCounter.next();
+  const fnSchema = selection.config.function.schema ?? 'public';
+  const fnName = selection.config.function.name;
+  const funcCall = `${quoteIdentifier(fnSchema)}.${quoteIdentifier(fnName)}(${quoteIdentifier(parentAlias)})`;
+
+  // Filter columns for the sub-selection
+  const subColumns = filterColumns(
+    selection.columns,
+    selection.remoteTable,
+    selection.permission?.columns,
+  );
+
+  // Build json_build_object fields (recursive — handles nested relationships and computed fields)
+  const jsonFields = buildJsonFields(
+    subColumns,
+    subAlias,
+    selection.relationships,
+    params,
+    session,
+    aliasCounter,
+    selection.computedFields,
+    selection.setReturningComputedFields,
+  );
+
+  // WHERE clauses (no join conditions — function call handles the relationship)
+  const whereParts: string[] = [];
+
+  const userWhere = compileWhere(selection.where, params, subAlias, session);
+  if (userWhere) whereParts.push(userWhere);
+
+  if (selection.permission?.filter) {
+    const permResult = selection.permission.filter.toSQL(
+      session,
+      params.getOffset(),
+      subAlias,
+    );
+    if (permResult.sql) {
+      for (const p of permResult.params) {
+        params.add(p);
+      }
+      whereParts.push(permResult.sql);
+    }
+  }
+
+  const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+
+  // ORDER BY
+  const orderByClause = selection.orderBy ? compileOrderBy(selection.orderBy, subAlias) : '';
+
+  // LIMIT / OFFSET
+  let limitClause = '';
+  const effectiveLimit = resolveLimit(selection.limit, selection.permission?.limit);
+  if (effectiveLimit !== undefined) {
+    limitClause += ` LIMIT ${params.add(effectiveLimit)}`;
+  }
+  if (selection.offset !== undefined) {
+    limitClause += ` OFFSET ${params.add(selection.offset)}`;
+  }
+
+  const hasLimitOffset = limitClause.length > 0;
+
+  if (hasLimitOffset) {
+    const innerAlias = aliasCounter.next();
+    const innerSelect = `SELECT json_build_object(${jsonFields}) AS "_row_" FROM ${funcCall} ${quoteIdentifier(subAlias)}${whereClause}${orderByClause}${limitClause}`;
+    return `SELECT coalesce(json_agg(${quoteIdentifier(innerAlias)}."_row_"), '[]'::json) FROM (${innerSelect}) ${quoteIdentifier(innerAlias)}`;
+  }
+
+  return `SELECT coalesce(json_agg(json_build_object(${jsonFields})${orderByClause}), '[]'::json) FROM ${funcCall} ${quoteIdentifier(subAlias)}${whereClause}`;
+}
+
 // ─── Limit Resolution ────────────────────────────────────────────────────────
 
 function resolveLimit(
@@ -444,6 +569,7 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
     opts.session,
     aliasCounter,
     opts.computedFields,
+    opts.setReturningComputedFields,
   );
 
   // Build WHERE clause
@@ -543,6 +669,7 @@ export function compileSelectByPk(opts: SelectByPkOptions): CompiledQuery {
     opts.session,
     aliasCounter,
     opts.computedFields,
+    opts.setReturningComputedFields,
   );
 
   // Build WHERE for PK columns

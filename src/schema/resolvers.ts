@@ -24,12 +24,12 @@ import type { QueryCache } from '../sql/cache.js';
 import type { SubscriptionManager } from '../subscriptions/manager.js';
 import type { JobQueue } from '../shared/job-queue/types.js';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../sql/select.js';
-import type { OrderByItem, AggregateSelection, ComputedFieldSelection } from '../sql/select.js';
+import type { OrderByItem, AggregateSelection, ComputedFieldSelection, SetReturningComputedFieldSelection } from '../sql/select.js';
 import { compileInsertOne, compileInsert } from '../sql/insert.js';
 import { compileUpdateByPk, compileUpdate, compileUpdateMany } from '../sql/update.js';
 import { compileDeleteByPk, compileDelete } from '../sql/delete.js';
 import { toCamelCase } from './type-builder.js';
-import { parseResolveInfo, parseReturningInfo, parseAggregateNodesInfo } from './resolve-info.js';
+import { parseResolveInfo, parseReturningInfo, parseAggregateNodesInfo, type SetReturningComputedFieldParsed } from './resolve-info.js';
 
 // ─── Resolver Context ───────────────────────────────────────────────────────
 
@@ -266,13 +266,79 @@ function buildComputedFieldSelections(
     );
     if (!fn) continue;
 
-    // Skip set-returning functions for now (TODO: array computed fields)
+    // Skip set-returning functions — handled by buildSetReturningComputedFieldSelections
     if (fn.isSetReturning) continue;
 
     selections.push({ config: cfConfig, functionInfo: fn });
   }
 
   return selections;
+}
+
+/**
+ * Build SetReturningComputedFieldSelection[] from parsed set-returning computed fields.
+ */
+function buildSetReturningComputedFieldSelections(
+  parsed: SetReturningComputedFieldParsed[] | undefined,
+  table: TableInfo,
+  functions: FunctionInfo[],
+  permComputedFields?: string[],
+  isAdmin?: boolean,
+): SetReturningComputedFieldSelection[] {
+  if (!parsed || parsed.length === 0) return [];
+
+  const result: SetReturningComputedFieldSelection[] = [];
+
+  for (const srcf of parsed) {
+    // Check computed field permission on the parent table
+    if (!isAdmin && permComputedFields && !permComputedFields.includes(srcf.name)) {
+      continue;
+    }
+
+    const cfConfig = table.computedFields?.find((cf) => cf.name === srcf.name);
+    if (!cfConfig) continue;
+
+    const fnSchema = cfConfig.function.schema ?? 'public';
+    const fn = functions.find(
+      (f) => f.name === cfConfig.function.name && f.schema === fnSchema,
+    );
+    if (!fn) continue;
+
+    // Build nested scalar computed field selections for the return table
+    const nestedComputedFields = buildComputedFieldSelections(
+      srcf.computedFields,
+      srcf.remoteTable,
+      functions,
+      undefined,
+      isAdmin,
+    );
+
+    // Recursively build nested set-returning computed field selections
+    const nestedSetReturning = buildSetReturningComputedFieldSelections(
+      srcf.setReturningComputedFields,
+      srcf.remoteTable,
+      functions,
+      undefined,
+      isAdmin,
+    );
+
+    result.push({
+      config: cfConfig,
+      functionInfo: fn,
+      remoteTable: srcf.remoteTable,
+      columns: srcf.columns,
+      where: srcf.where,
+      orderBy: srcf.orderBy,
+      limit: srcf.limit,
+      offset: srcf.offset,
+      relationships: srcf.relationships.length > 0 ? srcf.relationships : undefined,
+      computedFields: nestedComputedFields.length > 0 ? nestedComputedFields : undefined,
+      setReturningComputedFields: nestedSetReturning.length > 0 ? nestedSetReturning : undefined,
+      permission: srcf.permission,
+    });
+  }
+
+  return result;
 }
 
 /**
@@ -331,12 +397,21 @@ export function makeSelectResolver(
     }
 
     // Parse resolve info to extract requested columns and relationships
-    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const columns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
 
     // Build computed field selections
     const computedFields = buildComputedFieldSelections(
       parsed.computedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+    );
+
+    // Build set-returning computed field selections
+    const setReturningComputedFields = buildSetReturningComputedFieldSelections(
+      parsed.setReturningComputedFields,
       table,
       context.functions,
       perm?.computedFields,
@@ -369,6 +444,7 @@ export function makeSelectResolver(
       offset: args.offset as number | undefined,
       relationships: parsed.relationships,
       computedFields: computedFields.length > 0 ? computedFields : undefined,
+      setReturningComputedFields: setReturningComputedFields.length > 0 ? setReturningComputedFields : undefined,
       permission: perm ? {
         filter: perm.filter,
         columns: perm.columns,
@@ -414,12 +490,21 @@ export function makeSelectByPkResolver(
     const pkValues = remapKeys(args as Record<string, unknown>, columnMap) ?? {};
 
     // Parse resolve info to extract requested columns and relationships
-    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const columns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
 
     // Build computed field selections
     const computedFields = buildComputedFieldSelections(
       parsed.computedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+    );
+
+    // Build set-returning computed field selections
+    const setReturningComputedFields = buildSetReturningComputedFieldSelections(
+      parsed.setReturningComputedFields,
       table,
       context.functions,
       perm?.computedFields,
@@ -432,6 +517,7 @@ export function makeSelectByPkResolver(
       columns,
       relationships: parsed.relationships,
       computedFields: computedFields.length > 0 ? computedFields : undefined,
+      setReturningComputedFields: setReturningComputedFields.length > 0 ? setReturningComputedFields : undefined,
       permission: perm ? {
         filter: perm.filter,
         columns: perm.columns,
@@ -477,7 +563,7 @@ export function makeSelectAggregateResolver(
     }
 
     // Parse resolve info for the "nodes" sub-selection to extract relationships
-    const nodesParsed = parseAggregateNodesInfo(info, table, context.tables, permissionLookup, auth);
+    const nodesParsed = parseAggregateNodesInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const columns = nodesParsed?.columns.length
       ? nodesParsed.columns
       : getAllowedColumns(table, perm?.columns);
