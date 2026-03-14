@@ -29,7 +29,7 @@
       - name: ListClients
         query: |
           query ListClients($limit: Int, $offset: Int, $where: client_bool_exp) {
-            clients(limit: $limit, offset: $offset, where: $where, order_by: {createdAt: desc}) {
+            clients(limit: $limit, offset: $offset, where: $where, order_by: {createdAt: DESC}) {
               id
               username
               email
@@ -66,7 +66,7 @@
       - name: ListInvoices
         query: |
           query ListInvoices($limit: Int, $offset: Int, $where: invoice_bool_exp) {
-            invoice(limit: $limit, offset: $offset, where: $where, order_by: {createdAt: desc}) {
+            invoice(limit: $limit, offset: $offset, where: $where, order_by: {createdAt: DESC}) {
               id
               clientId
               currencyId
@@ -102,7 +102,7 @@
           query ListActiveServicePlans($branchId: uuid) {
             servicePlan(
               where: {state: {_eq: "active"}, branch_id: {_eq: $branchId}}
-              order_by: {start_at: desc}
+              order_by: {start_at: DESC}
             ) {
               id
               name

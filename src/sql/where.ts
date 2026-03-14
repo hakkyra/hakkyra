@@ -69,8 +69,8 @@ function compileColumnOperators(
     }
   }
 
-  if (ops._ne !== undefined) {
-    const val = resolveValue(ops._ne, session);
+  if (ops._neq !== undefined) {
+    const val = resolveValue(ops._neq, session);
     if (val === null) {
       clauses.push(`${columnRef} IS NOT NULL`);
     } else {
@@ -121,8 +121,8 @@ function compileColumnOperators(
     }
   }
 
-  if (ops._is_null !== undefined) {
-    clauses.push(ops._is_null ? `${columnRef} IS NULL` : `${columnRef} IS NOT NULL`);
+  if (ops._isNull !== undefined) {
+    clauses.push(ops._isNull ? `${columnRef} IS NULL` : `${columnRef} IS NOT NULL`);
   }
 
   // ── Text operators ──
@@ -167,24 +167,24 @@ function compileColumnOperators(
       `${columnRef} @> ${params.add(JSON.stringify(resolveValue(ops._contains, session)))}::jsonb`,
     );
   }
-  if (ops._contained_in !== undefined) {
+  if (ops._containedIn !== undefined) {
     clauses.push(
-      `${columnRef} <@ ${params.add(JSON.stringify(resolveValue(ops._contained_in, session)))}::jsonb`,
+      `${columnRef} <@ ${params.add(JSON.stringify(resolveValue(ops._containedIn, session)))}::jsonb`,
     );
   }
-  if (ops._has_key !== undefined) {
+  if (ops._hasKey !== undefined) {
     clauses.push(
-      `${columnRef} ? ${params.add(resolveValue(ops._has_key, session))}`,
+      `${columnRef} ? ${params.add(resolveValue(ops._hasKey, session))}`,
     );
   }
-  if (ops._has_keys_any !== undefined) {
+  if (ops._hasKeysAny !== undefined) {
     clauses.push(
-      `${columnRef} ?| ${params.add(ops._has_keys_any)}`,
+      `${columnRef} ?| ${params.add(ops._hasKeysAny)}`,
     );
   }
-  if (ops._has_keys_all !== undefined) {
+  if (ops._hasKeysAll !== undefined) {
     clauses.push(
-      `${columnRef} ?& ${params.add(ops._has_keys_all)}`,
+      `${columnRef} ?& ${params.add(ops._hasKeysAll)}`,
     );
   }
 

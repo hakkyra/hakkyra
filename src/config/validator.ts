@@ -17,13 +17,17 @@ export interface ValidationWarning {
 }
 
 const VALID_OPERATORS = new Set<string>([
-  '_eq', '_ne', '_gt', '_lt', '_gte', '_lte',
-  '_in', '_nin', '_is_null',
+  // GraphQL naming (Hasura-compatible)
+  '_eq', '_neq', '_gt', '_lt', '_gte', '_lte',
+  '_in', '_nin', '_isNull',
   '_like', '_nlike', '_ilike', '_nilike',
   '_similar', '_nsimilar',
   '_regex', '_nregex', '_iregex', '_niregex',
-  '_contains', '_contained_in',
-  '_has_key', '_has_keys_any', '_has_keys_all',
+  '_contains', '_containedIn',
+  '_hasKey', '_hasKeysAny', '_hasKeysAll',
+  // YAML metadata compat aliases (snake_case)
+  '_ne', '_is_null',
+  '_contained_in', '_has_key', '_has_keys_any', '_has_keys_all',
 ]);
 
 const BOOL_OPERATORS = new Set(['_and', '_or', '_not', '_exists']);

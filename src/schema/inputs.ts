@@ -45,12 +45,12 @@ export const OrderByDirection = new GraphQLEnumType({
   name: 'OrderBy',
   description: 'Column ordering direction.',
   values: {
-    asc: { value: 'asc' },
-    asc_nulls_first: { value: 'asc_nulls_first' },
-    asc_nulls_last: { value: 'asc_nulls_last' },
-    desc: { value: 'desc' },
-    desc_nulls_first: { value: 'desc_nulls_first' },
-    desc_nulls_last: { value: 'desc_nulls_last' },
+    ASC: { value: 'asc' },
+    ASC_NULLS_FIRST: { value: 'asc_nulls_first' },
+    ASC_NULLS_LAST: { value: 'asc_nulls_last' },
+    DESC: { value: 'desc' },
+    DESC_NULLS_FIRST: { value: 'desc_nulls_first' },
+    DESC_NULLS_LAST: { value: 'desc_nulls_last' },
   },
 });
 

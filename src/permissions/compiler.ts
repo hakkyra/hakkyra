@@ -30,7 +30,8 @@ interface SqlOperator {
 const OPERATOR_MAP: Record<string, SqlOperator> = {
   // Comparison
   _eq:  { sql: '=' },
-  _ne:  { sql: '<>' },
+  _neq: { sql: '<>' },
+  _ne:  { sql: '<>' },            // YAML metadata compat alias
   _gt:  { sql: '>' },
   _lt:  { sql: '<' },
   _gte: { sql: '>=' },
@@ -41,7 +42,8 @@ const OPERATOR_MAP: Record<string, SqlOperator> = {
   _nin: { sql: 'NOT IN', mode: 'in' },
 
   // Null
-  _is_null: { sql: 'IS NULL', mode: 'is_null' },
+  _isNull:  { sql: 'IS NULL', mode: 'is_null' },
+  _is_null: { sql: 'IS NULL', mode: 'is_null' },  // YAML metadata compat alias
 
   // Text pattern matching
   _like:     { sql: 'LIKE' },
@@ -58,13 +60,17 @@ const OPERATOR_MAP: Record<string, SqlOperator> = {
   _niregex:{ sql: '!~*' },
 
   // JSONB containment
-  _contains:     { sql: '@>' },
-  _contained_in: { sql: '<@' },
+  _contains:      { sql: '@>' },
+  _containedIn:   { sql: '<@' },
+  _contained_in:  { sql: '<@' },    // YAML metadata compat alias
 
   // JSONB key checks
-  _has_key:      { sql: '?', mode: 'jsonb_keys' },
-  _has_keys_any: { sql: '?|', mode: 'jsonb_keys_array' },
-  _has_keys_all: { sql: '?&', mode: 'jsonb_keys_array' },
+  _hasKey:        { sql: '?', mode: 'jsonb_keys' },
+  _has_key:       { sql: '?', mode: 'jsonb_keys' },        // YAML metadata compat alias
+  _hasKeysAny:    { sql: '?|', mode: 'jsonb_keys_array' },
+  _has_keys_any:  { sql: '?|', mode: 'jsonb_keys_array' }, // YAML metadata compat alias
+  _hasKeysAll:    { sql: '?&', mode: 'jsonb_keys_array' },
+  _has_keys_all:  { sql: '?&', mode: 'jsonb_keys_array' }, // YAML metadata compat alias
 };
 
 // Operators that are defined on ColumnOperators (as opposed to logical / _exists / column traversal).
@@ -307,7 +313,7 @@ function comparisonNode(
       const placeholder = `$${paramOffset + 1}`;
 
       // JSONB containment operators: serialize objects to JSON
-      if (operatorKey === '_contains' || operatorKey === '_contained_in') {
+      if (operatorKey === '_contains' || operatorKey === '_contained_in' || operatorKey === '_containedIn') {
         const jsonValue = typeof resolved === 'object' ? JSON.stringify(resolved) : resolved;
         return {
           sql: `${col} ${op.sql} ${placeholder}`,
