@@ -518,6 +518,32 @@ function resolveLimit(userLimit?: number, permLimit?: number): number | undefine
   return userLimit ?? permLimit;
 }
 
+// ─── Row remapping (snake_case → camelCase) ─────────────────────────────
+
+/**
+ * Remap row keys from snake_case to camelCase for GraphQL response.
+ * Matches the remapping done by regular table resolvers.
+ */
+function remapRowToCamel(
+  row: Record<string, unknown>,
+  table: TableInfo,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const col of table.columns) {
+    if (col.name in row) {
+      result[toCamelCase(col.name)] = row[col.name];
+    }
+  }
+  // Preserve any extra keys (e.g., relationship subquery results)
+  for (const [key, value] of Object.entries(row)) {
+    const camelKey = toCamelCase(key);
+    if (!(camelKey in result)) {
+      result[camelKey] = value;
+    }
+  }
+  return result;
+}
+
 // ─── camelCase / snake_case helpers ──────────────────────────────────────
 
 function camelToColumnMap(table: TableInfo): Map<string, string> {
@@ -717,10 +743,14 @@ function makeTrackedFunctionResolver(
 
     if (fn.isSetReturning) {
       const row = result.rows[0] as { data: unknown } | undefined;
-      return row?.data ?? [];
+      const data = row?.data ?? [];
+      return Array.isArray(data)
+        ? data.map((r: Record<string, unknown>) => remapRowToCamel(r, returnTable))
+        : data;
     } else {
       const row = result.rows[0] as { data: unknown } | undefined;
-      return row?.data ?? null;
+      const data = row?.data ?? null;
+      return data ? remapRowToCamel(data as Record<string, unknown>, returnTable) : null;
     }
   };
 }

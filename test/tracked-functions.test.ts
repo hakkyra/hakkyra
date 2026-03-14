@@ -424,6 +424,68 @@ describe('Tracked Functions — Permissions', () => {
   });
 });
 
+describe('Tracked Functions — camelCase remapping', () => {
+  it('should remap snake_case columns to camelCase in SETOF results', async () => {
+    // Query multi-word columns (snake_case in PG → camelCase in GraphQL)
+    const { body } = await graphqlRequest(
+      `query {
+        searchClients(args: { searchTerm: "alice" }) {
+          id
+          username
+          branchId
+          currencyId
+          trustLevel
+          createdAt
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClients: AnyRow[] };
+    expect(data.searchClients.length).toBeGreaterThan(0);
+    const alice = data.searchClients.find((c) => c.username === 'alice');
+    expect(alice).toBeDefined();
+    // Multi-word columns should be accessible via camelCase
+    expect(alice!.branchId).toBeDefined();
+    expect(alice!.currencyId).toBeDefined();
+    expect(alice!.createdAt).toBeDefined();
+    // trustLevel has a default of 0 so it should be a number
+    expect(typeof alice!.trustLevel).toBe('number');
+  });
+
+  it('should remap snake_case columns to camelCase for non-SETOF results', async () => {
+    // Ensure charlie is active first
+    const pool = getPool();
+    await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
+
+    const { body } = await graphqlRequest(
+      `mutation {
+        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          id
+          username
+          branchId
+          currencyId
+          trustLevel
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { deactivateClient: AnyRow };
+    expect(data.deactivateClient).toBeDefined();
+    expect(data.deactivateClient.branchId).toBeDefined();
+    expect(data.deactivateClient.currencyId).toBeDefined();
+    expect(typeof data.deactivateClient.trustLevel).toBe('number');
+
+    // Restore charlie
+    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+  });
+});
+
 describe('Tracked Functions — Aggregate', () => {
   it('should execute aggregate on a SETOF function', async () => {
     const { body } = await graphqlRequest(
