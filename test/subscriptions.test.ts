@@ -408,4 +408,73 @@ describe('Subscriptions', () => {
       // If we reach here without hanging, cleanup worked
     });
   });
+
+  describe('streaming subscriptions', () => {
+    it('returns initial data from branchStream', async () => {
+      const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+      try {
+        const data = await firstResult<{ branchStream: Array<{ id: string; name: string; createdAt: string }> }>(client, `
+          subscription {
+            branchStream(
+              batchSize: 2,
+              cursor: [{ initialValue: { createdAt: "2000-01-01T00:00:00Z" }, ordering: ASC }]
+            ) { id name createdAt }
+          }
+        `);
+        expect(data.branchStream).toBeDefined();
+        expect(Array.isArray(data.branchStream)).toBe(true);
+        // With batchSize 2, should get at most 2 rows
+        expect(data.branchStream.length).toBeLessThanOrEqual(2);
+        expect(data.branchStream.length).toBeGreaterThan(0);
+      } finally {
+        await client.dispose();
+      }
+    });
+
+    it('delivers new rows after INSERT via streaming', async () => {
+      const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+      const uniqueName = `stream_test_${Date.now()}`;
+      const uniqueCode = `STR${Date.now()}`;
+
+      try {
+        // Use a past cursor and a where filter on a unique name.
+        // Initial batch: empty (no rows match the unique name yet).
+        // After INSERT: the new row matches both cursor and where filter.
+        const resultPromise = collectResults<{ branchStream: Array<{ id: string; name: string }> }>(
+          client,
+          `subscription {
+            branchStream(
+              batchSize: 10,
+              cursor: [{ initialValue: { createdAt: "2000-01-01T00:00:00Z" }, ordering: ASC }],
+              where: { name: { _eq: "${uniqueName}" } }
+            ) { id name }
+          }`,
+          undefined,
+          2, // initial (empty, no matching rows) + after insert
+          15000,
+        );
+
+        await wait(500);
+
+        // Insert a new branch — should trigger the streaming subscription
+        await pool.query(
+          `INSERT INTO branch (id, name, code, active) VALUES (gen_random_uuid(), $1, $2, true)`,
+          [uniqueName, uniqueCode],
+        );
+
+        const results = await resultPromise;
+
+        // First: initial (empty — no rows match the unique name yet)
+        expect(results[0].branchStream).toEqual([]);
+
+        // Second: after insert — should contain the new row
+        expect(results[1].branchStream.length).toBe(1);
+        expect(results[1].branchStream[0].name).toBe(uniqueName);
+      } finally {
+        await client.dispose();
+        await pool.query(`DELETE FROM branch WHERE name = $1`, [uniqueName]);
+      }
+    });
+  });
 });

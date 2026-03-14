@@ -38,8 +38,8 @@ import {
 } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import { buildFilterTypes } from './filters.js';
-import { buildMutationInputTypes, buildAllAggregateOrderByTypes, OrderByDirection } from './inputs.js';
-import type { MutationInputTypes } from './inputs.js';
+import { buildMutationInputTypes, buildAllAggregateOrderByTypes, OrderByDirection, CursorOrdering, buildStreamCursorTypes } from './inputs.js';
+import type { MutationInputTypes, StreamCursorTypes } from './inputs.js';
 import {
   makeSelectResolver,
   makeSelectByPkResolver,
@@ -56,6 +56,7 @@ import type { ResolverContext } from './resolvers.js';
 import {
   makeSubscriptionSelectSubscribe,
   makeSubscriptionSelectByPkSubscribe,
+  makeSubscriptionStreamSubscribe,
 } from './subscription-resolvers.js';
 import { buildCustomQueryFields } from './custom-queries.js';
 import { resolveTrackedFunctions, buildTrackedFunctionFields } from './tracked-functions.js';
@@ -70,6 +71,7 @@ interface RootFieldNames {
   select: string;
   selectByPk: string;
   selectAggregate: string;
+  selectStream: string;
   insert: string;
   insertOne: string;
   update: string;
@@ -88,6 +90,7 @@ function getRootFieldNames(table: TableInfo): RootFieldNames {
     select: custom?.select ?? base,
     selectByPk: custom?.select_by_pk ?? `${base}ByPk`,
     selectAggregate: custom?.select_aggregate ?? `${base}Aggregate`,
+    selectStream: custom?.select_stream ?? `${base}Stream`,
     insert: custom?.insert ?? `insert${typeName}`,
     insertOne: custom?.insert_one ?? `insert${typeName}One`,
     update: custom?.update ?? `update${typeName}`,
@@ -527,6 +530,29 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
         subscribe: makeSubscriptionSelectByPkSubscribe(table),
       };
     }
+
+    // subscribe to stream (cursor-based streaming)
+    const streamCursorTypes = buildStreamCursorTypes(table, enumTypes, enumNames);
+    const streamArgs: GraphQLFieldConfigArgumentMap = {
+      batchSize: { type: new GraphQLNonNull(GraphQLInt), description: 'Maximum number of rows to return per batch.' },
+      cursor: {
+        type: new GraphQLNonNull(
+          new GraphQLList(streamCursorTypes.streamCursorInput),
+        ),
+        description: 'Cursor to stream results from.',
+      },
+    };
+    if (filterType) {
+      streamArgs['where'] = { type: filterType };
+    }
+
+    subscriptionFields[names.selectStream] = {
+      type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
+      args: streamArgs,
+      description: `Stream rows from ${table.schema}.${table.name} using cursor-based streaming.`,
+      resolve: (payload: unknown) => payload,
+      subscribe: makeSubscriptionStreamSubscribe(table),
+    };
   }
 
   // Only create subscription type if there are subscription fields
@@ -547,6 +573,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       ...Object.values(customScalars),
       ...enumTypes.values(),
       OrderByDirection,
+      CursorOrdering,
       ...customFields.outputTypes,
       // Note: action types are NOT included here because they are reachable
       // through the query/mutation field graph. Including them would cause

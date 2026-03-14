@@ -407,3 +407,205 @@ export function makeSubscriptionSelectByPkSubscribe(
     return generate();
   };
 }
+
+// ─── Subscription Subscribe: Streaming ───────────────────────────────────────
+
+/**
+ * Cursor entry parsed from the GraphQL cursor argument.
+ */
+export interface CursorEntry {
+  column: string;
+  ordering: 'ASC' | 'DESC';
+  value: unknown;
+}
+
+/**
+ * Creates a `subscribe` function for streaming subscription fields ({table}Stream).
+ *
+ * Streaming subscriptions differ from regular subscriptions:
+ * - They track cursor positions and deliver batches of new rows
+ * - The cursor advances after each batch
+ * - No hash comparison — always pushes if rows are returned
+ */
+export function makeSubscriptionStreamSubscribe(
+  table: TableInfo,
+): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext) => AsyncIterableIterator<unknown> {
+  const columnMap = camelToColumnMap(table);
+  const tableKeyStr = `${table.schema}.${table.name}`;
+
+  return (_parent, args, context) => {
+    const { auth, permissionLookup, subscriptionManager } = context;
+
+    if (!subscriptionManager) {
+      throw new Error('Subscription manager is not available');
+    }
+
+    const perm = permissionLookup.getSelect(table.schema, table.name, auth.role);
+
+    if (!perm && !auth.isAdmin) {
+      throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
+    }
+
+    const batchSize = args.batchSize as number;
+    const cursorArgs = args.cursor as Array<{
+      initialValue: Record<string, unknown>;
+      ordering?: string;
+    }>;
+    const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
+    const columns = getAllowedColumns(table, perm?.columns);
+
+    // Parse cursor entries: remap camelCase to snake_case
+    const cursors: CursorEntry[] = cursorArgs
+      .filter((c) => c != null)
+      .map((c) => {
+        const ordering = (c.ordering === 'DESC' ? 'DESC' : 'ASC') as 'ASC' | 'DESC';
+        // initialValue has camelCase keys — remap to snake_case
+        const remappedValues = remapKeys(c.initialValue, columnMap) ?? {};
+        // Each cursor entry can specify one or more columns
+        const entries = Object.entries(remappedValues).filter(([, v]) => v !== undefined && v !== null);
+        if (entries.length === 0) {
+          throw new Error('Stream cursor initialValue must specify at least one column');
+        }
+        return entries.map(([col, value]) => ({
+          column: col,
+          ordering,
+          value,
+        }));
+      })
+      .flat();
+
+    if (cursors.length === 0) {
+      throw new Error('Stream cursor must specify at least one cursor column');
+    }
+
+    function buildCursorBoolExp(currentCursors: CursorEntry[]): BoolExp | undefined {
+      if (currentCursors.length === 0) return undefined;
+
+      if (currentCursors.length === 1) {
+        const c = currentCursors[0];
+        const op = c.ordering === 'DESC' ? '_lt' : '_gt';
+        return { [c.column]: { [op]: c.value } } as BoolExp;
+      }
+
+      // Multi-column cursor: (a > $1) OR (a = $1 AND b > $2)
+      const orConditions: BoolExp[] = [];
+      for (let i = 0; i < currentCursors.length; i++) {
+        const andParts: Record<string, unknown> = {};
+        // All preceding columns must be equal
+        for (let j = 0; j < i; j++) {
+          andParts[currentCursors[j].column] = { _eq: currentCursors[j].value };
+        }
+        // Current column uses the comparison operator
+        const c = currentCursors[i];
+        const op = c.ordering === 'DESC' ? '_lt' : '_gt';
+        andParts[c.column] = { [op]: c.value };
+
+        const parts = Object.entries(andParts).map(([k, v]) => ({ [k]: v } as BoolExp));
+        if (parts.length === 1) {
+          orConditions.push(parts[0]);
+        } else {
+          orConditions.push({ _and: parts });
+        }
+      }
+
+      return orConditions.length === 1 ? orConditions[0] : { _or: orConditions };
+    }
+
+    function compileStreamQueryWithCursor(currentCursors: CursorEntry[]): { sql: string; params: unknown[] } {
+      const cursorWhere = buildCursorBoolExp(currentCursors);
+
+      // Combine user where + cursor where
+      let combinedWhere: BoolExp | undefined;
+      if (where && cursorWhere) {
+        combinedWhere = { _and: [where, cursorWhere] };
+      } else {
+        combinedWhere = cursorWhere ?? where;
+      }
+
+      const orderBy: OrderByItem[] = currentCursors.map((c) => ({
+        column: c.column,
+        direction: c.ordering === 'DESC' ? 'desc' as const : 'asc' as const,
+      }));
+
+      return compileSelect({
+        table,
+        columns,
+        where: combinedWhere,
+        orderBy,
+        limit: batchSize,
+        permission: perm ? {
+          filter: perm.filter,
+          columns: perm.columns,
+          limit: perm.limit,
+        } : undefined,
+        session: auth,
+      });
+    }
+
+    // Mutable cursor state
+    const currentCursors = cursors.map((c) => ({ ...c }));
+
+    const queue = createAsyncQueue<unknown>();
+    const subscriptionId = randomUUID();
+
+    async function* generate(): AsyncGenerator<unknown> {
+      try {
+        // Initial query uses cursor values from the args
+        const initialCompiled = compileStreamQueryWithCursor(currentCursors);
+
+        const initialData = await subscriptionManager!.registerStreaming({
+          id: subscriptionId,
+          tableKey: tableKeyStr,
+          session: auth,
+          recompile: () => compileStreamQueryWithCursor(currentCursors),
+          cursors: currentCursors,
+          push: (data: unknown) => {
+            if (Array.isArray(data)) {
+              queue.push(remapRowsToCamel(data as Record<string, unknown>[], table));
+            } else {
+              queue.push(data);
+            }
+          },
+        }, { sql: initialCompiled.sql, params: initialCompiled.params });
+
+        // Yield the initial result (remapped)
+        if (Array.isArray(initialData)) {
+          const remapped = remapRowsToCamel(initialData as Record<string, unknown>[], table);
+          // Update cursors from initial data
+          updateCursorsFromRows(initialData as Record<string, unknown>[], currentCursors);
+          yield remapped;
+        } else {
+          yield initialData;
+        }
+
+        // Yield subsequent updates from the queue
+        for await (const value of queue.iterator) {
+          yield value;
+        }
+      } finally {
+        subscriptionManager!.unregister(subscriptionId);
+        queue.done();
+      }
+    }
+
+    return generate();
+  };
+}
+
+/**
+ * Update cursor values from the returned rows.
+ * Takes the last row's value for each cursor column (since rows are ordered).
+ */
+export function updateCursorsFromRows(
+  rows: Record<string, unknown>[],
+  cursors: CursorEntry[],
+): void {
+  if (rows.length === 0) return;
+
+  for (const cursor of cursors) {
+    const lastRow = rows[rows.length - 1];
+    if (lastRow && cursor.column in lastRow) {
+      cursor.value = lastRow[cursor.column];
+    }
+  }
+}

@@ -13,6 +13,8 @@ import type { Logger } from 'pino';
 import type { ConnectionManager } from '../connections/manager.js';
 import type { SessionVariables, CompiledQuery } from '../types.js';
 import type { ChangeNotification } from './listener.js';
+import type { CursorEntry } from '../schema/subscription-resolvers.js';
+import { updateCursorsFromRows } from '../schema/subscription-resolvers.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -30,12 +32,32 @@ export interface SubscriptionEntry {
   push: (data: unknown) => void;
 }
 
+export interface StreamingSubscriptionEntry {
+  id: string;
+  /** The table this subscription queries */
+  tableKey: string;
+  /** Session variables for query execution */
+  session: SessionVariables;
+  /** Recompile function to generate a new query with updated cursor state */
+  recompile: () => CompiledQuery;
+  /** Mutable cursor state — updated after each batch */
+  cursors: CursorEntry[];
+  /** Callback to push new data to the client */
+  push: (data: unknown) => void;
+}
+
 export interface SubscriptionManager {
   /**
    * Register a new subscription and execute the initial query.
    * Returns the initial data.
    */
   register(entry: Omit<SubscriptionEntry, 'lastHash'>): Promise<unknown>;
+
+  /**
+   * Register a streaming subscription and execute the initial query.
+   * Returns the initial data.
+   */
+  registerStreaming(entry: StreamingSubscriptionEntry, initialQuery: CompiledQuery): Promise<unknown>;
 
   /**
    * Unregister a subscription by ID.
@@ -79,8 +101,11 @@ export function createSubscriptionManager(
 ): SubscriptionManager {
   const queryIntent: 'read' | 'write' =
     (options?.queryRouting ?? 'primary') === 'primary' ? 'write' : 'read';
-  /** All active subscriptions by ID */
+  /** All active regular subscriptions by ID */
   const subscriptions = new Map<string, SubscriptionEntry>();
+
+  /** All active streaming subscriptions by ID */
+  const streamingSubs = new Map<string, StreamingSubscriptionEntry>();
 
   /** Index: tableKey → Set of subscription IDs for fast lookup */
   const tableIndex = new Map<string, Set<string>>();
@@ -121,6 +146,20 @@ export function createSubscriptionManager(
     return data ?? [];
   }
 
+  async function executeStreamingQuery(
+    query: CompiledQuery,
+    session: SessionVariables,
+  ): Promise<unknown> {
+    const result = await connectionManager.queryWithSession(
+      query.sql,
+      query.params,
+      session,
+      queryIntent,
+    );
+    const data = (result.rows[0] as Record<string, unknown> | undefined)?.data;
+    return data ?? [];
+  }
+
   async function reQueryTable(tableKey: string): Promise<void> {
     const subIds = tableIndex.get(tableKey);
     if (!subIds || subIds.size === 0) return;
@@ -128,27 +167,58 @@ export function createSubscriptionManager(
     const promises: Promise<void>[] = [];
 
     for (const subId of subIds) {
+      // Check regular subscriptions first
       const entry = subscriptions.get(subId);
-      if (!entry) continue;
+      if (entry) {
+        promises.push(
+          (async () => {
+            try {
+              const data = await executeQuery(entry);
+              const newHash = hashResult(data);
 
-      promises.push(
-        (async () => {
-          try {
-            const data = await executeQuery(entry);
-            const newHash = hashResult(data);
-
-            if (newHash !== entry.lastHash) {
-              entry.lastHash = newHash;
-              entry.push(data);
+              if (newHash !== entry.lastHash) {
+                entry.lastHash = newHash;
+                entry.push(data);
+              }
+            } catch (err) {
+              logger.error(
+                { err, subscriptionId: subId, tableKey },
+                'Error re-querying subscription',
+              );
             }
-          } catch (err) {
-            logger.error(
-              { err, subscriptionId: subId, tableKey },
-              'Error re-querying subscription',
-            );
-          }
-        })(),
-      );
+          })(),
+        );
+        continue;
+      }
+
+      // Check streaming subscriptions
+      const streamEntry = streamingSubs.get(subId);
+      if (streamEntry) {
+        promises.push(
+          (async () => {
+            try {
+              // Recompile the query with updated cursor state
+              const query = streamEntry.recompile();
+              const data = await executeStreamingQuery(query, streamEntry.session);
+
+              // For streaming: no hash comparison — push if rows are returned
+              if (Array.isArray(data) && data.length > 0) {
+                // Update cursor values from the returned rows
+                updateCursorsFromRows(
+                  data as Record<string, unknown>[],
+                  streamEntry.cursors,
+                );
+                streamEntry.push(data);
+              }
+            } catch (err) {
+              logger.error(
+                { err, subscriptionId: subId, tableKey },
+                'Error re-querying streaming subscription',
+              );
+            }
+          })(),
+        );
+      }
     }
 
     await Promise.all(promises);
@@ -176,12 +246,34 @@ export function createSubscriptionManager(
       return data;
     },
 
+    async registerStreaming(entry, initialQuery): Promise<unknown> {
+      // Execute initial query
+      const data = await executeStreamingQuery(initialQuery, entry.session);
+
+      streamingSubs.set(entry.id, entry);
+      addToTableIndex(entry.tableKey, entry.id);
+
+      logger.debug(
+        { subscriptionId: entry.id, tableKey: entry.tableKey },
+        'Streaming subscription registered',
+      );
+
+      return data;
+    },
+
     unregister(id): void {
       const entry = subscriptions.get(id);
       if (entry) {
         removeFromTableIndex(entry.tableKey, id);
         subscriptions.delete(id);
         logger.debug({ subscriptionId: id }, 'Subscription unregistered');
+      }
+
+      const streamEntry = streamingSubs.get(id);
+      if (streamEntry) {
+        removeFromTableIndex(streamEntry.tableKey, id);
+        streamingSubs.delete(id);
+        logger.debug({ subscriptionId: id }, 'Streaming subscription unregistered');
       }
     },
 
@@ -209,7 +301,7 @@ export function createSubscriptionManager(
     },
 
     activeCount(): number {
-      return subscriptions.size;
+      return subscriptions.size + streamingSubs.size;
     },
   };
 }

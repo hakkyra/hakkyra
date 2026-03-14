@@ -38,6 +38,18 @@ import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
 import { toCamelCase, getTypeName, tableKey } from './type-builder.js';
 
+// ─── CursorOrdering Enum ────────────────────────────────────────────────────
+
+/** Cursor ordering direction for streaming subscriptions. */
+export const CursorOrdering = new GraphQLEnumType({
+  name: 'CursorOrdering',
+  description: 'Ordering options for cursor-based streaming.',
+  values: {
+    ASC: { value: 'ASC' },
+    DESC: { value: 'DESC' },
+  },
+});
+
 // ─── OrderBy Direction Enum ─────────────────────────────────────────────────
 
 /** Ordering direction enum, shared across all tables. */
@@ -193,6 +205,63 @@ export interface MutationInputTypes {
   updateColumnEnum: GraphQLEnumType;
   selectColumnEnum: GraphQLEnumType;
   updateManyInput: GraphQLInputObjectType | null;
+}
+
+// ─── Stream Cursor Types ────────────────────────────────────────────────────
+
+export interface StreamCursorTypes {
+  streamCursorValueInput: GraphQLInputObjectType;
+  streamCursorInput: GraphQLInputObjectType;
+}
+
+/**
+ * Build streaming subscription cursor input types for a table.
+ *
+ * Creates:
+ * - {Type}StreamCursorValueInput — all columns as optional fields (nullable scalars)
+ * - {Type}StreamCursorInput — { initialValue: {Type}StreamCursorValueInput!, ordering: CursorOrdering }
+ */
+export function buildStreamCursorTypes(
+  table: TableInfo,
+  enumTypes: Map<string, GraphQLEnumType>,
+  enumNames: Set<string>,
+): StreamCursorTypes {
+  const typeName = getTypeName(table);
+
+  // StreamCursorValueInput — all columns as optional fields (same pattern as SetInput)
+  const streamCursorValueInput = new GraphQLInputObjectType({
+    name: `${typeName}StreamCursorValueInput`,
+    description: `Initial value of the cursor for streaming subscription on ${typeName}.`,
+    fields: () => {
+      const fields: GraphQLInputFieldConfigMap = {};
+      for (const column of table.columns) {
+        const fieldName = toCamelCase(column.name);
+        fields[fieldName] = {
+          type: columnToInputType(column, enumTypes, enumNames),
+          description: column.comment,
+        };
+      }
+      return fields;
+    },
+  });
+
+  // StreamCursorInput — { initialValue: ..., ordering: CursorOrdering }
+  const streamCursorInput = new GraphQLInputObjectType({
+    name: `${typeName}StreamCursorInput`,
+    description: `Streaming cursor input for ${typeName}.`,
+    fields: {
+      initialValue: {
+        type: new GraphQLNonNull(streamCursorValueInput),
+        description: 'Stream cursor initial value.',
+      },
+      ordering: {
+        type: CursorOrdering,
+        description: 'Cursor ordering, defaults to ASC.',
+      },
+    },
+  });
+
+  return { streamCursorValueInput, streamCursorInput };
 }
 
 // ─── Aggregate OrderBy Builders ─────────────────────────────────────────────

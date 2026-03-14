@@ -74,6 +74,7 @@ export const CustomRootFieldsSchema = z.object({
   select: z.string().optional(),
   select_by_pk: z.string().optional(),
   select_aggregate: z.string().optional(),
+  select_stream: z.string().optional(),
   insert: z.string().optional(),
   insert_one: z.string().optional(),
   update: z.string().optional(),
