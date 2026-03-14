@@ -115,10 +115,12 @@ export const RawRelationshipSchema = z
         foreign_key_constraint_on: z
           .union([
             z.string(),
+            z.array(z.string()),
             z.object({
-              column: z.string(),
-              table: TableIdentifierSchema,
-            }),
+              column: z.string().optional(),
+              columns: z.array(z.string()).optional(),
+              table: z.union([TableIdentifierSchema, z.string()]).optional(),
+            }).passthrough(),
           ])
           .optional(),
         manual_configuration: z
@@ -158,7 +160,7 @@ export const RawUpdatePermissionSchema = z
   .object({
     columns: ColumnsSchema,
     filter: BoolExpSchema,
-    check: BoolExpSchema.optional(),
+    check: BoolExpSchema.nullable().optional(),
     set: z.record(z.string(), z.string()).optional(),
   })
   .passthrough();
@@ -425,6 +427,7 @@ export const RawServerConfigSchema = z
         host: z.string().optional(),
         slow_query_threshold_ms: z.number().optional(),
         log_level: z.string().optional(),
+        stringify_numeric_types: z.boolean().optional(),
       })
       .passthrough()
       .optional(),

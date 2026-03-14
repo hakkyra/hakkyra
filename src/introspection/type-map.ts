@@ -29,6 +29,30 @@ export interface GraphQLTypeName {
 }
 
 /**
+ * PostgreSQL types that are stringified when `stringify_numeric_types` is enabled.
+ * These types don't fit cleanly into the IEEE-754 spec for JSON encoding/decoding.
+ */
+const STRINGIFY_NUMERIC_OVERRIDES: Record<string, { name: string; isCustomScalar: boolean }> = {
+  int8: { name: 'String', isCustomScalar: false },
+  bigserial: { name: 'String', isCustomScalar: false },
+  serial8: { name: 'String', isCustomScalar: false },
+  float8: { name: 'String', isCustomScalar: false },
+  numeric: { name: 'String', isCustomScalar: false },
+  money: { name: 'String', isCustomScalar: false },
+};
+
+let stringifyNumericOverrides: Record<string, { name: string; isCustomScalar: boolean }> | null = null;
+
+/**
+ * Enable or disable stringification of numeric types (bigint, numeric, double precision).
+ * When enabled, these types map to GraphQL `String` instead of their usual scalar types.
+ * Call this before schema generation.
+ */
+export function configureStringifyNumericTypes(enabled: boolean): void {
+  stringifyNumericOverrides = enabled ? STRINGIFY_NUMERIC_OVERRIDES : null;
+}
+
+/**
  * Mapping from PostgreSQL udt_name (without leading underscore for arrays)
  * to GraphQL scalar name and whether it's custom.
  */
@@ -124,7 +148,7 @@ export function pgTypeToGraphQL(
     };
   }
 
-  const mapping = PG_TO_GRAPHQL[baseType];
+  const mapping = stringifyNumericOverrides?.[baseType] ?? PG_TO_GRAPHQL[baseType];
   if (mapping) {
     return {
       name: mapping.name,

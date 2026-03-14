@@ -390,7 +390,8 @@ export const HakkyraConfigSchema = z.object({
     port: z.number().default(3000),
     host: z.string().default('0.0.0.0'),
     logLevel: z.string().default('info'),
-  }).default({ port: 3000, host: '0.0.0.0', logLevel: 'info' }),
+    stringifyNumericTypes: z.boolean().default(false),
+  }).default({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false }),
   auth: AuthConfigSchema,
   databases: DatabasesConfigSchema,
   tables: z.array(z.any()), // TableInfo contains introspection data — not validated

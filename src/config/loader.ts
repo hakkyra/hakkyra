@@ -107,6 +107,12 @@ async function resolveIncludes(data: unknown, baseDir: string): Promise<unknown>
     const included = await readYaml(includePath);
     return resolveIncludes(included, path.dirname(includePath));
   }
+  // Handle quoted "!include filename.yaml" strings (Hasura CLI generates these)
+  if (typeof data === 'string' && data.startsWith('!include ')) {
+    const includePath = path.resolve(baseDir, data.slice('!include '.length).trim());
+    const included = await readYaml(includePath);
+    return resolveIncludes(included, path.dirname(includePath));
+  }
   if (Array.isArray(data)) {
     return Promise.all(data.map((item) => resolveIncludes(item, baseDir)));
   }
@@ -189,6 +195,7 @@ export async function loadConfig(
       port: serverConfig?.server?.port,
       host: serverConfig?.server?.host,
       logLevel: serverConfig?.server?.log_level,
+      stringifyNumericTypes: serverConfig?.server?.stringify_numeric_types,
     }) ?? {},
     auth: transformAuth(serverConfig),
     databases: transformDatabases(databases, serverConfig),
@@ -461,9 +468,27 @@ function transformRelationship(
   if (fk) {
     if (typeof fk === 'string') {
       rel.localColumns = [fk];
+    } else if (Array.isArray(fk)) {
+      // Composite FK as array of column names
+      rel.localColumns = fk;
     } else {
-      rel.remoteTable = { name: fk.table.name, schema: fk.table.schema };
-      rel.remoteColumns = [fk.column];
+      // Object form: { column?, columns?, table? }
+      if (fk.table) {
+        if (typeof fk.table === 'string') {
+          rel.remoteTable = { name: fk.table, schema: 'public' };
+        } else {
+          rel.remoteTable = { name: fk.table.name, schema: fk.table.schema };
+        }
+      }
+      const cols = fk.columns ?? (fk.column ? [fk.column] : undefined);
+      if (cols) {
+        // For array rels, these are remote columns; for object rels, local columns
+        if (type === 'array') {
+          rel.remoteColumns = cols;
+        } else {
+          rel.localColumns = cols;
+        }
+      }
     }
   }
 
@@ -514,7 +539,7 @@ function transformPermissions(raw: RawTableYaml): TablePermissions {
       perms.update[entry.role] = {
         columns: entry.permission.columns,
         filter: entry.permission.filter as BoolExp,
-        check: entry.permission.check as BoolExp | undefined,
+        check: (entry.permission.check ?? undefined) as BoolExp | undefined,
         set: entry.permission.set,
       };
     }

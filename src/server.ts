@@ -52,6 +52,7 @@ import { registerInvokeRoute } from './events/invoke.js';
 import { ensureAsyncActionSchema, registerAsyncActionWorkers } from './actions/index.js';
 import { registerAsyncActionStatusRoute } from './actions/rest.js';
 import { CONFIG_DEFAULTS } from './config/schemas-internal.js';
+import { configureStringifyNumericTypes } from './introspection/type-map.js';
 
 // ─── Permission adapters ─────────────────────────────────────────────────────
 
@@ -146,6 +147,9 @@ export async function createServer(
   // 4. Compile permissions
   const permissionLookup = buildPermissionLookup(schemaModel.tables);
 
+  // 4b. Configure numeric type stringification before schema generation
+  configureStringifyNumericTypes(config.server.stringifyNumericTypes);
+
   // 5. Generate GraphQL schema (with action fields if configured)
   const graphqlSchema = generateSchema(schemaModel, {
     actions: config.actions,
@@ -168,35 +172,47 @@ export async function createServer(
       level: process.env['LOG_LEVEL'] ?? config.server.logLevel,
       transport,
     },
+    rewriteUrl(req) {
+      let url = req.url ?? '/';
+      // Normalize consecutive slashes
+      url = url.replace(/\/\/+/g, '/');
+      // Hasura-compatible /v1/graphql -> /graphql
+      if (url.startsWith('/v1/graphql')) {
+        url = '/graphql' + url.slice('/v1/graphql'.length);
+      }
+      return url;
+    },
   });
 
   const slowQueryThresholdMs = config.slowQueryThresholdMs;
 
-  // ── Request logging hook ────────────────────────────────────────────────
-  server.addHook('onResponse', (request, reply, done) => {
+  // ── Debug request/response logging ─────────────────────────────────────
+  server.addHook('preHandler', (request, _reply, done) => {
     const logData: Record<string, unknown> = {
       method: request.method,
       url: request.url,
-      statusCode: reply.statusCode,
-      responseTimeMs: reply.elapsedTime,
+      headers: { ...request.headers, authorization: undefined },
     };
-
-    // Extract GraphQL operation name if available
-    if (request.url.startsWith('/graphql') && request.body && typeof request.body === 'object') {
-      const body = request.body as Record<string, unknown>;
-      if (typeof body.operationName === 'string') {
-        logData.operationName = body.operationName;
-      }
+    if (request.body !== undefined && request.body !== null) {
+      logData.body = request.body;
     }
-
-    // Include role from session variables if available
-    if (request.session?.role) {
-      logData.role = request.session.role;
-    }
-
-    server.log.info(logData, 'request completed');
+    server.log.debug(logData, 'incoming request');
     done();
   });
+
+  server.addHook('onSend', (request, reply, payload, done) => {
+    let body: unknown = payload;
+    if (typeof payload === 'string') {
+      try { body = JSON.parse(payload); } catch { /* keep as string */ }
+    }
+    server.log.debug(
+      { method: request.method, url: request.url, statusCode: reply.statusCode, body },
+      'outgoing response',
+    );
+    done(null, payload);
+  });
+
+
 
   // 7. Register auth middleware (must be BEFORE Mercurius so preHandler runs)
   await server.register(createAuthHook(config.auth));
@@ -613,6 +629,7 @@ export async function createServer(
         const newIntrospection = await introspectDatabase(primaryPool);
         const newMerge = mergeSchemaModel(newIntrospection, newConfig);
         const newPermLookup = buildPermissionLookup(newMerge.model.tables);
+        configureStringifyNumericTypes(newConfig.server.stringifyNumericTypes);
         const newSchema = generateSchema(newMerge.model, {
           actions: newConfig.actions,
           actionsGraphql: newConfig.actionsGraphql,
