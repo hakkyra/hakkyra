@@ -179,7 +179,8 @@ export function compileDelete(opts: DeleteOptions): CompiledQuery {
   const whereParts: string[] = [];
 
   // User-provided WHERE
-  const userWhere = compileWhere(opts.where, params, alias, opts.session);
+  const deleteColumnLookup = new Map(opts.table.columns.map(c => [c.name, c]));
+  const userWhere = compileWhere(opts.where, params, alias, opts.session, deleteColumnLookup);
   if (userWhere) whereParts.push(userWhere);
 
   // Permission filter

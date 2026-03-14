@@ -51,6 +51,8 @@ insert_permissions:
         - name
         - code
         - active
+        - tags
+        - ratings
       check: {}
 
 update_permissions:
@@ -59,4 +61,6 @@ update_permissions:
       columns:
         - name
         - active
+        - tags
+        - ratings
       filter: {}

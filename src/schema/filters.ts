@@ -153,6 +153,60 @@ function getEnumComparisonType(
   return compType;
 }
 
+// ─── Array Comparison Input Types ────────────────────────────────────────────
+
+/**
+ * Build comparison fields for PostgreSQL array columns.
+ * Array comparison uses PG array operators (@>, <@) and standard
+ * comparison operators that work on arrays.
+ */
+function arrayComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
+  const arrayType = new GraphQLList(new GraphQLNonNull(scalarType));
+  const arrayOfArraysType = new GraphQLList(new GraphQLNonNull(arrayType));
+  return {
+    _eq: { type: arrayType },
+    _neq: { type: arrayType },
+    _gt: { type: arrayType },
+    _gte: { type: arrayType },
+    _lt: { type: arrayType },
+    _lte: { type: arrayType },
+    _contains: { type: arrayType },
+    _containedIn: { type: arrayType },
+    _in: { type: arrayOfArraysType },
+    _nin: { type: arrayOfArraysType },
+    _isNull: { type: GraphQLBoolean },
+  };
+}
+
+/**
+ * Get (or create and cache) the array comparison input type for a given scalar name.
+ * Creates types like `StringArrayComparisonExp`, `IntArrayComparisonExp`, etc.
+ */
+function getArrayComparisonType(scalarName: string): GraphQLInputObjectType {
+  const typeName = `${scalarName}ArrayComparisonExp`;
+  const cached = comparisonTypeCache.get(typeName);
+  if (cached) return cached;
+
+  // Resolve the actual GraphQL scalar type
+  const builtinScalars: Record<string, GraphQLInputType> = {
+    Int: GraphQLInt,
+    Float: GraphQLFloat,
+    String: GraphQLString,
+    Boolean: GraphQLBoolean,
+  };
+  const scalarType: GraphQLInputType =
+    builtinScalars[scalarName] ?? customScalars[scalarName] ?? (GraphQLString as unknown as GraphQLScalarType);
+
+  const compType = new GraphQLInputObjectType({
+    name: typeName,
+    description: `Comparison operators for ${scalarName} array columns.`,
+    fields: arrayComparisonFields(scalarType),
+  });
+
+  comparisonTypeCache.set(typeName, compType);
+  return compType;
+}
+
 // ─── Column → Comparison Type Resolution ────────────────────────────────────
 
 /**
@@ -164,6 +218,16 @@ function columnComparisonType(
   enumNames: Set<string>,
 ): GraphQLInputObjectType {
   const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
+
+  // Array columns get a dedicated array comparison type
+  if (column.isArray) {
+    // Check if it's an enum array
+    const enumType = enumTypes.get(mapping.name);
+    if (enumType) {
+      return getArrayComparisonType(enumType.name);
+    }
+    return getArrayComparisonType(mapping.name);
+  }
 
   // Check if it's an enum
   const enumType = enumTypes.get(mapping.name);

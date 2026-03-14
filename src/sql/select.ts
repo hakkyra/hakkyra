@@ -364,7 +364,8 @@ function buildRelationshipSubquery(
   const whereParts: string[] = [...joinConditions];
 
   // User-provided filter on this relationship
-  const userWhere = compileWhere(relSel.where, params, subAlias, session);
+  const relColumnLookup = new Map(remoteTable.columns.map(c => [c.name, c]));
+  const userWhere = compileWhere(relSel.where, params, subAlias, session, relColumnLookup);
   if (userWhere) whereParts.push(userWhere);
 
   // Permission filter
@@ -499,7 +500,8 @@ function buildSetReturningComputedFieldSubquery(
   // WHERE clauses (no join conditions — function call handles the relationship)
   const whereParts: string[] = [];
 
-  const userWhere = compileWhere(selection.where, params, subAlias, session);
+  const srcfColumnLookup = new Map(selection.remoteTable.columns.map(c => [c.name, c]));
+  const userWhere = compileWhere(selection.where, params, subAlias, session, srcfColumnLookup);
   if (userWhere) whereParts.push(userWhere);
 
   if (selection.permission?.filter) {
@@ -591,7 +593,8 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
   const whereParts: string[] = [];
 
   // User-provided filter
-  const userWhere = compileWhere(opts.where, params, alias, opts.session);
+  const columnLookup = new Map(opts.table.columns.map(c => [c.name, c]));
+  const userWhere = compileWhere(opts.where, params, alias, opts.session, columnLookup);
   if (userWhere) whereParts.push(userWhere);
 
   // Permission filter
@@ -735,7 +738,8 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
   // Build WHERE clause
   const whereParts: string[] = [];
 
-  const userWhere = compileWhere(opts.where, params, alias, opts.session);
+  const aggColumnLookup = new Map(opts.table.columns.map(c => [c.name, c]));
+  const userWhere = compileWhere(opts.where, params, alias, opts.session, aggColumnLookup);
   if (userWhere) whereParts.push(userWhere);
 
   if (opts.permission?.filter) {

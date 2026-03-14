@@ -110,7 +110,8 @@ function buildSelectSQL(
   const whereParts: string[] = [];
 
   // User-provided filters
-  const userWhere = compileWhere(parsed.where, params, 't', session);
+  const restColumnLookup = new Map(table.columns.map(c => [c.name, c]));
+  const userWhere = compileWhere(parsed.where, params, 't', session, restColumnLookup);
   if (userWhere) {
     whereParts.push(userWhere);
   }
@@ -271,7 +272,8 @@ function buildInsertSQL(
 
         // Optional WHERE clause on the DO UPDATE
         if (onConflict.where) {
-          const whereSQL = compileWhere(onConflict.where, params, table.name, session);
+          const restOcColumnLookup = new Map(table.columns.map(c => [c.name, c]));
+          const whereSQL = compileWhere(onConflict.where, params, table.name, session, restOcColumnLookup);
           if (whereSQL) {
             onConflictClause += ` WHERE ${whereSQL}`;
           }

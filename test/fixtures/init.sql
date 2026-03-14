@@ -119,7 +119,9 @@ CREATE TABLE supplier (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,
   code TEXT NOT NULL UNIQUE,
-  active BOOLEAN DEFAULT true
+  active BOOLEAN DEFAULT true,
+  tags text[] DEFAULT '{}',
+  ratings int[] DEFAULT '{}'
 );
 
 CREATE TABLE product (
@@ -293,8 +295,8 @@ INSERT INTO role (id, name) VALUES
   (2, 'support'),
   (3, 'viewer');
 
-INSERT INTO supplier (id, name, code) VALUES
-  ('b0000000-0000-0000-0000-000000000001', 'TestSupplier', 'TEST_SUP');
+INSERT INTO supplier (id, name, code, tags, ratings) VALUES
+  ('b0000000-0000-0000-0000-000000000001', 'TestSupplier', 'TEST_SUP', '{"premium","verified"}', '{5,4,5}');
 
 INSERT INTO product (id, supplier_id, name, code, category, margin) VALUES
   ('c0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'Premium Casket', 'premium-casket', 'caskets', 35.50),

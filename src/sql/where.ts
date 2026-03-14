@@ -5,7 +5,7 @@
  * permission filters) into parameterized SQL WHERE clause fragments.
  */
 
-import type { BoolExp, ColumnOperators, ExistsExp, SessionVariables } from '../types.js';
+import type { BoolExp, ColumnInfo, ColumnOperators, ExistsExp, SessionVariables } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 
 /**
@@ -51,12 +51,19 @@ let existsAliasCounter = 0;
 
 /**
  * Compile column-level operators into SQL fragments.
+ *
+ * @param columnRef    - Quoted column reference (e.g. `"t0"."tags"`).
+ * @param ops          - The operator map from the BoolExp.
+ * @param params       - Parameter collector.
+ * @param session      - Session variables for resolving x-hasura-* references.
+ * @param isArrayColumn - Whether the column is a PostgreSQL array type.
  */
 function compileColumnOperators(
   columnRef: string,
   ops: ColumnOperators,
   params: ParamCollector,
   session?: SessionVariables,
+  isArrayColumn = false,
 ): string[] {
   const clauses: string[] = [];
 
@@ -99,6 +106,11 @@ function compileColumnOperators(
     if (values.length === 0) {
       // IN with empty list => always false
       clauses.push('FALSE');
+    } else if (isArrayColumn) {
+      // For array columns, each value in _in is itself an array.
+      // Always use IN ($1, $2, ...) form — the pg driver serializes each
+      // JS array into a PG array literal.
+      clauses.push(`${columnRef} IN ${params.addMany(values)}`);
     } else if (values.length > ARRAY_ANY_THRESHOLD) {
       // For large IN lists, use = ANY($1) with a single array parameter
       // instead of IN ($1, $2, ...) to reduce parameter count
@@ -113,6 +125,9 @@ function compileColumnOperators(
     if (values.length === 0) {
       // NOT IN with empty list => always true (no-op)
       clauses.push('TRUE');
+    } else if (isArrayColumn) {
+      // For array columns, always use NOT IN ($1, $2, ...) form
+      clauses.push(`${columnRef} NOT IN ${params.addMany(values)}`);
     } else if (values.length > ARRAY_ANY_THRESHOLD) {
       // For large NOT IN lists, use != ALL($1) with a single array parameter
       clauses.push(`${columnRef} != ALL(${params.addArray(values)})`);
@@ -160,18 +175,35 @@ function compileColumnOperators(
     clauses.push(`${columnRef} !~* ${params.add(resolveValue(ops._niregex, session))}`);
   }
 
-  // ── JSONB operators ──
+  // ── Containment operators (@> / <@) ──
+  // For array columns: native PG array containment (no JSON serialization).
+  // For JSONB columns: JSON-serialize the value and cast to ::jsonb.
 
   if (ops._contains !== undefined) {
-    clauses.push(
-      `${columnRef} @> ${params.add(JSON.stringify(resolveValue(ops._contains, session)))}::jsonb`,
-    );
+    if (isArrayColumn) {
+      clauses.push(
+        `${columnRef} @> ${params.add(resolveValue(ops._contains, session))}`,
+      );
+    } else {
+      clauses.push(
+        `${columnRef} @> ${params.add(JSON.stringify(resolveValue(ops._contains, session)))}::jsonb`,
+      );
+    }
   }
   if (ops._containedIn !== undefined) {
-    clauses.push(
-      `${columnRef} <@ ${params.add(JSON.stringify(resolveValue(ops._containedIn, session)))}::jsonb`,
-    );
+    if (isArrayColumn) {
+      clauses.push(
+        `${columnRef} <@ ${params.add(resolveValue(ops._containedIn, session))}`,
+      );
+    } else {
+      clauses.push(
+        `${columnRef} <@ ${params.add(JSON.stringify(resolveValue(ops._containedIn, session)))}::jsonb`,
+      );
+    }
   }
+
+  // ── JSONB-only operators ──
+
   if (ops._hasKey !== undefined) {
     clauses.push(
       `${columnRef} ? ${params.add(resolveValue(ops._hasKey, session))}`,
@@ -202,6 +234,7 @@ function compileBoolExp(
   params: ParamCollector,
   tableAlias: string,
   session?: SessionVariables,
+  columnLookup?: Map<string, ColumnInfo>,
 ): string {
   if (!exp || typeof exp !== 'object') return '';
 
@@ -213,7 +246,7 @@ function compileBoolExp(
   if ('_and' in exp) {
     const andExp = exp as { _and: BoolExp[] };
     const parts = andExp._and
-      .map((sub) => compileBoolExp(sub, params, tableAlias, session))
+      .map((sub) => compileBoolExp(sub, params, tableAlias, session, columnLookup))
       .filter(Boolean);
     if (parts.length === 0) return '';
     if (parts.length === 1) return parts[0];
@@ -223,7 +256,7 @@ function compileBoolExp(
   if ('_or' in exp) {
     const orExp = exp as { _or: BoolExp[] };
     const parts = orExp._or
-      .map((sub) => compileBoolExp(sub, params, tableAlias, session))
+      .map((sub) => compileBoolExp(sub, params, tableAlias, session, columnLookup))
       .filter(Boolean);
     if (parts.length === 0) return '';
     if (parts.length === 1) return parts[0];
@@ -232,7 +265,7 @@ function compileBoolExp(
 
   if ('_not' in exp) {
     const notExp = exp as { _not: BoolExp };
-    const inner = compileBoolExp(notExp._not, params, tableAlias, session);
+    const inner = compileBoolExp(notExp._not, params, tableAlias, session, columnLookup);
     if (!inner) return '';
     return `NOT (${inner})`;
   }
@@ -270,19 +303,24 @@ function compileBoolExp(
       const hasColumnOps = valueKeys.some((k) => k.startsWith('_'));
 
       if (hasColumnOps) {
+        // Determine if this column is a PG array type
+        const colInfo = columnLookup?.get(key);
+        const isArrayColumn = colInfo?.isArray ?? false;
+
         // It's a ColumnOperators object
         const opClauses = compileColumnOperators(
           columnRef,
           value as ColumnOperators,
           params,
           session,
+          isArrayColumn,
         );
         clauses.push(...opClauses);
       } else {
         // It's a nested BoolExp for relationship traversal — not handled
         // at this level (relationship traversal needs schema context).
         // For now, treat as nested column filters.
-        const nested = compileBoolExp(value as BoolExp, params, tableAlias, session);
+        const nested = compileBoolExp(value as BoolExp, params, tableAlias, session, columnLookup);
         if (nested) clauses.push(nested);
       }
     }
@@ -298,10 +336,11 @@ function compileBoolExp(
 /**
  * Compile a BoolExp into a SQL WHERE clause fragment (without the WHERE keyword).
  *
- * @param boolExp    - The boolean expression tree to compile.
- * @param params     - Parameter collector for tracking $N placeholders.
- * @param tableAlias - The table alias to prefix column references with.
- * @param session    - Session variables for resolving x-hasura-* references.
+ * @param boolExp       - The boolean expression tree to compile.
+ * @param params        - Parameter collector for tracking $N placeholders.
+ * @param tableAlias    - The table alias to prefix column references with.
+ * @param session       - Session variables for resolving x-hasura-* references.
+ * @param columnLookup  - Optional map of column name → ColumnInfo for array detection.
  * @returns The compiled SQL string, or empty string for empty/null filters.
  */
 export function compileWhere(
@@ -309,9 +348,10 @@ export function compileWhere(
   params: ParamCollector,
   tableAlias: string,
   session?: SessionVariables,
+  columnLookup?: Map<string, ColumnInfo>,
 ): string {
   if (!boolExp) return '';
   // Reset the _exists alias counter for each top-level compilation
   existsAliasCounter = 0;
-  return compileBoolExp(boolExp, params, tableAlias, session);
+  return compileBoolExp(boolExp, params, tableAlias, session, columnLookup);
 }
