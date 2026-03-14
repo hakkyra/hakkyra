@@ -28,6 +28,8 @@ export interface DeleteByPkOptions {
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
   returningRelationships?: RelationshipSelection[];
+  /** JSONB path arguments for RETURNING fields */
+  returningJsonbPaths?: Map<string, string>;
   permission?: {
     filter: CompiledFilter;
   };
@@ -42,6 +44,8 @@ export interface DeleteOptions {
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
   returningRelationships?: RelationshipSelection[];
+  /** JSONB path arguments for RETURNING fields */
+  returningJsonbPaths?: Map<string, string>;
   permission?: {
     filter: CompiledFilter;
   };
@@ -61,14 +65,15 @@ function buildReturningFields(
   params: ParamCollector,
   session: SessionVariables,
   relationships?: RelationshipSelection[],
+  jsonbPaths?: Map<string, string>,
 ): string {
   const tableColumnNames = new Set(table.columns.map((c) => c.name));
   const validReturning = returningColumns.filter((c) => tableColumnNames.has(c));
 
-  if (relationships && relationships.length > 0) {
+  if ((relationships && relationships.length > 0) || (jsonbPaths && jsonbPaths.size > 0)) {
     const columns = filterColumns(validReturning, table);
     const aliasCounter = new AliasCounter();
-    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter);
+    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, undefined, undefined, jsonbPaths);
   }
 
   return validReturning.map(
@@ -119,9 +124,10 @@ export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
 
   const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
   const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
+  const hasJsonbPaths = opts.returningJsonbPaths && opts.returningJsonbPaths.size > 0;
 
-  if (hasRelationships) {
-    // Use CTE pattern so relationship subqueries can reference the deleted row
+  if (hasRelationships || hasJsonbPaths) {
+    // Use CTE pattern so relationship subqueries / jsonb path extraction can reference the deleted row
     const returningFields = buildReturningFields(
       opts.table,
       opts.returningColumns,
@@ -129,6 +135,7 @@ export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
       params,
       opts.session,
       opts.returningRelationships,
+      opts.returningJsonbPaths,
     );
 
     const sql = [
@@ -204,9 +211,10 @@ export function compileDelete(opts: DeleteOptions): CompiledQuery {
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
+  const hasJsonbPaths = opts.returningJsonbPaths && opts.returningJsonbPaths.size > 0;
 
-  if (validReturning.length > 0 || hasRelationships) {
-    // Use CTE to collect results as JSON array, with optional relationship subqueries
+  if (validReturning.length > 0 || hasRelationships || hasJsonbPaths) {
+    // Use CTE to collect results as JSON array, with optional relationship subqueries and JSONB path extraction
     const returningFields = buildReturningFields(
       opts.table,
       opts.returningColumns,
@@ -214,6 +222,7 @@ export function compileDelete(opts: DeleteOptions): CompiledQuery {
       params,
       opts.session,
       opts.returningRelationships,
+      opts.returningJsonbPaths,
     );
 
     const sql = [

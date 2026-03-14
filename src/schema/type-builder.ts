@@ -187,11 +187,18 @@ export function buildObjectType(
           fieldType = new GraphQLNonNull(fieldType);
         }
 
+        // Add path argument for JSONB/JSON scalar columns
+        const fieldArgs: GraphQLFieldConfigArgumentMap | undefined =
+          !column.isArray && (column.udtName === 'jsonb' || column.udtName === 'json')
+            ? { path: { type: GraphQLString, description: 'JSON select path' } }
+            : undefined;
+
         fields[fieldName] = {
           type: fieldType,
           description: column.comment,
           // Store the original PG column name for the SQL compiler
           extensions: { pgColumnName: column.name },
+          ...(fieldArgs ? { args: fieldArgs } : {}),
         };
       }
 

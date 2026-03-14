@@ -540,6 +540,7 @@ function buildSetReturningComputedFieldSelections(
       relationships: srcf.relationships.length > 0 ? srcf.relationships : undefined,
       computedFields: nestedComputedFields.length > 0 ? nestedComputedFields : undefined,
       setReturningComputedFields: nestedSetReturning.length > 0 ? nestedSetReturning : undefined,
+      jsonbPaths: srcf.jsonbPaths,
       permission: srcf.permission,
     });
   }
@@ -654,6 +655,7 @@ export function makeSelectResolver(
       relationships: parsed.relationships,
       computedFields: computedFields.length > 0 ? computedFields : undefined,
       setReturningComputedFields: setReturningComputedFields.length > 0 ? setReturningComputedFields : undefined,
+      jsonbPaths: parsed.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
         columns: perm.columns,
@@ -727,6 +729,7 @@ export function makeSelectByPkResolver(
       relationships: parsed.relationships,
       computedFields: computedFields.length > 0 ? computedFields : undefined,
       setReturningComputedFields: setReturningComputedFields.length > 0 ? setReturningComputedFields : undefined,
+      jsonbPaths: parsed.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
         columns: perm.columns,
@@ -971,6 +974,7 @@ export function makeInsertResolver(
       objects,
       returningColumns,
       returningRelationships,
+      returningJsonbPaths: returningParsed?.jsonbPaths,
       onConflict,
       permission: perm ? {
         check: perm.check,
@@ -982,9 +986,9 @@ export function makeInsertResolver(
 
     const result = await queryWithSession(compiled.sql, compiled.params, auth, 'write');
 
-    // CTE pattern (check OR relationships): single row with "data" as JSON array
+    // CTE pattern (check OR relationships or jsonbPaths): single row with "data" as JSON array
     // Simple pattern: RETURNING json_build_object → "data" column per row
-    const usesCTE = !!(perm?.check || returningRelationships);
+    const usesCTE = !!(perm?.check || returningRelationships || returningParsed?.jsonbPaths?.size);
     const firstRow = result.rows[0] as Record<string, unknown> | undefined;
 
     if (usesCTE) {
@@ -1068,6 +1072,7 @@ export function makeInsertOneResolver(
       object: obj,
       returningColumns,
       returningRelationships,
+      returningJsonbPaths: parsed.jsonbPaths,
       onConflict,
       permission: perm ? {
         check: perm.check,
@@ -1137,6 +1142,7 @@ export function makeUpdateResolver(
       _set: setValues,
       returningColumns,
       returningRelationships,
+      returningJsonbPaths: returningParsed?.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
         check: perm.check,
@@ -1148,9 +1154,9 @@ export function makeUpdateResolver(
 
     const result = await queryWithSession(compiled.sql, compiled.params, auth, 'write');
 
-    // CTE pattern (check OR relationships): single row with "data" as JSON array
+    // CTE pattern (check OR relationships or jsonbPaths): single row with "data" as JSON array
     // Without CTE: each row has a "data" column
-    const usesCTE = !!(perm?.check || returningRelationships);
+    const usesCTE = !!(perm?.check || returningRelationships || returningParsed?.jsonbPaths?.size);
     if (usesCTE) {
       const firstRow = result.rows[0] as Record<string, unknown> | undefined;
       const data = firstRow?.data;
@@ -1218,6 +1224,7 @@ export function makeUpdateByPkResolver(
       _set: setValues,
       returningColumns,
       returningRelationships,
+      returningJsonbPaths: parsed.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
         check: perm.check,
@@ -1282,6 +1289,7 @@ export function makeUpdateManyResolver(
       updates,
       returningColumns,
       returningRelationships,
+      returningJsonbPaths: returningParsed?.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
         check: perm.check,
@@ -1362,6 +1370,7 @@ export function makeDeleteResolver(
       where,
       returningColumns,
       returningRelationships,
+      returningJsonbPaths: returningParsed?.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
       } : undefined,
@@ -1423,6 +1432,7 @@ export function makeDeleteByPkResolver(
       pkValues,
       returningColumns,
       returningRelationships,
+      returningJsonbPaths: parsed.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
       } : undefined,

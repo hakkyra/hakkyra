@@ -414,4 +414,34 @@ describe('GraphQL Schema Generation', () => {
       expect(field.type).not.toBeInstanceOf(GraphQLNonNull);
     });
   });
+
+  describe('JSONB path argument', () => {
+    it('should add path: String argument to JSONB column fields', () => {
+      const clientDataType = schema.getType('ClientData') as GraphQLObjectType;
+      expect(clientDataType).toBeDefined();
+      const valueField = clientDataType.getFields()['value'];
+      expect(valueField).toBeDefined();
+      const argNames = valueField.args.map((a) => a.name);
+      expect(argNames).toContain('path');
+      const pathArg = valueField.args.find((a) => a.name === 'path')!;
+      expect(pathArg.type.toString()).toBe('String');
+    });
+
+    it('should add path: String argument to other JSONB columns (e.g., client.metadata)', () => {
+      const clientType = schema.getType('Client') as GraphQLObjectType;
+      expect(clientType).toBeDefined();
+      const metadataField = clientType.getFields()['metadata'];
+      expect(metadataField).toBeDefined();
+      const argNames = metadataField.args.map((a) => a.name);
+      expect(argNames).toContain('path');
+    });
+
+    it('should not add path argument to non-JSONB columns', () => {
+      const clientType = schema.getType('Client') as GraphQLObjectType;
+      expect(clientType).toBeDefined();
+      const usernameField = clientType.getFields()['username'];
+      expect(usernameField).toBeDefined();
+      expect(usernameField.args).toHaveLength(0);
+    });
+  });
 });

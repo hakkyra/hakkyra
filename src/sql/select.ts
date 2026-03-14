@@ -59,6 +59,8 @@ export interface SetReturningComputedFieldSelection {
   relationships?: RelationshipSelection[];
   computedFields?: ComputedFieldSelection[];
   setReturningComputedFields?: SetReturningComputedFieldSelection[];
+  /** JSONB path arguments: snake_case column name → dot-separated path string */
+  jsonbPaths?: Map<string, string>;
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -77,6 +79,8 @@ export interface RelationshipSelection {
   relationships?: RelationshipSelection[];
   computedFields?: ComputedFieldSelection[];
   setReturningComputedFields?: SetReturningComputedFieldSelection[];
+  /** JSONB path arguments: snake_case column name → dot-separated path string */
+  jsonbPaths?: Map<string, string>;
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -109,6 +113,8 @@ export interface SelectOptions {
   relationships?: RelationshipSelection[];
   computedFields?: ComputedFieldSelection[];
   setReturningComputedFields?: SetReturningComputedFieldSelection[];
+  /** JSONB path arguments: snake_case column name → dot-separated path string */
+  jsonbPaths?: Map<string, string>;
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -124,6 +130,8 @@ export interface SelectByPkOptions {
   relationships?: RelationshipSelection[];
   computedFields?: ComputedFieldSelection[];
   setReturningComputedFields?: SetReturningComputedFieldSelection[];
+  /** JSONB path arguments: snake_case column name → dot-separated path string */
+  jsonbPaths?: Map<string, string>;
   permission?: {
     filter: CompiledFilter;
     columns: string[] | '*';
@@ -434,12 +442,23 @@ export function buildJsonFields(
   aliasCounter: AliasCounter,
   computedFields?: ComputedFieldSelection[],
   setReturningComputedFields?: SetReturningComputedFieldSelection[],
+  jsonbPaths?: Map<string, string>,
 ): string {
   const fields: string[] = [];
 
   // Scalar columns
   for (const col of columns) {
     const colRef = `${quoteIdentifier(alias)}.${quoteIdentifier(col.name)}`;
+
+    // JSONB path extraction: column #> $N::text[]
+    const pathStr = jsonbPaths?.get(col.name);
+    if (pathStr) {
+      const segments = pathStr.split('.');
+      const placeholder = params.add(segments);
+      fields.push(`'${col.name}', ${colRef} #> ${placeholder}::text[]`);
+      continue;
+    }
+
     // When stringify_numeric_types is enabled, cast numeric columns to text
     // so json_build_object emits a JSON string, preserving precision and trailing zeros.
     const expr = shouldCastToText(col.udtName) ? `(${colRef})::text` : colRef;
@@ -528,6 +547,7 @@ function buildRelationshipSubquery(
     aliasCounter,
     relSel.computedFields,
     relSel.setReturningComputedFields,
+    relSel.jsonbPaths,
   );
 
   // Build the join condition from the relationship mapping
@@ -668,6 +688,7 @@ function buildSetReturningComputedFieldSubquery(
     aliasCounter,
     selection.computedFields,
     selection.setReturningComputedFields,
+    selection.jsonbPaths,
   );
 
   // WHERE clauses (no join conditions — function call handles the relationship)
@@ -760,6 +781,7 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
     aliasCounter,
     opts.computedFields,
     opts.setReturningComputedFields,
+    opts.jsonbPaths,
   );
 
   // Build WHERE clause
@@ -863,6 +885,7 @@ export function compileSelectByPk(opts: SelectByPkOptions): CompiledQuery {
     aliasCounter,
     opts.computedFields,
     opts.setReturningComputedFields,
+    opts.jsonbPaths,
   );
 
   // Build WHERE for PK columns

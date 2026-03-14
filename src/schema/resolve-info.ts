@@ -38,6 +38,8 @@ export interface ParsedSelection {
   computedFields?: string[];
   /** Set-returning computed field selections (array computed fields) */
   setReturningComputedFields?: SetReturningComputedFieldParsed[];
+  /** JSONB path arguments: snake_case column name → dot-separated path string */
+  jsonbPaths?: Map<string, string>;
 }
 
 export interface SetReturningComputedFieldParsed {
@@ -53,6 +55,8 @@ export interface SetReturningComputedFieldParsed {
   computedFields?: string[];
   /** Nested set-returning computed fields from the return table */
   setReturningComputedFields?: SetReturningComputedFieldParsed[];
+  /** JSONB path arguments: snake_case column name → dot-separated path string */
+  jsonbPaths?: Map<string, string>;
   /** User-provided where filter */
   where?: BoolExp;
   /** User-provided order by */
@@ -422,6 +426,15 @@ function parseSelectionSet(
   const relationships: RelationshipSelection[] = [];
   const computedFieldSet = new Set<string>();
   const setReturningComputedFieldList: SetReturningComputedFieldParsed[] = [];
+  const jsonbPaths = new Map<string, string>();
+
+  // Build a set of JSONB/JSON column camelCase names for path argument detection
+  const jsonbColumnCamelNames = new Set<string>();
+  for (const col of table.columns) {
+    if (!col.isArray && (col.udtName === 'jsonb' || col.udtName === 'json')) {
+      jsonbColumnCamelNames.add(toCamelCase(col.name));
+    }
+  }
 
   for (const selection of selections) {
     if (selection.kind === 'Field') {
@@ -476,6 +489,7 @@ function parseSelectionSet(
                 relationships: subParsed.relationships,
                 computedFields: subParsed.computedFields,
                 setReturningComputedFields: subParsed.setReturningComputedFields,
+                jsonbPaths: subParsed.jsonbPaths,
                 permission: remotePerm ? {
                   filter: remotePerm.filter,
                   columns: remotePerm.columns,
@@ -566,6 +580,7 @@ function parseSelectionSet(
           relationships: subSelection.relationships.length > 0
             ? subSelection.relationships
             : undefined,
+          jsonbPaths: subSelection.jsonbPaths,
           permission: remotePerm ? {
             filter: remotePerm.filter,
             columns: remotePerm.columns,
@@ -609,6 +624,14 @@ function parseSelectionSet(
         const pgName = colMap.get(fieldName);
         if (pgName) {
           columnSet.add(pgName);
+
+          // Check for path argument on JSONB/JSON columns
+          if (jsonbColumnCamelNames.has(fieldName)) {
+            const pathArg = getArgumentValue(selection, 'path', variableValues);
+            if (typeof pathArg === 'string' && pathArg.length > 0) {
+              jsonbPaths.set(pgName, pathArg);
+            }
+          }
         }
       }
     } else if (selection.kind === 'FragmentSpread') {
@@ -639,6 +662,11 @@ function parseSelectionSet(
         if (fragmentResult.setReturningComputedFields) {
           setReturningComputedFieldList.push(...fragmentResult.setReturningComputedFields);
         }
+        if (fragmentResult.jsonbPaths) {
+          for (const [col, path] of fragmentResult.jsonbPaths) {
+            jsonbPaths.set(col, path);
+          }
+        }
       }
     } else if (selection.kind === 'InlineFragment') {
       // Handle inline fragments
@@ -666,6 +694,11 @@ function parseSelectionSet(
       if (fragmentResult.setReturningComputedFields) {
         setReturningComputedFieldList.push(...fragmentResult.setReturningComputedFields);
       }
+      if (fragmentResult.jsonbPaths) {
+        for (const [col, path] of fragmentResult.jsonbPaths) {
+          jsonbPaths.set(col, path);
+        }
+      }
     }
   }
 
@@ -679,6 +712,7 @@ function parseSelectionSet(
     relationships,
     computedFields: computedFieldSet.size > 0 ? Array.from(computedFieldSet) : undefined,
     setReturningComputedFields: setReturningComputedFieldList.length > 0 ? setReturningComputedFieldList : undefined,
+    jsonbPaths: jsonbPaths.size > 0 ? jsonbPaths : undefined,
   };
 }
 

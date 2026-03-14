@@ -647,3 +647,80 @@ describe('SQL DELETE Compiler', () => {
     expect(result.rows).toHaveLength(1);
   });
 });
+
+describe('JSONB Path Argument', () => {
+  const adminSession = makeSession('admin');
+
+  it('should compile SELECT with jsonbPaths extracting a nested key', () => {
+    const table = findTable('client_data');
+    const jsonbPaths = new Map<string, string>([['value', 'theme']]);
+    const query = compileSelect({
+      table,
+      columns: ['id', 'key', 'value'],
+      jsonbPaths,
+      session: adminSession,
+    });
+    // Should contain the #> operator for path extraction
+    expect(query.sql).toContain('#>');
+    expect(query.sql).toContain('::text[]');
+    // The path segments should be parameterized
+    expect(query.params).toContainEqual(['theme']);
+  });
+
+  it('should compile SELECT with multi-segment jsonbPaths', () => {
+    const table = findTable('client_data');
+    const jsonbPaths = new Map<string, string>([['value', 'nested.deep.key']]);
+    const query = compileSelect({
+      table,
+      columns: ['id', 'value'],
+      jsonbPaths,
+      session: adminSession,
+    });
+    expect(query.sql).toContain('#>');
+    // Multi-segment path should be split into array
+    expect(query.params).toContainEqual(['nested', 'deep', 'key']);
+  });
+
+  it('should execute SELECT with jsonbPaths against real DB', async () => {
+    const pool = getPool();
+    const table = findTable('client_data');
+    const jsonbPaths = new Map<string, string>([['value', 'theme']]);
+    const query = compileSelect({
+      table,
+      columns: ['id', 'key', 'value'],
+      where: { key: { _eq: 'preferences' } } as BoolExp,
+      jsonbPaths,
+      session: adminSession,
+    });
+    const result = await pool.query(query.sql, query.params);
+    const data = result.rows[0].data;
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBeGreaterThan(0);
+    // The value should be the extracted nested value "dark"
+    expect(data[0].value).toBe('dark');
+  });
+
+  it('should compile SELECT BY PK with jsonbPaths', () => {
+    const table = findTable('client_data');
+    const jsonbPaths = new Map<string, string>([['value', 'city']]);
+    const query = compileSelectByPk({
+      table,
+      pkValues: { id: '00000000-0000-0000-0000-000000000000' },
+      columns: ['id', 'value'],
+      jsonbPaths,
+      session: adminSession,
+    });
+    expect(query.sql).toContain('#>');
+    expect(query.params).toContainEqual(['city']);
+  });
+
+  it('should not use path extraction when jsonbPaths is empty', () => {
+    const table = findTable('client_data');
+    const query = compileSelect({
+      table,
+      columns: ['id', 'key', 'value'],
+      session: adminSession,
+    });
+    expect(query.sql).not.toContain('#>');
+  });
+});

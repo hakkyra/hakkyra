@@ -1313,3 +1313,103 @@ describe('Aggregate BoolExp (filter by array relationship aggregates)', () => {
     expect(ids).not.toContain(CHARLIE_ID);
   });
 });
+
+// ─── JSONB Path Argument ────────────────────────────────────────────────────
+
+describe('JSONB path argument', () => {
+  it('extracts a nested value from JSONB column with path argument', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientData(where: { key: { _eq: "preferences" } }) {
+          key
+          value(path: "theme")
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const rows = (body.data as { clientData: AnyRow[] }).clientData;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].value).toBe('dark');
+  });
+
+  it('extracts a different nested value from JSONB column', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientData(where: { key: { _eq: "address" } }) {
+          key
+          value(path: "city")
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const rows = (body.data as { clientData: AnyRow[] }).clientData;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].value).toBe('Helsinki');
+  });
+
+  it('returns full JSONB value when no path argument is given', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientData(where: { key: { _eq: "preferences" } }) {
+          key
+          value
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const rows = (body.data as { clientData: AnyRow[] }).clientData;
+    expect(rows).toHaveLength(1);
+    // Full JSONB value should be the full object
+    expect(rows[0].value).toEqual({ theme: 'dark', notifications: true });
+  });
+
+  it('returns null for non-existent path (nullable column)', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(where: { id: { _eq: "${ALICE_ID}" } }) {
+          id
+          metadata(path: "nonexistent")
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const rows = (body.data as { clients: AnyRow[] }).clients;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].metadata).toBeNull();
+  });
+
+  it('works with path argument via variable', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query($path: String!) {
+        clientData(where: { key: { _eq: "address" } }) {
+          key
+          value(path: $path)
+        }
+      }`,
+      { path: 'country' },
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const rows = (body.data as { clientData: AnyRow[] }).clientData;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].value).toBe('FI');
+  });
+});
