@@ -124,7 +124,7 @@ describe('Actions', () => {
 
     it('generates correct output types from actions.graphql', () => {
       expect(sdl).toContain('type PaymentResult');
-      expect(sdl).toMatch(/type PaymentResult\s*\{[^}]*invoiceId:\s*UUID!/);
+      expect(sdl).toMatch(/type PaymentResult\s*\{[^}]*invoiceId:\s*Uuid!/);
       expect(sdl).toMatch(/type PaymentResult\s*\{[^}]*redirectUrl:\s*String/);
       expect(sdl).toMatch(/type PaymentResult\s*\{[^}]*status:\s*String!/);
     });

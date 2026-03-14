@@ -9,18 +9,18 @@ export { generateSchema } from './generator.js';
 
 // Custom scalars
 export {
-  GraphQLUUID,
-  GraphQLDateTime,
+  GraphQLUuid,
   GraphQLTimestamptz,
   GraphQLDate,
   GraphQLTime,
-  GraphQLJSON,
-  GraphQLJSONB,
-  GraphQLBigInt,
-  GraphQLBigDecimal,
+  GraphQLJson,
+  GraphQLJsonb,
+  GraphQLBigint,
+  GraphQLNumeric,
   GraphQLInterval,
   GraphQLBytea,
   GraphQLInet,
+  GraphQLBpchar,
   customScalars,
 } from './scalars.js';
 

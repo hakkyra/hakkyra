@@ -114,7 +114,7 @@ describe('GraphQL E2E', () => {
     it('fetches a single client by ID', async () => {
       const token = await tokens.backoffice();
       const { status, body } = await graphqlRequest(
-        `query($id: UUID!) { clientByPk(id: $id) { id username email } }`,
+        `query($id: Uuid!) { clientByPk(id: $id) { id username email } }`,
         { id: ALICE_ID },
         { authorization: `Bearer ${token}` },
       );
@@ -129,7 +129,7 @@ describe('GraphQL E2E', () => {
     it('returns null for non-existent PK', async () => {
       const token = await tokens.backoffice();
       const { body } = await graphqlRequest(
-        `query($id: UUID!) { clientByPk(id: $id) { id } }`,
+        `query($id: Uuid!) { clientByPk(id: $id) { id } }`,
         { id: '00000000-0000-0000-0000-000000000000' },
         { authorization: `Bearer ${token}` },
       );
@@ -144,7 +144,7 @@ describe('GraphQL E2E', () => {
     it('fetches client with accounts (array relationship)', async () => {
       const token = await tokens.backoffice();
       const { body } = await graphqlRequest(
-        `query($id: UUID!) {
+        `query($id: Uuid!) {
           clientByPk(id: $id) {
             id
             username
@@ -164,7 +164,7 @@ describe('GraphQL E2E', () => {
     it('fetches client with invoices', async () => {
       const token = await tokens.backoffice();
       const { body } = await graphqlRequest(
-        `query($id: UUID!) {
+        `query($id: Uuid!) {
           clientByPk(id: $id) {
             id
             invoices { id amount state type }
@@ -187,7 +187,7 @@ describe('GraphQL E2E', () => {
     it('fetches client -> appointments -> product (nested relationships)', async () => {
       const token = await tokens.backoffice();
       const { body } = await graphqlRequest(
-        `query($id: UUID!) {
+        `query($id: Uuid!) {
           clientByPk(id: $id) {
             id
             username
@@ -235,7 +235,7 @@ describe('GraphQL E2E', () => {
     it('filters clients by branchId', async () => {
       const token = await tokens.backoffice();
       const { body } = await graphqlRequest(
-        `query($branchId: UUID!) {
+        `query($branchId: Uuid!) {
           clients(where: { branchId: { _eq: $branchId } }) { id username branchId }
         }`,
         { branchId: BRANCH_TEST_ID },
@@ -347,7 +347,7 @@ describe('GraphQL E2E', () => {
     it('updates client status as backoffice (updateClientByPk)', async () => {
       const token = await tokens.backoffice();
       const { body } = await graphqlRequest(
-        `mutation($id: UUID!, $set: ClientSetInput!) {
+        `mutation($id: Uuid!, $set: ClientSetInput!) {
           updateClientByPk(pkColumns: { id: $id }, _set: $set) {
             id
             status
@@ -372,7 +372,7 @@ describe('GraphQL E2E', () => {
     it('client can update own currency preference', async () => {
       const token = await tokens.client(ALICE_ID);
       const { body } = await graphqlRequest(
-        `mutation($id: UUID!, $set: ClientSetInput!) {
+        `mutation($id: Uuid!, $set: ClientSetInput!) {
           updateClientByPk(pkColumns: { id: $id }, _set: $set) {
             id
             currencyId
@@ -394,7 +394,7 @@ describe('GraphQL E2E', () => {
     it('client cannot update another client record', async () => {
       const token = await tokens.client(ALICE_ID);
       const { body } = await graphqlRequest(
-        `mutation($id: UUID!, $set: ClientSetInput!) {
+        `mutation($id: Uuid!, $set: ClientSetInput!) {
           updateClientByPk(pkColumns: { id: $id }, _set: $set) {
             id
           }
@@ -413,7 +413,7 @@ describe('GraphQL E2E', () => {
       // Client update_permissions only allow: language_id, currency_id
       const token = await tokens.client(ALICE_ID);
       const { body } = await graphqlRequest(
-        `mutation($id: UUID!, $set: ClientSetInput!) {
+        `mutation($id: Uuid!, $set: ClientSetInput!) {
           updateClientByPk(pkColumns: { id: $id }, _set: $set) {
             id
             status
@@ -854,7 +854,7 @@ describe('Custom Queries E2E', () => {
     it('backoffice can query client with balance', async () => {
       const token = await tokens.backoffice();
       const { status, body } = await graphqlRequest(
-        `query($clientId: UUID!) {
+        `query($clientId: Uuid!) {
           getClientWithBalance(clientId: $clientId) {
             id
             username
@@ -884,7 +884,7 @@ describe('Custom Queries E2E', () => {
     it('administrator can query client with balance', async () => {
       const token = await tokens.administrator();
       const { status, body } = await graphqlRequest(
-        `query($clientId: UUID!) {
+        `query($clientId: Uuid!) {
           getClientWithBalance(clientId: $clientId) { id username }
         }`,
         { clientId: BOB_ID },
@@ -900,7 +900,7 @@ describe('Custom Queries E2E', () => {
     it('client role cannot access getClientWithBalance', async () => {
       const token = await tokens.client(ALICE_ID);
       const { status, body } = await graphqlRequest(
-        `query($clientId: UUID!) {
+        `query($clientId: Uuid!) {
           getClientWithBalance(clientId: $clientId) { id username }
         }`,
         { clientId: ALICE_ID },
@@ -913,7 +913,7 @@ describe('Custom Queries E2E', () => {
 
     it('admin secret bypasses permission check', async () => {
       const { status, body } = await graphqlRequest(
-        `query($clientId: UUID!) {
+        `query($clientId: Uuid!) {
           getClientWithBalance(clientId: $clientId) { id username }
         }`,
         { clientId: ALICE_ID },
@@ -930,7 +930,7 @@ describe('Custom Queries E2E', () => {
     it('backoffice can query top clients', async () => {
       const token = await tokens.backoffice();
       const { status, body } = await graphqlRequest(
-        `query($branchId: UUID!, $limit: Int!) {
+        `query($branchId: Uuid!, $limit: Int!) {
           getTopClients(branchId: $branchId, limit: $limit) {
             id
             username
@@ -951,7 +951,7 @@ describe('Custom Queries E2E', () => {
     it('client role cannot access getTopClients', async () => {
       const token = await tokens.client(ALICE_ID);
       const { status, body } = await graphqlRequest(
-        `query($branchId: UUID!, $limit: Int!) {
+        `query($branchId: Uuid!, $limit: Int!) {
           getTopClients(branchId: $branchId, limit: $limit) { id }
         }`,
         { branchId: BRANCH_TEST_ID, limit: 5 },
@@ -976,7 +976,7 @@ describe('Custom Queries E2E', () => {
       const balanceBefore = Number(field(bobAccount!, 'balance'));
 
       const { status, body } = await graphqlRequest(
-        `mutation($accountId: UUID!, $amount: BigDecimal!) {
+        `mutation($accountId: Uuid!, $amount: Numeric!) {
           creditAccount(accountId: $accountId, amount: $amount) {
             id
             clientId
@@ -999,7 +999,7 @@ describe('Custom Queries E2E', () => {
     it('client role cannot credit an account', async () => {
       const token = await tokens.client(ALICE_ID);
       const { status, body } = await graphqlRequest(
-        `mutation($accountId: UUID!, $amount: BigDecimal!) {
+        `mutation($accountId: Uuid!, $amount: Numeric!) {
           creditAccount(accountId: $accountId, amount: $amount) { id balance }
         }`,
         { accountId: ACCOUNT_ALICE_ID, amount: '50.0000' },

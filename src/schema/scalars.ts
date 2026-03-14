@@ -15,26 +15,26 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 function validateUUID(value: unknown): string {
   const str = String(value);
   if (!UUID_REGEX.test(str)) {
-    throw new TypeError(`Invalid UUID: "${str}"`);
+    throw new TypeError(`Invalid Uuid: "${str}"`);
   }
   return str;
 }
 
-export const GraphQLUUID = new GraphQLScalarType({
-  name: 'UUID',
+export const GraphQLUuid = new GraphQLScalarType({
+  name: 'Uuid',
   description: 'A UUID scalar type conforming to RFC 4122.',
 
   serialize: validateUUID as GraphQLScalarSerializer<string>,
   parseValue: validateUUID as GraphQLScalarValueParser<string>,
   parseLiteral(ast) {
     if (ast.kind !== Kind.STRING) {
-      throw new TypeError(`UUID must be a string, got: ${ast.kind}`);
+      throw new TypeError(`Uuid must be a string, got: ${ast.kind}`);
     }
     return validateUUID(ast.value);
   },
 });
 
-// ─── DateTime / Timestamptz ──────────────────────────────────────────────────
+// ─── Timestamptz ─────────────────────────────────────────────────────────────
 
 const ISO_DATETIME_REGEX = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
 
@@ -44,29 +44,14 @@ function validateDateTime(value: unknown): string {
   }
   const str = String(value);
   if (!ISO_DATETIME_REGEX.test(str)) {
-    throw new TypeError(`Invalid DateTime: "${str}". Expected ISO 8601 format.`);
+    throw new TypeError(`Invalid Timestamptz: "${str}". Expected ISO 8601 format.`);
   }
   return str;
 }
 
-export const GraphQLDateTime = new GraphQLScalarType({
-  name: 'DateTime',
-  description: 'An ISO 8601 datetime scalar (alias: timestamptz).',
-
-  serialize: validateDateTime as GraphQLScalarSerializer<string>,
-  parseValue: validateDateTime as GraphQLScalarValueParser<string>,
-  parseLiteral(ast) {
-    if (ast.kind !== Kind.STRING) {
-      throw new TypeError(`DateTime must be a string, got: ${ast.kind}`);
-    }
-    return validateDateTime(ast.value);
-  },
-});
-
-/** Alias — Hasura uses "timestamptz" in some contexts. */
 export const GraphQLTimestamptz = new GraphQLScalarType({
   name: 'Timestamptz',
-  description: 'An ISO 8601 datetime with timezone. Alias for DateTime.',
+  description: 'An ISO 8601 datetime with timezone.',
 
   serialize: validateDateTime as GraphQLScalarSerializer<string>,
   parseValue: validateDateTime as GraphQLScalarValueParser<string>,
@@ -163,16 +148,16 @@ const parseValueJSON: GraphQLScalarValueParser<unknown> = (value: unknown) => va
 const parseLiteralJSON: GraphQLScalarLiteralParser<unknown> = (ast) =>
   parseJSONLiteral(ast as unknown as Parameters<typeof parseJSONLiteral>[0]);
 
-export const GraphQLJSON = new GraphQLScalarType({
-  name: 'JSON',
+export const GraphQLJson = new GraphQLScalarType({
+  name: 'json',
   description: 'Arbitrary JSON scalar. Accepts any valid JSON value.',
   serialize: serializeJSON,
   parseValue: parseValueJSON,
   parseLiteral: parseLiteralJSON,
 });
 
-export const GraphQLJSONB = new GraphQLScalarType({
-  name: 'JSONB',
+export const GraphQLJsonb = new GraphQLScalarType({
+  name: 'Jsonb',
   description: 'PostgreSQL JSONB scalar. Accepts any valid JSON value.',
   serialize: serializeJSON,
   parseValue: parseValueJSON,
@@ -188,46 +173,46 @@ function validateBigInt(value: unknown): string {
   const str = String(value);
   // Validate it's a valid integer string (possibly negative)
   if (!/^-?\d+$/.test(str)) {
-    throw new TypeError(`Invalid BigInt: "${str}". Must be an integer.`);
+    throw new TypeError(`Invalid Bigint: "${str}". Must be an integer.`);
   }
   return str;
 }
 
-export const GraphQLBigInt = new GraphQLScalarType({
-  name: 'BigInt',
+export const GraphQLBigint = new GraphQLScalarType({
+  name: 'Bigint',
   description: 'A 64-bit integer, serialized as a string to avoid precision loss.',
 
   serialize: validateBigInt as GraphQLScalarSerializer<string>,
   parseValue: validateBigInt as GraphQLScalarValueParser<string>,
   parseLiteral(ast) {
     if (ast.kind !== Kind.STRING && ast.kind !== Kind.INT) {
-      throw new TypeError(`BigInt must be a string or integer, got: ${ast.kind}`);
+      throw new TypeError(`Bigint must be a string or integer, got: ${ast.kind}`);
     }
     return validateBigInt((ast as { value: string }).value);
   },
 });
 
-// ─── BigDecimal (numeric/money) ──────────────────────────────────────────────
+// ─── Numeric (numeric/money) ─────────────────────────────────────────────────
 
-function validateBigDecimal(value: unknown): string {
+function validateNumeric(value: unknown): string {
   const str = String(value);
   if (!/^-?\d+(\.\d+)?$/.test(str)) {
-    throw new TypeError(`Invalid BigDecimal: "${str}". Must be a numeric value.`);
+    throw new TypeError(`Invalid Numeric: "${str}". Must be a numeric value.`);
   }
   return str;
 }
 
-export const GraphQLBigDecimal = new GraphQLScalarType({
-  name: 'BigDecimal',
+export const GraphQLNumeric = new GraphQLScalarType({
+  name: 'Numeric',
   description: 'An arbitrary precision decimal, serialized as a string.',
 
-  serialize: validateBigDecimal as GraphQLScalarSerializer<string>,
-  parseValue: validateBigDecimal as GraphQLScalarValueParser<string>,
+  serialize: validateNumeric as GraphQLScalarSerializer<string>,
+  parseValue: validateNumeric as GraphQLScalarValueParser<string>,
   parseLiteral(ast) {
     if (ast.kind !== Kind.STRING && ast.kind !== Kind.INT && ast.kind !== Kind.FLOAT) {
-      throw new TypeError(`BigDecimal must be a string or number, got: ${ast.kind}`);
+      throw new TypeError(`Numeric must be a string or number, got: ${ast.kind}`);
     }
-    return validateBigDecimal((ast as { value: string }).value);
+    return validateNumeric((ast as { value: string }).value);
   },
 });
 
@@ -294,6 +279,26 @@ export const GraphQLInet = new GraphQLScalarType({
   },
 });
 
+// ─── Bpchar ─────────────────────────────────────────────────────────────────
+
+export const GraphQLBpchar = new GraphQLScalarType({
+  name: 'Bpchar',
+  description: 'PostgreSQL blank-padded character type (char(n)).',
+
+  serialize(value: unknown): string {
+    return String(value);
+  },
+  parseValue(value: unknown): string {
+    return String(value);
+  },
+  parseLiteral(ast) {
+    if (ast.kind !== Kind.STRING) {
+      throw new TypeError(`Bpchar must be a string, got: ${ast.kind}`);
+    }
+    return ast.value;
+  },
+});
+
 // ─── Scalar Registry ────────────────────────────────────────────────────────
 
 /**
@@ -301,16 +306,16 @@ export const GraphQLInet = new GraphQLScalarType({
  * Used by the schema generator to register them.
  */
 export const customScalars: Record<string, GraphQLScalarType> = {
-  UUID: GraphQLUUID,
-  DateTime: GraphQLDateTime,
+  Uuid: GraphQLUuid,
   Timestamptz: GraphQLTimestamptz,
   Date: GraphQLDate,
   Time: GraphQLTime,
-  JSON: GraphQLJSON,
-  JSONB: GraphQLJSONB,
-  BigInt: GraphQLBigInt,
-  BigDecimal: GraphQLBigDecimal,
+  json: GraphQLJson,
+  Jsonb: GraphQLJsonb,
+  Bigint: GraphQLBigint,
+  Numeric: GraphQLNumeric,
   Interval: GraphQLInterval,
   Bytea: GraphQLBytea,
   Inet: GraphQLInet,
+  Bpchar: GraphQLBpchar,
 };
