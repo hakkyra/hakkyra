@@ -1,5 +1,7 @@
 # Hakkyra
 
+*Häkkyrä* (Finnish): a thingy, contraption, or gadget — an indefinable or convoluted-looking device. *"Kummallinen rautalankahäkkyrä."*
+
 Auto-generate GraphQL + REST APIs from PostgreSQL with Hasura-compatible YAML metadata configuration.
 
 Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible with Hasura's metadata format), and serves a fully-featured GraphQL and REST API with authentication, role-based permissions, real-time subscriptions, event triggers, and cron scheduling — all without writing application code.
@@ -358,10 +360,6 @@ npm test                    # run tests (250 tests, 9 suites)
 npm run typecheck           # type-check without emitting
 npm run build               # compile TypeScript
 ```
-
-## Name
-
-*Häkkyrä* (Finnish): a thingy, contraption, or gadget — an indefinable or convoluted-looking device. *"Kummallinen rautalankahäkkyrä."*
 
 ## License
 
