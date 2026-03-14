@@ -402,37 +402,40 @@ Change all operators and enums to match Hasura's exact naming.
 - [x] Update all tests to use new operator/enum names
 - [x] Permission compiler accepts both old YAML names and new GraphQL names via compat aliases
 
-### P5.2 — Tracked Functions as Root Fields (Critical)
+### P5.2 — Tracked Functions as Root Fields (Critical) — COMPLETE
 
 Hasura exposes PostgreSQL functions as top-level Query/Mutation fields. The metadata tracks 39 functions. The schema exposes `latestWins(args: LatestWinsArgs): [BigWin!]!` and `acceptContractWithToken(args: AcceptContractWithTokenArgs!): PlayerContract` as examples.
 
-- [ ] Load `functions.yaml` from Hasura metadata (already has `!include` support)
-- [ ] Parse function metadata: `function.name`, `function.schema`, `configuration.exposed_as` (query/mutation), `configuration.custom_root_fields`, `permissions`
-- [ ] Introspect PG function signatures: input args → GraphQL input type, return type → existing table type
-- [ ] Generate `{functionName}Args` input type from function parameters
-- [ ] Register function as Query root field (default) or Mutation root field (`exposed_as: mutation`)
-- [ ] Support function aggregate variant (`{functionName}Aggregate`) for functions returning SETOF table
-- [ ] Permission enforcement per role on function fields
-- [ ] Wire resolver: call function via SQL `SELECT * FROM schema.function_name(args)`, map result to table type
+- [x] Load `functions.yaml` from Hasura metadata (already has `!include` support)
+- [x] Parse function metadata: `function.name`, `function.schema`, `configuration.exposed_as` (query/mutation), `configuration.custom_root_fields`, `permissions`
+- [x] Introspect PG function signatures: input args → GraphQL input type, return type → existing table type
+- [x] Generate `{functionName}Args` input type from function parameters
+- [x] Register function as Query root field (default) or Mutation root field (`exposed_as: mutation`)
+- [x] Support function aggregate variant (`{functionName}Aggregate`) for functions returning SETOF table
+- [x] Permission enforcement per role on function fields
+- [x] Wire resolver: call function via SQL `SELECT * FROM schema.function_name(args)`, map result to table type
+- [x] 20 tests (config loading, introspection, schema gen, E2E query/mutation, permissions, aggregates)
 
-### P5.3 — Relationship Ordering (High)
+### P5.3 — Relationship Ordering (High) — COMPLETE
 
-Hasura allows ordering by nested relationship fields (e.g., `orderBy: { currency: { name: asc } }`) and by array relationship aggregates (e.g., `orderBy: { gamesAggregate: { count: desc } }`).
+Hasura allows ordering by nested relationship fields (e.g., `orderBy: { currency: { name: ASC } }`) and by array relationship aggregates (e.g., `orderBy: { gamesAggregate: { count: DESC } }`).
 
-- [ ] Support object relationship fields in OrderBy input types (e.g., `BigWinOrderBy.currency: CurrencyOrderBy`)
-- [ ] Generate `{Table}AggregateOrderBy` types for array relationships
-- [ ] Generate per-function aggregate order types (`{Table}AvgOrderBy`, `{Table}MaxOrderBy`, `{Table}MinOrderBy`, `{Table}SumOrderBy`, etc.)
-- [ ] Add `{rel}Aggregate: {Rel}AggregateOrderBy` field to parent OrderBy types
-- [ ] SQL compiler: translate relationship ordering to subquery ORDER BY
+- [x] Support object relationship fields in OrderBy input types (e.g., `BigWinOrderBy.currency: CurrencyOrderBy`)
+- [x] Generate `{Table}AggregateOrderBy` types for array relationships
+- [x] Generate per-function aggregate order types (`{Table}AvgOrderBy`, `{Table}MaxOrderBy`, `{Table}MinOrderBy`, `{Table}SumOrderBy`, `{Table}StddevOrderBy`, etc.)
+- [x] Add `{rel}Aggregate: {Rel}AggregateOrderBy` field to parent OrderBy types
+- [x] SQL compiler: translate relationship ordering to LEFT JOIN + ORDER BY, aggregate ordering to correlated subquery
+- [x] 15 tests (schema types, SQL compilation, E2E ordering)
 
-### P5.4 — Aggregate BoolExp — Filter by Array Relationship Aggregates (High)
+### P5.4 — Aggregate BoolExp — Filter by Array Relationship Aggregates (High) — COMPLETE
 
 Hasura allows filtering parent rows by aggregate values of their array relationships (e.g., "find game_integrations where count of currencies > 5").
 
-- [ ] Generate `{Table}AggregateBoolExp` types for each array relationship
-- [ ] Generate `{table}AggregateBoolExpCount` helper input (lowercase-start name, Hasura convention)
-- [ ] Add `{rel}Aggregate: {Rel}AggregateBoolExp` field to parent BoolExp types
-- [ ] SQL compiler: translate aggregate bool_exp to `HAVING`/correlated subquery
+- [x] Generate `{Table}AggregateBoolExp` types for each array relationship
+- [x] Generate `{table}AggregateBoolExpCount` helper input (lowercase-start name, Hasura convention)
+- [x] Add `{rel}Aggregate: {Rel}AggregateBoolExp` field to parent BoolExp types
+- [x] SQL compiler: translate aggregate bool_exp to correlated subquery with predicate
+- [x] 6 schema tests
 
 ### P5.5 — Statistical Aggregate Functions (Medium) — COMPLETE
 
@@ -460,14 +463,15 @@ Hasura supports cursor-based streaming subscriptions (`{table}Stream`) with `bat
 - [ ] Register `{table}Stream` subscription fields with `batchSize: Int!`, `cursor: [{Table}StreamCursorInput]!`, `where` args
 - [ ] Implement streaming: use cursor value to filter rows > cursor, batch delivery
 
-### P5.7 — Array Comparison Types (Medium)
+### P5.7 — Array Comparison Types (Medium) — COMPLETE
 
 Hasura generates `StringArrayComparisonExp` (and likely others) for PostgreSQL array columns (`text[]`, `int[]`, etc.).
 
-- [ ] Detect PostgreSQL array column types during introspection
-- [ ] Generate `{ScalarType}ArrayComparisonExp` input types with Hasura operators: `_contains`, `_containedIn`, `_eq`, `_neq`, `_gt`, `_gte`, `_lt`, `_lte`, `_in`, `_nin`, `_isNull`
-- [ ] SQL compiler: translate array operators to PG operators (`@>`, `<@`, `=`, etc.)
-- [ ] Map array columns to `[ScalarType!]` in object types
+- [x] Detect PostgreSQL array column types during introspection
+- [x] Generate `{ScalarType}ArrayComparisonExp` input types with Hasura operators: `_contains`, `_containedIn`, `_eq`, `_neq`, `_gt`, `_gte`, `_lt`, `_lte`, `_in`, `_nin`, `_isNull`
+- [x] SQL compiler: translate array operators to PG operators (`@>`, `<@`, `=`, etc.) with column-type-aware disambiguation from JSONB
+- [x] Map array columns to `[ScalarType!]` in object types
+- [x] 24 tests (11 schema + 13 E2E)
 
 ### P5.8 — JSONB Path Argument (Medium)
 
@@ -476,44 +480,43 @@ Hasura supports a `path: String` argument on JSONB fields to select nested JSON 
 - [ ] Add optional `path: String` argument to JSONB-typed fields in object types
 - [ ] SQL compiler: when `path` is provided, emit `column #>> '{path,segments}'` or `column -> 'key' -> 'nested'`
 
-### P5.9 — JSONB Cast Expression (Low)
+### P5.9 — JSONB Cast Expression (Low) — COMPLETE
 
 Hasura's `JsonbComparisonExp` has a `_cast` field (`JsonbCastExp { String: StringComparisonExp }`) allowing you to cast JSONB to string for string comparison operators.
 
-- [ ] Generate `JsonbCastExp` input type
-- [ ] Add `_cast: JsonbCastExp` to JSONBComparisonExp
-- [ ] SQL compiler: emit `(column)::text` cast when `_cast.String` is used
+- [x] Generate `JsonbCastExp` input type
+- [x] Add `_cast: JsonbCastExp` to `JsonbComparisonExp`
+- [x] SQL compiler: emit `(column)::text` cast when `_cast.String` is used
+- [x] 8 tests (2 schema + 4 SQL compiler + 2 E2E)
 
-### P5.10 — Scalar Type Naming (Low)
+### P5.10 — Scalar Type Naming (Low) — COMPLETE
 
 Rename scalars to match Hasura's exact names.
 
-| Hasura | Hakkyra (current) | Action |
+| Hasura | Hakkyra (previous) | Action |
 |--------|-------------------|--------|
-| `Uuid` | `UUID` | Rename to `Uuid` |
-| `Bigint` | `BigInt` | Rename to `Bigint` |
-| `Numeric` | `BigDecimal` | Rename to `Numeric` |
-| `numeric` (lowercase) | — | Add lowercase `numeric` scalar |
-| `Jsonb` | `JSONB` | Rename to `Jsonb` |
-| `json` (lowercase) | `JSON` | Rename to `json` |
-| `Bpchar` | `String` | Add `Bpchar` scalar (behaves like String with text operators) |
-| `Timestamptz` | `DateTime` / `Timestamptz` | Use `Timestamptz` only |
+| `Uuid` | `UUID` | Renamed |
+| `Bigint` | `BigInt` | Renamed |
+| `Numeric` | `BigDecimal` | Renamed |
+| `Jsonb` | `JSONB` | Renamed |
+| `json` (lowercase) | `JSON` | Renamed |
+| `Bpchar` | `String` | Added new scalar |
+| `Timestamptz` | `DateTime` | Consolidated |
 
-- [ ] Rename all scalar types to match Hasura naming
-- [ ] Add `Bpchar` scalar with `BpcharComparisonExp` (same operators as StringComparisonExp)
-- [ ] Add `numeric` (lowercase) scalar for action input types
-- [ ] Generate `NumericComparisonExp` instead of `BigDecimalComparisonExp`
-- [ ] Generate `BigintComparisonExp`, `BpcharComparisonExp`, `UuidComparisonExp`, `TimestamptzComparisonExp` with Hasura-matching names
-- [ ] Update type-map to use Hasura scalar names
+- [x] Rename all scalar types to match Hasura naming
+- [x] Add `Bpchar` scalar with `BpcharComparisonExp` (same operators as StringComparisonExp)
+- [x] Generate `NumericComparisonExp`, `BigintComparisonExp`, `BpcharComparisonExp`, `UuidComparisonExp`, `TimestamptzComparisonExp`
+- [x] Update type-map to use Hasura scalar names
+- [x] Separate `json` and `jsonb` into distinct scalars
 
-### P5.11 — Root Type Naming (Low)
+### P5.11 — Root Type Naming (Low) — COMPLETE
 
 Change root type names to match Hasura.
 
-- [ ] Rename `Query` → `query_root`
-- [ ] Rename `Mutation` → `mutation_root`
-- [ ] Rename `Subscription` → `subscription_root`
-- [ ] Add explicit `schema { query: query_root, mutation: mutation_root, subscription: subscription_root }` declaration
+- [x] Rename `Query` → `query_root`
+- [x] Rename `Mutation` → `mutation_root`
+- [x] Rename `Subscription` → `subscription_root`
+- [x] `schema { query: query_root, ... }` declaration emitted automatically by `printSchema`
 
 ---
 
@@ -524,10 +527,10 @@ Change root type names to match Hasura.
 | Config loader | 19 | Pass |
 | Introspection | 30 | Pass |
 | Permissions | 33 | Pass |
-| SQL compiler | 24 | Pass |
-| Schema generator | 41 | Pass |
+| SQL compiler | 30 | Pass |
+| Schema generator | 49 | Pass |
 | REST filters | 30 | Pass |
-| Server / E2E | 59 | Pass |
+| Server / E2E | 69 | Pass |
 | Events | 9 | Pass |
 | Crons | 14 | Pass |
 | Subscriptions | 13 | Pass |
@@ -545,4 +548,7 @@ Change root type names to match Hasura.
 | Action relationships | 13 | Pass |
 | Statistical aggregates | 15 | Pass |
 | Zod schemas | 237 | Pass |
-| **Total** | **750** | **24 suites, all passing** |
+| Tracked functions | 20 | Pass |
+| Relationship ordering | 15 | Pass |
+| Array comparison | 24 | Pass |
+| **Total** | **~850** | **27 suites, all passing** |
