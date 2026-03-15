@@ -17,6 +17,12 @@ import type {
   ScheduleOptions,
 } from './types.js';
 
+function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined),
+  ) as Partial<T>;
+}
+
 export class PgBossAdapter implements JobQueue {
   private boss: PgBoss;
   private gracefulShutdownMs: number;
@@ -56,12 +62,7 @@ export class PgBossAdapter implements JobQueue {
   }
 
   async createQueue(name: string, options?: QueueOptions): Promise<void> {
-    await this.boss.createQueue(name, {
-      retryLimit: options?.retryLimit,
-      retryDelay: options?.retryDelay,
-      retryBackoff: options?.retryBackoff,
-      expireInSeconds: options?.expireInSeconds,
-    });
+    await this.boss.createQueue(name, options ? stripUndefined(options) : {});
   }
 
   async schedule(
@@ -70,11 +71,6 @@ export class PgBossAdapter implements JobQueue {
     data?: JobData,
     options?: ScheduleOptions,
   ): Promise<void> {
-    await this.boss.schedule(name, cron, data ?? {}, {
-      retryLimit: options?.retryLimit,
-      retryDelay: options?.retryDelay,
-      retryBackoff: options?.retryBackoff,
-      expireInSeconds: options?.expireInSeconds,
-    });
+    await this.boss.schedule(name, cron, data ?? {}, options ? stripUndefined(options) : {});
   }
 }
