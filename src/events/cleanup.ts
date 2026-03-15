@@ -43,7 +43,8 @@ export async function registerEventCleanup(
   const queueName = `${schemaName}/cleanup_events`;
   const schedule = options?.schedule ?? '0 3 * * *';
 
-  // Schedule cleanup
+  // Ensure the queue exists before scheduling
+  await jobQueue.createQueue(queueName);
   await jobQueue.schedule(queueName, schedule, { retentionDays });
 
   await jobQueue.work(queueName, async (_jobs) => {
