@@ -96,9 +96,9 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
       expect(result.version).toBe(3);
     });
 
-    it('passes through extra fields', () => {
-      const result = expectValid(RawVersionYamlSchema, { version: 3, extra: true });
-      expect((result as Record<string, unknown>).extra).toBe(true);
+    it('rejects extra fields (strict mode)', () => {
+      const err = expectInvalid(RawVersionYamlSchema, { version: 3, extra: true });
+      expect(err.issues[0].message).toContain('Unrecognized key');
     });
 
     it('rejects missing version', () => {
@@ -2068,14 +2068,14 @@ describe('REST Input Validation Schemas (rest/schemas.ts)', () => {
 // =============================================================================
 
 describe('Edge cases', () => {
-  it('raw schemas accept extra keys (passthrough)', () => {
-    // Raw schemas use .passthrough() to allow unknown fields from Hasura YAML
-    const result = expectValid(RawVersionYamlSchema, {
+  it('raw schemas reject extra keys (strict mode)', () => {
+    const err = expectInvalid(RawVersionYamlSchema, {
       version: 3,
       unknown_field: 'allowed',
       another: 42,
     });
-    expect((result as Record<string, unknown>).unknown_field).toBe('allowed');
+    expect(err.issues.length).toBeGreaterThan(0);
+    expect(err.issues[0].message).toContain('Unrecognized key');
   });
 
   it('internal schemas strip extra keys (Zod default strip behavior)', () => {

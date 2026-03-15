@@ -379,3 +379,46 @@ update_permissions:
     });
   });
 });
+
+// ─── Strict validation (unknown fields) ───────────────────────────────────
+
+describe('unknown fields in YAML configs (strict mode)', () => {
+  it('should error on unknown field in table YAML', async () => {
+    const dir = await createFixture(async (d) => {
+      const tablePath = path.join(d, 'databases', 'default', 'tables', 'public_client.yaml');
+      const content = await fs.readFile(tablePath, 'utf-8');
+      const modified = content + '\nunknown_field: true\n';
+      await fs.writeFile(tablePath, modified);
+    });
+    try {
+      await expect(loadConfig(dir, SERVER_CONFIG_PATH)).rejects.toThrow(/Unrecognized key/i);
+    } finally {
+      await cleanup(dir);
+    }
+  });
+
+  it('should error on unknown field in database YAML', async () => {
+    const dir = await createFixture(async (d) => {
+      const dbPath = path.join(d, 'databases', 'databases.yaml');
+      const content = await fs.readFile(dbPath, 'utf-8');
+      // Append unknown field inside the first database entry (indented under the array element)
+      const modified = content + '  unknown_db_field: true\n';
+      await fs.writeFile(dbPath, modified);
+    });
+    try {
+      await expect(loadConfig(dir, SERVER_CONFIG_PATH)).rejects.toThrow(/Unrecognized key/i);
+    } finally {
+      await cleanup(dir);
+    }
+  });
+
+  it('should error on unknown field in server config (hakkyra.yaml)', async () => {
+    const tmpConfig = path.join(os.tmpdir(), `hakkyra-strict-test-${Date.now()}.yaml`);
+    await fs.writeFile(tmpConfig, 'server:\n  port: 3000\nunknown_section:\n  foo: bar\n');
+    try {
+      await expect(loadConfig(METADATA_DIR, tmpConfig)).rejects.toThrow(/Unrecognized key/i);
+    } finally {
+      await fs.rm(tmpConfig, { force: true });
+    }
+  });
+});
