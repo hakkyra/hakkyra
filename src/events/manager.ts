@@ -2,7 +2,7 @@
  * Event trigger manager.
  *
  * Orchestrates the full event trigger lifecycle:
- * 1. Create the hakkyra schema and event_log table
+ * 1. Create the internal schema and event_log table
  * 2. Install PG triggers on tables with event trigger configs
  * 3. Start pg-listen subscriber for NOTIFY signals
  * 4. Register pg-boss workers for webhook delivery
@@ -41,6 +41,8 @@ export interface EventManager {
 export interface EventTriggerOptions {
   /** Batch size for fetching pending events (default: 100). */
   batchSize?: number;
+  /** Internal schema name (default: 'hakkyra'). */
+  schemaName?: string;
 }
 
 export async function initEventTriggers(
@@ -51,6 +53,8 @@ export async function initEventTriggers(
   logger: Logger,
   options?: EventTriggerOptions,
 ): Promise<EventManager> {
+  const schemaName = options?.schemaName ?? 'hakkyra';
+  const channelName = `${schemaName}_events`;
   const tablesWithEvents = tables.filter((t) => t.eventTriggers.length > 0);
 
   if (tablesWithEvents.length === 0) {
@@ -59,13 +63,14 @@ export async function initEventTriggers(
   }
 
   // 1. Ensure schema and event_log table
-  await ensureEventSchema(pool);
+  await ensureEventSchema(pool, schemaName);
   logger.info('Event log schema ready');
 
   // 2. Reconcile PG triggers (diff-based: only create/drop/replace what changed)
-  const desiredEventTriggers = buildDesiredEventTriggers(tablesWithEvents);
+  const desiredEventTriggers = buildDesiredEventTriggers(tablesWithEvents, schemaName);
   const reconcileResult = await reconcileTriggers(pool, desiredEventTriggers, logger, {
-    triggerPrefix: 'hakkyra_event_',
+    triggerPrefix: `${schemaName}_event_`,
+    schemaName,
   });
   logger.info(
     {
@@ -79,16 +84,16 @@ export async function initEventTriggers(
   );
 
   // 3. Register job queue workers
-  await registerEventWorkers(jobQueue, pool, tables, logger);
+  await registerEventWorkers(jobQueue, pool, tables, logger, schemaName);
 
   const batchSize = options?.batchSize;
 
   // 4. Start pg-listen subscriber
   const subscriber = createSubscriber({ connectionString });
 
-  subscriber.notifications.on('hakkyra_events', async () => {
+  subscriber.notifications.on(channelName, async () => {
     try {
-      await enqueuePendingEvents(pool, jobQueue, logger, batchSize);
+      await enqueuePendingEvents(pool, jobQueue, logger, batchSize, schemaName);
     } catch (err) {
       logger.error({ err }, 'Error processing event notification');
     }
@@ -99,11 +104,11 @@ export async function initEventTriggers(
   });
 
   await subscriber.connect();
-  await subscriber.listenTo('hakkyra_events');
+  await subscriber.listenTo(channelName);
   logger.info('Event listener connected');
 
   // 5. Catchup: process any pending events from before startup
-  const catchupCount = await enqueuePendingEvents(pool, jobQueue, logger, batchSize);
+  const catchupCount = await enqueuePendingEvents(pool, jobQueue, logger, batchSize, schemaName);
   if (catchupCount > 0) {
     logger.info({ count: catchupCount }, 'Caught up pending events');
   }

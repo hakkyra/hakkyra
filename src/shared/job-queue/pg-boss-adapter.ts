@@ -2,7 +2,7 @@
  * pg-boss adapter for the JobQueue interface.
  *
  * Wraps pg-boss to match the abstract JobQueue contract, preserving all
- * existing behavior: schema isolation (hakkyra_boss), auto-migration,
+ * existing behavior: schema isolation, auto-migration,
  * and supervised mode.
  */
 
@@ -27,11 +27,11 @@ export class PgBossAdapter implements JobQueue {
   private boss: PgBoss;
   private gracefulShutdownMs: number;
 
-  constructor(connectionString: string, gracefulShutdownMs: number = 10000) {
+  constructor(connectionString: string, gracefulShutdownMs: number = 10000, schemaName: string = 'hakkyra') {
     this.gracefulShutdownMs = gracefulShutdownMs;
     this.boss = new PgBoss({
       connectionString,
-      schema: 'hakkyra_boss',
+      schema: `${schemaName}_boss`,
       migrate: true,
       supervise: true,
     });

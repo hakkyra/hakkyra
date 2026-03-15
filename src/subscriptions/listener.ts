@@ -26,14 +26,18 @@ export interface ChangeListener {
 /**
  * Create a change notification listener connected to PostgreSQL.
  *
- * Listens on the `hakkyra_changes` channel for NOTIFY messages
+ * Listens on the `${schemaName}_changes` channel for NOTIFY messages
  * fired by the subscription triggers.
  */
-export function createChangeListener(connectionString: string): ChangeListener {
+export function createChangeListener(
+  connectionString: string,
+  schemaName: string = 'hakkyra',
+): ChangeListener {
+  const channelName = `${schemaName}_changes`;
   const subscriber = createSubscriber({ connectionString });
   const callbacks: Array<(notification: ChangeNotification) => void> = [];
 
-  subscriber.notifications.on('hakkyra_changes', (payload) => {
+  subscriber.notifications.on(channelName, (payload) => {
     const notification = payload as ChangeNotification;
     for (const cb of callbacks) {
       cb(notification);
@@ -43,7 +47,7 @@ export function createChangeListener(connectionString: string): ChangeListener {
   return {
     async start(): Promise<void> {
       await subscriber.connect();
-      await subscriber.listenTo('hakkyra_changes');
+      await subscriber.listenTo(channelName);
     },
 
     async stop(): Promise<void> {

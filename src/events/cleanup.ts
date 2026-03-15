@@ -12,6 +12,15 @@ import type { JobQueue } from '../shared/job-queue/types.js';
 export interface EventCleanupOptions {
   /** Cron schedule for the cleanup job (default: '0 3 * * *'). */
   schedule?: string;
+  /** Internal schema name (default: 'hakkyra'). */
+  schemaName?: string;
+}
+
+/**
+ * Double-quote a SQL identifier to prevent injection.
+ */
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /**
@@ -30,7 +39,8 @@ export async function registerEventCleanup(
   logger: Logger,
   options?: EventCleanupOptions,
 ): Promise<void> {
-  const queueName = 'hakkyra/cleanup_events';
+  const schemaName = options?.schemaName ?? 'hakkyra';
+  const queueName = `${schemaName}/cleanup_events`;
   const schedule = options?.schedule ?? '0 3 * * *';
 
   // Schedule cleanup
@@ -38,7 +48,7 @@ export async function registerEventCleanup(
 
   await jobQueue.work(queueName, async (_jobs) => {
     const result = await pool.query(
-      `DELETE FROM hakkyra.event_log
+      `DELETE FROM ${quoteIdent(schemaName)}.event_log
        WHERE status = 'delivered'
        AND delivered_at < now() - make_interval(days => $1)`,
       [retentionDays],

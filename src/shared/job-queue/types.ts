@@ -86,4 +86,6 @@ export interface JobQueueConfig {
   };
   /** Timeout in milliseconds for graceful shutdown (default: 10000). */
   gracefulShutdownMs?: number;
+  /** Internal schema name prefix for pg-boss tables (default: 'hakkyra'). */
+  schemaName?: string;
 }

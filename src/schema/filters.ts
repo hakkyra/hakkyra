@@ -18,7 +18,7 @@ import {
   GraphQLEnumType,
 } from 'graphql';
 import type { GraphQLInputType, GraphQLScalarType } from 'graphql';
-import type { TableInfo, ColumnInfo } from '../types.js';
+import type { TableInfo, ColumnInfo, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
 import { getTypeName, toCamelCase, tableKey, type TypeRegistry } from './type-builder.js';
@@ -279,6 +279,7 @@ export function buildFilterTypes(
   enumTypes: Map<string, GraphQLEnumType>,
   enumNames: Set<string>,
   selectColumnEnums?: Map<string, GraphQLEnumType>,
+  functions?: FunctionInfo[],
 ): Map<string, GraphQLInputObjectType> {
   const filterTypes = new Map<string, GraphQLInputObjectType>();
   const aggregateBoolExpTypes = new Map<string, GraphQLInputObjectType>();
@@ -367,6 +368,26 @@ export function buildFilterTypes(
           const compType = columnComparisonType(column, enumTypes, enumNames);
           const fieldName = toCamelCase(column.name);
           fields[fieldName] = { type: compType };
+        }
+
+        // Scalar computed field comparison fields
+        if (table.computedFields && functions) {
+          for (const cf of table.computedFields) {
+            const fnSchema = cf.function.schema ?? 'public';
+            const fn = functions.find(
+              (f) => f.name === cf.function.name && f.schema === fnSchema,
+            );
+            // Only add scalar (non-SETOF) computed fields to BoolExp
+            if (!fn || fn.isSetReturning) continue;
+
+            const mapping = pgTypeToGraphQL(fn.returnType, false, enumNames);
+            const compType = getComparisonType(mapping.name);
+            const fieldName = toCamelCase(cf.name);
+            // Don't overwrite column fields if names collide
+            if (!(fieldName in fields)) {
+              fields[fieldName] = { type: compType };
+            }
+          }
         }
 
         // Logical combinators (self-referential)

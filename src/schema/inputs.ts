@@ -33,7 +33,7 @@ import type {
   GraphQLFieldConfigMap,
   GraphQLScalarType,
 } from 'graphql';
-import type { TableInfo, ColumnInfo, RelationshipConfig } from '../types.js';
+import type { TableInfo, ColumnInfo, RelationshipConfig, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
 import { toCamelCase, getTypeName, tableKey } from './type-builder.js';
@@ -380,6 +380,7 @@ export function buildMutationInputTypes(
   filterType?: GraphQLInputObjectType,
   orderByTypes?: Map<string, GraphQLInputObjectType>,
   allTables?: TableInfo[],
+  functions?: FunctionInfo[],
 ): MutationInputTypes {
   const typeName = getTypeName(table);
   // ── InsertInput ────────────────────────────────────────────────────────
@@ -482,6 +483,23 @@ export function buildMutationInputTypes(
         fields[fieldName] = { type: OrderByDirection };
       }
 
+      // Scalar computed field ordering
+      if (table.computedFields && functions) {
+        for (const cf of table.computedFields) {
+          const fnSchema = cf.function.schema ?? 'public';
+          const fn = functions.find(
+            (f) => f.name === cf.function.name && f.schema === fnSchema,
+          );
+          // Only add scalar (non-SETOF) computed fields to OrderBy
+          if (!fn || fn.isSetReturning) continue;
+          const fieldName = toCamelCase(cf.name);
+          // Don't overwrite column fields if names collide
+          if (!(fieldName in fields)) {
+            fields[fieldName] = { type: OrderByDirection };
+          }
+        }
+      }
+
       // Object relationship fields — allow ordering by related table columns
       if (orderByTypes) {
         for (const rel of table.relationships) {
@@ -520,6 +538,34 @@ export function buildMutationInputTypes(
   // ── Aggregate Sub-Fields (Sum, Avg, Min, Max) ─────────────────────────
   const numericColumns = table.columns.filter((c) => isNumericColumn(c, enumNames));
 
+  // Determine numeric scalar computed fields for aggregate types
+  interface ScalarCFInfo { name: string; returnType: string; graphqlTypeName: string; functionName: string; schema: string }
+  const numericComputedFields: ScalarCFInfo[] = [];
+  const orderableComputedFields: ScalarCFInfo[] = [];
+  if (table.computedFields && functions) {
+    for (const cf of table.computedFields) {
+      const fnSchema = cf.function.schema ?? 'public';
+      const fn = functions.find(
+        (f) => f.name === cf.function.name && f.schema === fnSchema,
+      );
+      if (!fn || fn.isSetReturning) continue;
+      const mapping = pgTypeToGraphQL(fn.returnType, false, enumNames);
+      const info: ScalarCFInfo = {
+        name: cf.name,
+        returnType: fn.returnType,
+        graphqlTypeName: mapping.name,
+        functionName: cf.function.name,
+        schema: fnSchema,
+      };
+      if (NUMERIC_GRAPHQL_TYPES.has(mapping.name)) {
+        numericComputedFields.push(info);
+      }
+      if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
+        orderableComputedFields.push(info);
+      }
+    }
+  }
+
   const sumFields = new GraphQLObjectType({
     name: `${typeName}SumFields`,
     description: `Sum aggregate fields for ${typeName}.`,
@@ -530,8 +576,14 @@ export function buildMutationInputTypes(
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
         fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
       }
+      for (const cf of numericComputedFields) {
+        const fieldName = toCamelCase(cf.name);
+        if (!(fieldName in fields)) {
+          fields[fieldName] = { type: resolveOutputScalarType(cf.graphqlTypeName) };
+        }
+      }
       // Must have at least one field — add a dummy if no numeric columns
-      if (numericColumns.length === 0) {
+      if (Object.keys(fields).length === 0) {
         fields['_dummy'] = { type: GraphQLInt, description: 'Placeholder — no numeric columns' };
       }
       return fields;
@@ -548,7 +600,13 @@ export function buildMutationInputTypes(
         // AVG always returns float/numeric
         fields[fieldName] = { type: GraphQLFloat };
       }
-      if (numericColumns.length === 0) {
+      for (const cf of numericComputedFields) {
+        const fieldName = toCamelCase(cf.name);
+        if (!(fieldName in fields)) {
+          fields[fieldName] = { type: GraphQLFloat };
+        }
+      }
+      if (Object.keys(fields).length === 0) {
         fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
       }
       return fields;
@@ -566,6 +624,12 @@ export function buildMutationInputTypes(
         if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
           const fieldName = toCamelCase(column.name);
           fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
+        }
+      }
+      for (const cf of orderableComputedFields) {
+        const fieldName = toCamelCase(cf.name);
+        if (!(fieldName in fields)) {
+          fields[fieldName] = { type: resolveOutputScalarType(cf.graphqlTypeName) };
         }
       }
       if (Object.keys(fields).length === 0) {
@@ -587,6 +651,12 @@ export function buildMutationInputTypes(
           fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
         }
       }
+      for (const cf of orderableComputedFields) {
+        const fieldName = toCamelCase(cf.name);
+        if (!(fieldName in fields)) {
+          fields[fieldName] = { type: resolveOutputScalarType(cf.graphqlTypeName) };
+        }
+      }
       if (Object.keys(fields).length === 0) {
         fields['_dummy'] = { type: GraphQLString, description: 'Placeholder — no orderable columns' };
       }
@@ -595,100 +665,59 @@ export function buildMutationInputTypes(
   });
 
   // ── Statistical Aggregate Sub-Fields (Stddev, Variance family) ──────
+  // Helper: build numeric fields (columns + computed fields) for statistical agg types
+  function buildStatAggFields(): GraphQLFieldConfigMap<unknown, unknown> {
+    const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
+    for (const column of numericColumns) {
+      const fieldName = toCamelCase(column.name);
+      fields[fieldName] = { type: GraphQLFloat };
+    }
+    for (const cf of numericComputedFields) {
+      const fieldName = toCamelCase(cf.name);
+      if (!(fieldName in fields)) {
+        fields[fieldName] = { type: GraphQLFloat };
+      }
+    }
+    if (Object.keys(fields).length === 0) {
+      fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
+    }
+    return fields;
+  }
+
   const stddevFields = new GraphQLObjectType({
     name: `${typeName}StddevFields`,
     description: `Sample standard deviation aggregate fields for ${typeName}.`,
-    fields: () => {
-      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
-      for (const column of numericColumns) {
-        const fieldName = toCamelCase(column.name);
-        fields[fieldName] = { type: GraphQLFloat };
-      }
-      if (numericColumns.length === 0) {
-        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
-      }
-      return fields;
-    },
+    fields: () => buildStatAggFields(),
   });
 
   const stddevPopFields = new GraphQLObjectType({
     name: `${typeName}StddevPopFields`,
     description: `Population standard deviation aggregate fields for ${typeName}.`,
-    fields: () => {
-      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
-      for (const column of numericColumns) {
-        const fieldName = toCamelCase(column.name);
-        fields[fieldName] = { type: GraphQLFloat };
-      }
-      if (numericColumns.length === 0) {
-        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
-      }
-      return fields;
-    },
+    fields: () => buildStatAggFields(),
   });
 
   const stddevSampFields = new GraphQLObjectType({
     name: `${typeName}StddevSampFields`,
     description: `Sample standard deviation (alias) aggregate fields for ${typeName}.`,
-    fields: () => {
-      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
-      for (const column of numericColumns) {
-        const fieldName = toCamelCase(column.name);
-        fields[fieldName] = { type: GraphQLFloat };
-      }
-      if (numericColumns.length === 0) {
-        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
-      }
-      return fields;
-    },
+    fields: () => buildStatAggFields(),
   });
 
   const varianceFields = new GraphQLObjectType({
     name: `${typeName}VarianceFields`,
     description: `Sample variance aggregate fields for ${typeName}.`,
-    fields: () => {
-      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
-      for (const column of numericColumns) {
-        const fieldName = toCamelCase(column.name);
-        fields[fieldName] = { type: GraphQLFloat };
-      }
-      if (numericColumns.length === 0) {
-        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
-      }
-      return fields;
-    },
+    fields: () => buildStatAggFields(),
   });
 
   const varPopFields = new GraphQLObjectType({
     name: `${typeName}VarPopFields`,
     description: `Population variance aggregate fields for ${typeName}.`,
-    fields: () => {
-      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
-      for (const column of numericColumns) {
-        const fieldName = toCamelCase(column.name);
-        fields[fieldName] = { type: GraphQLFloat };
-      }
-      if (numericColumns.length === 0) {
-        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
-      }
-      return fields;
-    },
+    fields: () => buildStatAggFields(),
   });
 
   const varSampFields = new GraphQLObjectType({
     name: `${typeName}VarSampFields`,
     description: `Sample variance (alias) aggregate fields for ${typeName}.`,
-    fields: () => {
-      const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
-      for (const column of numericColumns) {
-        const fieldName = toCamelCase(column.name);
-        fields[fieldName] = { type: GraphQLFloat };
-      }
-      if (numericColumns.length === 0) {
-        fields['_dummy'] = { type: GraphQLFloat, description: 'Placeholder — no numeric columns' };
-      }
-      return fields;
-    },
+    fields: () => buildStatAggFields(),
   });
 
   // ── AggregateFields ───────────────────────────────────────────────────
@@ -720,6 +749,21 @@ export function buildMutationInputTypes(
         const fieldName = toCamelCase(column.name);
         const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
         fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
+      }
+      // Add scalar computed fields to group-by keys
+      if (table.computedFields && functions) {
+        for (const cf of table.computedFields) {
+          const fnSchema = cf.function.schema ?? 'public';
+          const fn = functions.find(
+            (f) => f.name === cf.function.name && f.schema === fnSchema,
+          );
+          if (!fn || fn.isSetReturning) continue;
+          const fieldName = toCamelCase(cf.name);
+          if (!(fieldName in fields)) {
+            const mapping = pgTypeToGraphQL(fn.returnType, false, enumNames);
+            fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
+          }
+        }
       }
       return fields;
     },

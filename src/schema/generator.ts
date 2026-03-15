@@ -158,7 +158,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   // Create a shared selectColumnEnums map that will be populated during buildMutationInputTypes.
   // The filter types use thunks (lazy fields), so the map will be populated by the time they execute.
   const selectColumnEnums = new Map<string, GraphQLEnumType>();
-  const filterTypes = buildFilterTypes(tables, typeRegistry, enumTypes, enumNames, selectColumnEnums);
+  const filterTypes = buildFilterTypes(tables, typeRegistry, enumTypes, enumNames, selectColumnEnums, functions);
 
   // ── Step 3: Build OrderBy types for each table (needed by array rel args)
   const orderByTypes = new Map<string, GraphQLInputObjectType>();
@@ -191,7 +191,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     const objectType = typeRegistry.get(key)!;
     const filterType = filterTypes.get(key);
     const mutInputs = buildMutationInputTypes(
-      table, objectType, enumTypes, enumNames, filterType, orderByTypes, tables,
+      table, objectType, enumTypes, enumNames, filterType, orderByTypes, tables, functions,
     );
     mutationInputsByTable.set(key, mutInputs);
     // Register orderBy types for use in array relationship args

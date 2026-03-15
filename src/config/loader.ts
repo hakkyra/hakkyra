@@ -324,6 +324,7 @@ export async function loadConfig(
       logLevel: serverConfig?.server?.log_level,
       stringifyNumericTypes: serverConfig?.server?.stringify_numeric_types,
       bodyLimit: serverConfig?.server?.body_limit,
+      schemaName: serverConfig?.server?.schema_name,
     }) ?? {},
     auth: transformAuth(serverConfig),
     databases: transformDatabases(databases, serverConfig),
@@ -1229,6 +1230,7 @@ function transformAuth(serverConfig: RawServerConfig | null): AuthConfig {
       audience: auth.jwt.audience,
       issuer: auth.jwt.issuer,
       requireExp: auth.jwt.require_exp,
+      adminRoleIsAdmin: auth.jwt.admin_role_is_admin,
     });
   }
 

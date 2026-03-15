@@ -1,19 +1,22 @@
 /**
  * Event trigger database schema.
  *
- * Creates the hakkyra schema and event_log table used by the
+ * Creates the internal schema and event_log table used by the
  * outbox pattern for reliable event delivery.
  */
 
 import type { Pool } from 'pg';
 
 /**
- * SQL to create the hakkyra schema and event_log table.
+ * SQL to create the internal schema.
  */
-const CREATE_SCHEMA_SQL = `CREATE SCHEMA IF NOT EXISTS hakkyra`;
+export function createSchemaSQL(schemaName: string): string {
+  return `CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`;
+}
 
-const CREATE_EVENT_LOG_SQL = `
-CREATE TABLE IF NOT EXISTS hakkyra.event_log (
+export function createEventLogSQL(schemaName: string): string {
+  return `
+CREATE TABLE IF NOT EXISTS ${quoteIdent(schemaName)}.event_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   trigger_name TEXT NOT NULL,
   table_schema TEXT NOT NULL,
@@ -31,23 +34,33 @@ CREATE TABLE IF NOT EXISTS hakkyra.event_log (
   response_status INTEGER
 )
 `;
+}
 
-const CREATE_INDEXES_SQL = `
+export function createIndexesSQL(schemaName: string): string {
+  return `
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_event_log_status') THEN
-    CREATE INDEX idx_event_log_status ON hakkyra.event_log(status, next_retry);
+    CREATE INDEX idx_event_log_status ON ${quoteIdent(schemaName)}.event_log(status, next_retry);
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_event_log_trigger') THEN
-    CREATE INDEX idx_event_log_trigger ON hakkyra.event_log(trigger_name);
+    CREATE INDEX idx_event_log_trigger ON ${quoteIdent(schemaName)}.event_log(trigger_name);
   END IF;
 END $$
 `;
+}
 
 /**
- * Ensure the hakkyra schema and event_log table exist.
+ * Double-quote a SQL identifier to prevent injection.
  */
-export async function ensureEventSchema(pool: Pool): Promise<void> {
-  await pool.query(CREATE_SCHEMA_SQL);
-  await pool.query(CREATE_EVENT_LOG_SQL);
-  await pool.query(CREATE_INDEXES_SQL);
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Ensure the internal schema and event_log table exist.
+ */
+export async function ensureEventSchema(pool: Pool, schemaName: string = 'hakkyra'): Promise<void> {
+  await pool.query(createSchemaSQL(schemaName));
+  await pool.query(createEventLogSQL(schemaName));
+  await pool.query(createIndexesSQL(schemaName));
 }

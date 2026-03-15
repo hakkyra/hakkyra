@@ -72,6 +72,13 @@ function buildTriggerLookup(tables: TableInfo[]): Map<string, { trigger: EventTr
 }
 
 /**
+ * Double-quote a SQL identifier to prevent injection.
+ */
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
  * Fetch and enqueue pending events from the event_log table into pg-boss.
  *
  * Called on startup (catchup) and when a NOTIFY is received.
@@ -81,11 +88,12 @@ export async function enqueuePendingEvents(
   jobQueue: JobQueue,
   logger: Logger,
   batchSize: number = 100,
+  schemaName: string = 'hakkyra',
 ): Promise<number> {
   const result = await pool.query<EventLogRow>(
     `SELECT id, trigger_name, table_schema, table_name, operation,
             old_data, new_data, session_vars, created_at
-     FROM hakkyra.event_log
+     FROM ${quoteIdent(schemaName)}.event_log
      WHERE status = 'pending' AND next_retry <= now()
      ORDER BY created_at ASC
      LIMIT $1`,
@@ -97,7 +105,7 @@ export async function enqueuePendingEvents(
   // Mark these events as 'processing' to avoid double-enqueue
   const ids = result.rows.map((r) => r.id);
   await pool.query(
-    `UPDATE hakkyra.event_log SET status = 'processing' WHERE id = ANY($1)`,
+    `UPDATE ${quoteIdent(schemaName)}.event_log SET status = 'processing' WHERE id = ANY($1)`,
     [ids],
   );
 
@@ -123,6 +131,7 @@ export async function registerEventWorkers(
   pool: Pool,
   tables: TableInfo[],
   logger: Logger,
+  schemaName: string = 'hakkyra',
 ): Promise<void> {
   const triggerLookup = buildTriggerLookup(tables);
 
@@ -159,7 +168,7 @@ export async function registerEventWorkers(
       if (result.success) {
         // Mark as delivered
         await pool.query(
-          `UPDATE hakkyra.event_log SET status = 'delivered', delivered_at = now(),
+          `UPDATE ${quoteIdent(schemaName)}.event_log SET status = 'delivered', delivered_at = now(),
            response_status = $2 WHERE id = $1`,
           [eventId, result.statusCode],
         );
@@ -171,7 +180,7 @@ export async function registerEventWorkers(
       } else {
         // Update error info
         await pool.query(
-          `UPDATE hakkyra.event_log SET
+          `UPDATE ${quoteIdent(schemaName)}.event_log SET
            retry_count = retry_count + 1,
            last_error = $2,
            response_status = $3,

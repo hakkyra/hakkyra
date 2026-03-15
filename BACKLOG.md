@@ -385,6 +385,12 @@ Move all hardcoded default values to Zod `.default()` in `src/config/schemas-int
 - [x] Dual connection pool — dedicated session-mode pool for LISTEN/NOTIFY, separate pooled connections for queries/mutations (enables PgBouncer transaction-mode compatibility)
 - [x] Redis pub/sub fanout for multi-instance subscriptions
 
+### JWT Admin Role as isAdmin — COMPLETE
+- [x] Allow JWT users whose active role is `admin` to be treated as `isAdmin: true` (bypassing permission checks), controlled by `auth.jwt.admin_role_is_admin` config option (default: `false`). When enabled, `extractSessionVariables()` sets `isAdmin: true` when the resolved role equals `admin`. Role override via `x-hasura-role: admin` also sets `isAdmin: true`. 9 tests (5 unit + 4 E2E).
+
+### Configurable Internal Schema Name — COMPLETE
+- [x] Allow configuring the PostgreSQL schema name used for Hakkyra's internal objects via `server.schema_name` in `hakkyra.yaml` (default: `hakkyra`). Threaded through 18 files: event schema/triggers/delivery/cleanup/manager, subscription triggers/listener, trigger reconciler, pg-boss manager, job queue, connection manager, server. 5 new Zod schema tests.
+
 ---
 
 ## Phase 5: Hasura Schema Compatibility — COMPLETE
@@ -767,13 +773,13 @@ Findings from comprehensive code review of permissions, relationships, computed 
 
 ### P6.4 — Computed Field Test Gaps (High) — PARTIAL
 
-- [ ] **Computed fields in WHERE clauses** — Feature gap: computed fields not included in BoolExp input types
-- [ ] **Computed fields in ORDER BY** — Feature gap: computed fields not included in OrderBy input types
+- [x] **Computed fields in WHERE clauses** — Scalar computed fields added to BoolExp input types, SQL WHERE compiler emits function calls, resolver remaps camelCase names (4 schema + E2E tests)
+- [x] **Computed fields in ORDER BY** — Scalar computed fields added to OrderBy input types, SQL ORDER BY emits function calls (3 schema + E2E tests)
 - [x] **SETOF computed fields** — `client_active_accounts` function, test fixtures + metadata + E2E tests (5 tests)
 - [x] **Computed fields in UPDATE/DELETE RETURNING** — Resolvers extract computed fields from parseResolveInfo, pass to update/delete SQL compilers (2 tests)
 - [x] **Computed fields with arguments** — Type-builder generates args input types, resolve-info captures args, SQL compiler emits named parameter notation with DEFAULT support (2 tests)
 - [ ] **Computed fields in subscriptions** — Test fixture exists; blocked by Mercurius subscription context propagation bug (1 todo)
-- [ ] **Computed fields in aggregations** — COUNT/SUM/AVG on result sets, GROUP BY with computed fields
+- [x] **Computed fields in aggregations** — Numeric computed fields in SUM/AVG/MIN/MAX/stddev/variance aggregate types, scalar computed fields in GroupByKeys and SelectColumnEnum (schema + E2E tests)
 - [x] **Computed fields with session variables** — Session claims injected as JSON parameter via named argument notation in SQL function calls (1 test)
 - [x] **Computed fields on views/materialized views** — `client_summary_score` on materialized view with E2E tests (4 tests)
 
@@ -824,7 +830,7 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Streaming subscriptions | 13 | Pass |
 | Actions | 19 | Pass |
 | Async actions | 18 | Pass |
-| Computed fields | 31 | Pass (2 todo) |
+| Computed fields | 50 | Pass (2 todo) |
 | Upsert | 22 | Pass |
 | Distinct | 22 | Pass |
 | Returning rels | 16 | Pass |
@@ -835,7 +841,7 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Batch operations | 26 | Pass |
 | Action relationships | 13 | Pass |
 | Statistical aggregates | 15 | Pass |
-| Zod schemas | 237 | Pass |
+| Zod schemas | 242 | Pass |
 | Tracked functions | 43 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
@@ -846,4 +852,5 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Hasura REST endpoints | 5 | Pass |
 | Config unsupported | 34 | Pass |
 | REST permissions | 26 | Pass |
-| **Total** | **1159** | **35 suites, 1151 passing, 7 skipped, 1 todo** |
+| JWT admin role | 9 | Pass |
+| **Total** | **1191** | **36 suites, 1183 passing, 7 skipped, 1 todo** |

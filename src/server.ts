@@ -132,7 +132,8 @@ export async function createServer(
   options?: ServerOptions,
 ): Promise<FastifyInstance> {
   // 1. Create connection manager
-  const connectionManager = createConnectionManager(config.databases);
+  const schemaName = config.server.schemaName;
+  const connectionManager = createConnectionManager(config.databases, undefined, schemaName);
 
   // 2. Introspect database
   // Detect all schemas referenced by tracked functions so non-public schemas
@@ -636,6 +637,7 @@ export async function createServer(
         connectionString: jqConf?.connectionString ?? primaryConnectionString,
         redis: jqConf?.redis,
         gracefulShutdownMs: jqConf?.gracefulShutdownMs,
+        schemaName,
       });
       await jobQueue.start();
       server.log.info({ provider: jqConf?.provider ?? 'pg-boss' }, 'Job queue started');
@@ -656,12 +658,13 @@ export async function createServer(
           schemaModel.tables,
           sessionConnectionString,
           log,
-          { batchSize: config.eventDelivery.batchSize },
+          { batchSize: config.eventDelivery.batchSize, schemaName },
         );
 
         // Register event log cleanup
         await registerEventCleanup(jobQueue, primaryPool, config.eventLogRetentionDays, log, {
           schedule: config.eventCleanup.schedule,
+          schemaName,
         });
       } catch (err) {
         server.log.warn({ err }, 'Event/cron initialization failed — continuing without');
@@ -699,12 +702,12 @@ export async function createServer(
     try {
 
       // Reconcile subscription triggers (diff-based)
-      const desiredSubTriggers = buildDesiredSubscriptionTriggers(schemaModel.tables);
+      const desiredSubTriggers = buildDesiredSubscriptionTriggers(schemaModel.tables, schemaName);
       const subReconcile = await reconcileTriggers(
         primaryPool,
         desiredSubTriggers,
         server.log as any,
-        { triggerPrefix: 'hakkyra_notify_' },
+        { triggerPrefix: `${schemaName}_notify_`, schemaName },
       );
       server.log.info(
         {
@@ -717,7 +720,7 @@ export async function createServer(
       );
 
       // Create change listener for subscriptions
-      changeListener = createChangeListener(sessionConnectionString);
+      changeListener = createChangeListener(sessionConnectionString, schemaName);
       subscriptionMgr = createSubscriptionManager(connectionManager, log, {
         queryRouting: config.databases.subscriptionQueryRouting ?? 'primary',
         debounceMs: config.subscriptions.debounceMs,

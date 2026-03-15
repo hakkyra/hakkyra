@@ -561,6 +561,7 @@ export const RawServerConfigSchema = z
         log_level: z.string().optional(),
         stringify_numeric_types: z.boolean().optional(),
         body_limit: z.number().optional(),
+        schema_name: z.string().optional(),
       })
       .passthrough()
       .optional(),
@@ -609,6 +610,7 @@ export const RawServerConfigSchema = z
             audience: z.string().optional(),
             issuer: z.string().optional(),
             require_exp: z.boolean().optional(),
+            admin_role_is_admin: z.boolean().optional(),
           })
           .passthrough()
           .optional(),

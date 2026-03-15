@@ -20,13 +20,17 @@ export interface PgBossManager {
 /**
  * Create a pg-boss manager connected to the primary database.
  *
- * Uses the `hakkyra` schema to isolate pg-boss tables from the application schema.
+ * Uses `${schemaName}_boss` schema to isolate pg-boss tables from the application schema.
  * Auto-creates required tables on startup via `migrate: true`.
  */
-export function createPgBossManager(connectionString: string, gracefulShutdownMs: number = 10000): PgBossManager {
+export function createPgBossManager(
+  connectionString: string,
+  gracefulShutdownMs: number = 10000,
+  schemaName: string = 'hakkyra',
+): PgBossManager {
   const boss = new PgBoss({
     connectionString,
-    schema: 'hakkyra_boss',
+    schema: `${schemaName}_boss`,
     migrate: true,
     supervise: true,
   });
