@@ -110,8 +110,7 @@ metadata/
 ├── actions.yaml
 ├── actions.graphql
 ├── cron_triggers.yaml
-├── inherited_roles.yaml
-└── rest_endpoints.yaml
+└── inherited_roles.yaml
 ```
 
 #### Table config example
@@ -352,6 +351,23 @@ Options:
   --dev                Enable dev mode with config hot reload
   --help, -h           Show help
 ```
+
+## Unsupported Hasura Features
+
+Hakkyra reads Hasura-compatible YAML metadata but does not implement all Hasura features. The config loader **rejects** metadata containing unsupported features with a clear error message, rather than silently ignoring them.
+
+**Not supported by design** (architectural decision):
+- **Remote relationships** — Hakkyra connects to a single PostgreSQL database; cross-source joins are out of scope
+- **Apollo Federation** — Hakkyra serves a standalone GraphQL API, not a federated subgraph
+
+**Not implemented** (Hasura features Hakkyra does not use):
+- Remote schemas, allowlists, API limits, OpenTelemetry, network/TLS config, backend-specific config
+- Stored procedures, database customization (table name prefix/suffix, root field namespace)
+
+**Ignored with warning** (present in metadata but has no effect):
+- Input validation webhooks (`validate_input` in permissions) — logged as a warning and skipped
+
+If your Hasura metadata export contains any of these, `loadConfig()` will throw listing all unsupported features found. Empty files (e.g., `[]`) are ignored.
 
 ## Architecture
 

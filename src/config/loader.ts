@@ -25,6 +25,10 @@ import type {
   BoolExp,
   ComputedFieldConfig,
   TrackedFunctionConfig,
+  NativeQuery,
+  LogicalModel,
+  QueryCollection,
+  HasuraRestEndpoint,
 } from '../types.js';
 import type {
   RawTableYaml,
@@ -38,6 +42,8 @@ import type {
   RawServerConfig,
   RawDatabaseEntry,
   RawTrackedFunction,
+  RawNativeQuery,
+  RawLogicalModel,
 } from './types.js';
 import { IncludeRef } from './types.js';
 import {
@@ -51,6 +57,9 @@ import {
   RawCronTriggerSchema,
   RawApiConfigSchema,
   RawServerConfigSchema,
+  RawIntrospectionConfigSchema,
+  RawQueryCollectionSchema,
+  RawHasuraRestEndpointSchema,
 } from './schemas.js';
 import {
   HakkyraConfigSchema,
@@ -159,6 +168,106 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> |
   return hasValue ? (result as Partial<T>) : undefined;
 }
 
+// ─── Unsupported Hasura feature detection ───────────────────────────────────
+
+const UNSUPPORTED_METADATA_FILES: Record<string, string> = {
+  remote_schemas: 'Remote schemas',
+  allowlist: 'Query allowlisting',
+  api_limits: 'API rate/depth limits',
+  opentelemetry: 'OpenTelemetry export',
+  network: 'Network/TLS configuration',
+  backend_configs: 'Backend-specific configuration',
+};
+
+const UNSUPPORTED_TABLE_FIELDS: Record<string, string> = {
+  remote_relationships: 'Remote relationships are not supported by Hakkyra by design',
+  apollo_federation_config: 'Apollo Federation is not supported by Hakkyra by design',
+};
+
+const UNSUPPORTED_DATABASE_FIELDS: Record<string, string> = {
+  stored_procedures: 'Stored procedures',
+  backend_configs: 'Backend-specific configuration',
+  customization: 'Database customization (table name prefix/suffix, root field namespace)',
+};
+
+const UNSUPPORTED_PERMISSION_FIELDS: Record<string, string> = {};
+
+const IGNORED_PERMISSION_FIELDS: Record<string, string> = {
+  validate_input: 'Input validation webhook (validate_input) is not supported by Hakkyra and will be ignored',
+};
+
+function hasContent(raw: unknown): boolean {
+  if (raw == null) return false;
+  if (Array.isArray(raw)) return raw.length > 0;
+  if (typeof raw === 'object') return Object.keys(raw).length > 0;
+  return true;
+}
+
+async function checkUnsupportedFiles(metadataDir: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const [baseName, label] of Object.entries(UNSUPPORTED_METADATA_FILES)) {
+    for (const ext of ['.yaml', '.yml']) {
+      const filePath = path.join(metadataDir, baseName + ext);
+      if (!(await fileExists(filePath))) continue;
+      const content = await fs.readFile(filePath, 'utf-8');
+      if (content.trim().length === 0) break;
+      const parsed = loadYaml(content, filePath);
+      if (hasContent(parsed)) {
+        found.push(`${baseName}${ext} (${label})`);
+      }
+      break; // don't report both .yaml and .yml for the same feature
+    }
+  }
+  return found;
+}
+
+function checkUnsupportedTableFields(
+  raw: Record<string, unknown>,
+  tableName: string,
+): string[] {
+  const found: string[] = [];
+  for (const [field, label] of Object.entries(UNSUPPORTED_TABLE_FIELDS)) {
+    if (raw[field] !== undefined) {
+      found.push(`table "${tableName}": ${field} — ${label}`);
+    }
+  }
+  // Check permission entries for unsupported fields
+  for (const permType of ['select_permissions', 'insert_permissions', 'update_permissions', 'delete_permissions'] as const) {
+    const perms = raw[permType];
+    if (!Array.isArray(perms)) continue;
+    for (const entry of perms) {
+      if (!entry || typeof entry !== 'object') continue;
+      const perm = (entry as Record<string, unknown>).permission;
+      const role = (entry as Record<string, unknown>).role as string;
+      if (!perm || typeof perm !== 'object') continue;
+      for (const [field, label] of Object.entries(UNSUPPORTED_PERMISSION_FIELDS)) {
+        if ((perm as Record<string, unknown>)[field] !== undefined) {
+          found.push(`table "${tableName}" ${permType.replace('_permissions', '')} permission for role "${role}": ${field} — ${label}`);
+        }
+      }
+      for (const [field, message] of Object.entries(IGNORED_PERMISSION_FIELDS)) {
+        if ((perm as Record<string, unknown>)[field] !== undefined) {
+          log.warn({ table: tableName, role, permType }, message);
+        }
+      }
+    }
+  }
+  return found;
+}
+
+function checkUnsupportedDatabaseFields(
+  raw: Record<string, unknown>,
+  dbName: string,
+): string[] {
+  const found: string[] = [];
+  for (const [field, label] of Object.entries(UNSUPPORTED_DATABASE_FIELDS)) {
+    if (raw[field] !== undefined) {
+      found.push(`database "${dbName}": ${field} — ${label}`);
+    }
+  }
+  return found;
+}
+
 // ─── Main loader ────────────────────────────────────────────────────────────
 
 /**
@@ -173,9 +282,19 @@ export async function loadConfig(
 ): Promise<HakkyraConfig> {
   const absMetadataDir = path.resolve(metadataDir);
 
+  const unsupported = await checkUnsupportedFiles(absMetadataDir);
+
   const version = await loadVersion(absMetadataDir);
-  const databases = await loadDatabases(absMetadataDir);
-  const tables = await loadAllTables(absMetadataDir);
+  const { databases, nativeQueries, logicalModels, unsupported: dbUnsupported } = await loadDatabases(absMetadataDir);
+  const { tables, unsupported: tableUnsupported } = await loadAllTables(absMetadataDir);
+  unsupported.push(...dbUnsupported, ...tableUnsupported);
+
+  if (unsupported.length > 0) {
+    throw new Error(
+      `Unsupported Hasura features found:\n  - ${unsupported.join('\n  - ')}\n\nThese features are not supported by Hakkyra. Remove them from your metadata to continue.`,
+    );
+  }
+
   const trackedFunctions = await loadAllFunctions(absMetadataDir);
   const actions = await loadActions(absMetadataDir);
   const actionsGraphql = await loadActionsGraphql(absMetadataDir);
@@ -183,6 +302,9 @@ export async function loadConfig(
   const apiConfig = await loadApiConfig(absMetadataDir);
   const serverConfig = await loadServerConfig(serverConfigPath);
   const inheritedRoles = await loadInheritedRoles(absMetadataDir);
+  const introspectionConfig = await loadIntrospectionConfig(absMetadataDir);
+  const queryCollections = await loadQueryCollections(absMetadataDir);
+  const hasuraRestEndpoints = await loadRestEndpoints(absMetadataDir, queryCollections);
 
   const tableAliases = apiConfig?.table_aliases ?? {};
   for (const table of tables) {
@@ -211,6 +333,10 @@ export async function loadConfig(
     cronTriggers,
     rest: transformRESTConfig(apiConfig),
     customQueries: transformCustomQueries(apiConfig),
+    queryCollections,
+    hasuraRestEndpoints,
+    nativeQueries,
+    logicalModels,
     apiDocs: transformDocsConfig(apiConfig),
     tableAliases,
     inheritedRoles,
@@ -246,6 +372,7 @@ export async function loadConfig(
       unnestThreshold: serverConfig?.sql?.unnest_threshold,
       batchChunkSize: serverConfig?.sql?.batch_chunk_size,
     }),
+    introspection: introspectionConfig,
   };
 
   return HakkyraConfigSchema.parse(raw);
@@ -265,19 +392,83 @@ async function loadVersion(metadataDir: string): Promise<number> {
 
 // ─── Databases ──────────────────────────────────────────────────────────────
 
-async function loadDatabases(metadataDir: string): Promise<RawDatabaseEntry[]> {
+async function loadDatabases(
+  metadataDir: string,
+): Promise<{ databases: RawDatabaseEntry[]; nativeQueries: NativeQuery[]; logicalModels: LogicalModel[]; unsupported: string[] }> {
   const dbPath = path.join(metadataDir, 'databases', 'databases.yaml');
   const raw = await readYamlIfExists(dbPath);
-  if (!raw) return [];
+  if (!raw) return { databases: [], nativeQueries: [], logicalModels: [], unsupported: [] };
 
+  let entries: unknown[];
   if (Array.isArray(raw)) {
-    return raw.map((entry) => RawDatabaseEntrySchema.parse(entry));
-  }
-  if (typeof raw === 'object' && raw !== null && 'databases' in raw) {
+    entries = raw;
+  } else if (typeof raw === 'object' && raw !== null && 'databases' in raw) {
     const parsed = RawDatabasesYamlSchema.parse(raw);
-    return parsed.databases ?? [];
+    entries = parsed.databases ?? [];
+  } else {
+    return { databases: [], nativeQueries: [], logicalModels: [], unsupported: [] };
   }
-  return [];
+
+  const unsupported: string[] = [];
+  const databases: RawDatabaseEntry[] = [];
+  const nativeQueries: NativeQuery[] = [];
+  const logicalModels: LogicalModel[] = [];
+  for (const entry of entries) {
+    if (entry && typeof entry === 'object') {
+      const rawEntry = entry as Record<string, unknown>;
+      unsupported.push(...checkUnsupportedDatabaseFields(rawEntry, (rawEntry.name as string) ?? 'unknown'));
+    }
+    const dbEntry = RawDatabaseEntrySchema.parse(entry);
+    databases.push(dbEntry);
+
+    // Extract native queries and logical models from the database entry
+    if (dbEntry.native_queries) {
+      for (const rawNq of dbEntry.native_queries) {
+        nativeQueries.push(transformNativeQuery(rawNq));
+      }
+    }
+    if (dbEntry.logical_models) {
+      for (const rawLm of dbEntry.logical_models) {
+        logicalModels.push(transformLogicalModel(rawLm));
+      }
+    }
+  }
+  return { databases, nativeQueries, logicalModels, unsupported };
+}
+
+function transformNativeQuery(raw: RawNativeQuery): NativeQuery {
+  const args: NativeQuery['arguments'] = [];
+  if (raw.arguments) {
+    for (const [name, argDef] of Object.entries(raw.arguments)) {
+      args.push({
+        name,
+        type: argDef.type,
+        nullable: argDef.nullable ?? false,
+      });
+    }
+  }
+  return {
+    rootFieldName: raw.root_field_name,
+    code: raw.code,
+    arguments: args,
+    returns: raw.returns,
+  };
+}
+
+function transformLogicalModel(raw: RawLogicalModel): LogicalModel {
+  return {
+    name: raw.name,
+    fields: raw.fields.map((f) => ({
+      name: f.name,
+      type: f.type.scalar,
+      nullable: f.type.nullable ?? true,
+    })),
+    selectPermissions: (raw.select_permissions ?? []).map((p) => ({
+      role: p.role,
+      columns: p.permission.columns,
+      filter: p.permission.filter as BoolExp,
+    })),
+  };
 }
 
 function transformDatabases(
@@ -369,17 +560,20 @@ function transformDatabases(
 
 // ─── Tables ─────────────────────────────────────────────────────────────────
 
-async function loadAllTables(metadataDir: string): Promise<TableInfo[]> {
+async function loadAllTables(
+  metadataDir: string,
+): Promise<{ tables: TableInfo[]; unsupported: string[] }> {
   const tables: TableInfo[] = [];
+  const unsupported: string[] = [];
 
   const databasesDir = path.join(metadataDir, 'databases');
-  if (!(await fileExists(databasesDir))) return tables;
+  if (!(await fileExists(databasesDir))) return { tables, unsupported };
 
   let entries: string[];
   try {
     entries = await fs.readdir(databasesDir);
   } catch {
-    return tables;
+    return { tables, unsupported };
   }
 
   for (const dbName of entries) {
@@ -399,13 +593,17 @@ async function loadAllTables(metadataDir: string): Promise<TableInfo[]> {
 
     for (const rawTable of rawTables) {
       if (!rawTable || typeof rawTable !== 'object') continue;
+      const rawObj = rawTable as Record<string, unknown>;
+      const tableId = rawObj.table as { schema?: string; name?: string } | undefined;
+      const tableName = tableId ? `${tableId.schema ?? 'public'}.${tableId.name ?? 'unknown'}` : 'unknown';
+      unsupported.push(...checkUnsupportedTableFields(rawObj, tableName));
       const tableConfig = RawTableYamlSchema.parse(rawTable);
       if (!tableConfig.table) continue;
       tables.push(transformTable(tableConfig));
     }
   }
 
-  return tables;
+  return { tables, unsupported };
 }
 
 function transformTable(raw: RawTableYaml): TableInfo {
@@ -578,12 +776,15 @@ function transformPermissions(raw: RawTableYaml): TablePermissions {
 
   if (raw.select_permissions) {
     for (const entry of raw.select_permissions) {
+      const perm = entry.permission as Record<string, unknown>;
       perms.select[entry.role] = {
         columns: entry.permission.columns,
         filter: entry.permission.filter as BoolExp,
         limit: entry.permission.limit,
         allowAggregations: entry.permission.allow_aggregations,
         computedFields: entry.permission.computed_fields,
+        queryRootFields: perm.query_root_fields as string[] | undefined,
+        subscriptionRootFields: perm.subscription_root_fields as string[] | undefined,
       };
     }
   }
@@ -673,6 +874,84 @@ async function loadInheritedRoles(
     }
   }
   return result;
+}
+
+// ─── Introspection Config ────────────────────────────────────────────────────
+
+async function loadIntrospectionConfig(
+  metadataDir: string,
+): Promise<{ disabledForRoles: string[] }> {
+  const raw = await readYamlIfExists(path.join(metadataDir, 'graphql_schema_introspection.yaml'));
+  if (!raw || typeof raw !== 'object') return { disabledForRoles: [] };
+  const parsed = RawIntrospectionConfigSchema.parse(raw);
+  return { disabledForRoles: parsed.disabled_for_roles ?? [] };
+}
+
+// ─── Query Collections & Hasura REST Endpoints ──────────────────────────────
+
+async function loadQueryCollections(metadataDir: string): Promise<QueryCollection[]> {
+  const filePath = path.join(metadataDir, 'query_collections.yaml');
+  const raw = await readYamlIfExists(filePath);
+  if (!raw || !Array.isArray(raw)) return [];
+
+  const collections: QueryCollection[] = [];
+  for (const entry of raw) {
+    const parsed = RawQueryCollectionSchema.parse(entry);
+    const queries = new Map<string, string>();
+    for (const q of parsed.definition.queries) {
+      queries.set(q.name, q.query);
+    }
+    collections.push({ name: parsed.name, queries });
+  }
+  return collections;
+}
+
+async function loadRestEndpoints(
+  metadataDir: string,
+  queryCollections: QueryCollection[],
+): Promise<HasuraRestEndpoint[]> {
+  const filePath = path.join(metadataDir, 'rest_endpoints.yaml');
+  const raw = await readYamlIfExists(filePath);
+  if (!raw || !Array.isArray(raw)) return [];
+
+  // Build a lookup for validation
+  const collectionMap = new Map<string, QueryCollection>();
+  for (const col of queryCollections) {
+    collectionMap.set(col.name, col);
+  }
+
+  const endpoints: HasuraRestEndpoint[] = [];
+  for (const entry of raw) {
+    const parsed = RawHasuraRestEndpointSchema.parse(entry);
+    const collectionName = parsed.definition.query.collection_name;
+    const queryName = parsed.definition.query.query_name;
+
+    // Validate: collection must exist
+    const collection = collectionMap.get(collectionName);
+    if (!collection) {
+      throw new Error(
+        `REST endpoint "${parsed.name}" references non-existent query collection "${collectionName}"`,
+      );
+    }
+
+    // Validate: query must exist in the collection
+    if (!collection.queries.has(queryName)) {
+      throw new Error(
+        `REST endpoint "${parsed.name}" references non-existent query "${queryName}" in collection "${collectionName}"`,
+      );
+    }
+
+    endpoints.push({
+      name: parsed.name,
+      url: parsed.url,
+      methods: parsed.methods,
+      collectionName,
+      queryName,
+      comment: parsed.comment,
+    });
+  }
+
+  return endpoints;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
