@@ -40,6 +40,8 @@ export interface ParsedSelection {
   setReturningComputedFields?: SetReturningComputedFieldParsed[];
   /** JSONB path arguments: snake_case column name → dot-separated path string */
   jsonbPaths?: Map<string, string>;
+  /** User-provided arguments for scalar computed fields: snake_case cf name → { camelCaseArgName → value } */
+  computedFieldArgs?: Map<string, Record<string, unknown>>;
 }
 
 export interface SetReturningComputedFieldParsed {
@@ -427,6 +429,7 @@ function parseSelectionSet(
   const computedFieldSet = new Set<string>();
   const setReturningComputedFieldList: SetReturningComputedFieldParsed[] = [];
   const jsonbPaths = new Map<string, string>();
+  const computedFieldArgsMap = new Map<string, Record<string, unknown>>();
 
   // Build a set of JSONB/JSON column camelCase names for path argument detection
   const jsonbColumnCamelNames = new Set<string>();
@@ -530,6 +533,11 @@ function parseSelectionSet(
           } else {
             // Scalar computed field
             computedFieldSet.add(cf.name);
+            // Capture user-provided args (e.g., balanceInCurrency(args: { targetCurrency: "EUR" }))
+            const cfArgsValue = getArgumentValue(selection, 'args', variableValues);
+            if (cfArgsValue && typeof cfArgsValue === 'object' && cfArgsValue !== null) {
+              computedFieldArgsMap.set(cf.name, cfArgsValue as Record<string, unknown>);
+            }
           }
         }
         continue;
@@ -668,6 +676,11 @@ function parseSelectionSet(
             jsonbPaths.set(col, path);
           }
         }
+        if (fragmentResult.computedFieldArgs) {
+          for (const [cfName, cfArgs] of fragmentResult.computedFieldArgs) {
+            computedFieldArgsMap.set(cfName, cfArgs);
+          }
+        }
       }
     } else if (selection.kind === 'InlineFragment') {
       // Handle inline fragments
@@ -700,6 +713,11 @@ function parseSelectionSet(
           jsonbPaths.set(col, path);
         }
       }
+      if (fragmentResult.computedFieldArgs) {
+        for (const [cfName, cfArgs] of fragmentResult.computedFieldArgs) {
+          computedFieldArgsMap.set(cfName, cfArgs);
+        }
+      }
     }
   }
 
@@ -714,6 +732,7 @@ function parseSelectionSet(
     computedFields: computedFieldSet.size > 0 ? Array.from(computedFieldSet) : undefined,
     setReturningComputedFields: setReturningComputedFieldList.length > 0 ? setReturningComputedFieldList : undefined,
     jsonbPaths: jsonbPaths.size > 0 ? jsonbPaths : undefined,
+    computedFieldArgs: computedFieldArgsMap.size > 0 ? computedFieldArgsMap : undefined,
   };
 }
 

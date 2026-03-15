@@ -111,7 +111,7 @@ const PG_ARG_TYPE_MAP: Record<string, string> = {
   character: 'String',
 };
 
-function pgArgTypeToGraphQL(pgType: string): GraphQLInputType {
+export function pgArgTypeToGraphQL(pgType: string): GraphQLInputType {
   const normalized = pgType.toLowerCase().replace(/\s+/g, ' ').trim();
   const graphqlName = PG_ARG_TYPE_MAP[normalized] ?? 'String';
 

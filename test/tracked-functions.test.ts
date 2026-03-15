@@ -61,6 +61,15 @@ beforeAll(async () => {
     "$fn$ LANGUAGE SQL VOLATILE;"
   );
 
+  // Create the utils schema and a function in it for non-public schema tests
+  await pool.query("CREATE SCHEMA IF NOT EXISTS utils");
+  await pool.query(
+    "CREATE OR REPLACE FUNCTION utils.count_active_clients() " +
+    "RETURNS SETOF client AS $fn$ " +
+    "SELECT * FROM public.client WHERE status = 'active' " +
+    "$fn$ LANGUAGE SQL STABLE;"
+  );
+
   // Stop any existing cached server (from other test files) so we get a fresh
   // server that introspects including our newly-created functions.
   await stopServer();
@@ -68,9 +77,14 @@ beforeAll(async () => {
   // Start the server (will introspect the DB including our new functions)
   await startServer();
 
-  // Build our own schemaModel for direct tests
-  const introspection = await introspectDatabase(pool);
+  // Build our own schemaModel for direct tests — include 'utils' schema
+  // so non-public functions are visible
   const config = await loadConfig(METADATA_DIR, SERVER_CONFIG_PATH);
+  const schemas = new Set<string>(['public']);
+  for (const fn of config.trackedFunctions ?? []) {
+    if (fn.schema) schemas.add(fn.schema);
+  }
+  const introspection = await introspectDatabase(pool, [...schemas]);
   const result = mergeSchemaModel(introspection, config);
   schemaModel = result.model;
 }, 30_000);
@@ -298,27 +312,29 @@ describe('Tracked Functions — E2E Mutation Resolution', () => {
     const pool = getPool();
     await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
 
-    const { body } = await graphqlRequest(
-      `mutation {
-        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
-          id
-          username
-          status
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+            id
+            username
+            status
+          }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
 
-    expect(body.errors).toBeUndefined();
-    expect(body.data).toBeDefined();
-    const data = body.data as { deactivateClient: AnyRow };
-    expect(data.deactivateClient).toBeDefined();
-    expect(data.deactivateClient.username).toBe('charlie');
-    expect(data.deactivateClient.status).toBe('INACTIVE');
-
-    // Restore charlie
-    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+      expect(body.errors).toBeUndefined();
+      expect(body.data).toBeDefined();
+      const data = body.data as { deactivateClient: AnyRow };
+      expect(data.deactivateClient).toBeDefined();
+      expect(data.deactivateClient.username).toBe('charlie');
+      expect(data.deactivateClient.status).toBe('INACTIVE');
+    } finally {
+      // Restore charlie
+      await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+    }
   });
 });
 
@@ -379,25 +395,27 @@ describe('Tracked Functions — Permissions', () => {
     const pool = getPool();
     await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
 
-    const token = await tokens.administrator();
-    const { body } = await graphqlRequest(
-      `mutation {
-        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
-          id
-          username
-          status
-        }
-      }`,
-      undefined,
-      { authorization: `Bearer ${token}` },
-    );
+    try {
+      const token = await tokens.administrator();
+      const { body } = await graphqlRequest(
+        `mutation {
+          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+            id
+            username
+            status
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
 
-    expect(body.errors).toBeUndefined();
-    const data = body.data as { deactivateClient: AnyRow };
-    expect(data.deactivateClient.status).toBe('INACTIVE');
-
-    // Restore charlie
-    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+      expect(body.errors).toBeUndefined();
+      const data = body.data as { deactivateClient: AnyRow };
+      expect(data.deactivateClient.status).toBe('INACTIVE');
+    } finally {
+      // Restore charlie
+      await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+    }
   });
 
   it('should apply return table select permissions for backoffice role', async () => {
@@ -460,29 +478,31 @@ describe('Tracked Functions — camelCase remapping', () => {
     const pool = getPool();
     await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
 
-    const { body } = await graphqlRequest(
-      `mutation {
-        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
-          id
-          username
-          branchId
-          currencyId
-          trustLevel
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+            id
+            username
+            branchId
+            currencyId
+            trustLevel
+          }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
 
-    expect(body.errors).toBeUndefined();
-    const data = body.data as { deactivateClient: AnyRow };
-    expect(data.deactivateClient).toBeDefined();
-    expect(data.deactivateClient.branchId).toBeDefined();
-    expect(data.deactivateClient.currencyId).toBeDefined();
-    expect(typeof data.deactivateClient.trustLevel).toBe('number');
-
-    // Restore charlie
-    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+      expect(body.errors).toBeUndefined();
+      const data = body.data as { deactivateClient: AnyRow };
+      expect(data.deactivateClient).toBeDefined();
+      expect(data.deactivateClient.branchId).toBeDefined();
+      expect(data.deactivateClient.currencyId).toBeDefined();
+      expect(typeof data.deactivateClient.trustLevel).toBe('number');
+    } finally {
+      // Restore charlie
+      await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+    }
   });
 });
 
@@ -705,32 +725,34 @@ describe('Tracked Functions — Mutation with Relationships', () => {
     const pool = getPool();
     await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
 
-    const { body } = await graphqlRequest(
-      `mutation {
-        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
-          id
-          username
-          status
-          branch {
-            name
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+            id
+            username
+            status
+            branch {
+              name
+            }
           }
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
 
-    expect(body.errors).toBeUndefined();
-    const data = body.data as { deactivateClient: AnyRow };
-    expect(data.deactivateClient).toBeDefined();
-    expect(data.deactivateClient.username).toBe('charlie');
-    expect(data.deactivateClient.status).toBe('INACTIVE');
-    expect(data.deactivateClient.branch).toBeDefined();
-    // Charlie is in OtherBranch (branch_id = a0...0002)
-    expect((data.deactivateClient.branch as AnyRow).name).toBe('OtherBranch');
-
-    // Restore charlie
-    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+      expect(body.errors).toBeUndefined();
+      const data = body.data as { deactivateClient: AnyRow };
+      expect(data.deactivateClient).toBeDefined();
+      expect(data.deactivateClient.username).toBe('charlie');
+      expect(data.deactivateClient.status).toBe('INACTIVE');
+      expect(data.deactivateClient.branch).toBeDefined();
+      // Charlie is in OtherBranch (branch_id = a0...0002)
+      expect((data.deactivateClient.branch as AnyRow).name).toBe('OtherBranch');
+    } finally {
+      // Restore charlie
+      await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+    }
   });
 
   it('mutation function resolves array relationships in RETURNING', async () => {
@@ -738,33 +760,35 @@ describe('Tracked Functions — Mutation with Relationships', () => {
     const pool = getPool();
     await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
 
-    const { body } = await graphqlRequest(
-      `mutation {
-        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
-          id
-          username
-          accounts {
-            balance
-            currencyId
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+            id
+            username
+            accounts {
+              balance
+              currencyId
+            }
           }
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
 
-    expect(body.errors).toBeUndefined();
-    const data = body.data as { deactivateClient: AnyRow };
-    expect(data.deactivateClient).toBeDefined();
-    expect(data.deactivateClient.username).toBe('charlie');
-    expect(Array.isArray(data.deactivateClient.accounts)).toBe(true);
-    // Charlie has one account with balance=0
-    const accounts = data.deactivateClient.accounts as AnyRow[];
-    expect(accounts.length).toBe(1);
-    expect(Number(accounts[0].balance)).toBe(0);
-
-    // Restore charlie
-    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+      expect(body.errors).toBeUndefined();
+      const data = body.data as { deactivateClient: AnyRow };
+      expect(data.deactivateClient).toBeDefined();
+      expect(data.deactivateClient.username).toBe('charlie');
+      expect(Array.isArray(data.deactivateClient.accounts)).toBe(true);
+      // Charlie has one account with balance=0
+      const accounts = data.deactivateClient.accounts as AnyRow[];
+      expect(accounts.length).toBe(1);
+      expect(Number(accounts[0].balance)).toBe(0);
+    } finally {
+      // Restore charlie
+      await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+    }
   });
 
   it('SETOF query function resolves nested relationships', async () => {
@@ -804,10 +828,10 @@ describe('Tracked Functions — Mutation with Relationships', () => {
 // ─── Diverse Argument Types (P6.5a) ──────────────────────────────────────
 
 describe('Tracked Functions — Diverse Argument Types', () => {
-  it('should call searchClientsByDate with a date in the past and return clients', async () => {
+  it('should call clientsByDate (custom root field) with a date in the past and return clients', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsByDate(args: { since: "2000-01-01T00:00:00Z" }) {
+        clientsByDate(args: { since: "2000-01-01T00:00:00Z" }) {
           id
           username
           createdAt
@@ -818,11 +842,11 @@ describe('Tracked Functions — Diverse Argument Types', () => {
     );
 
     expect(body.errors).toBeUndefined();
-    const data = body.data as { searchClientsByDate: AnyRow[] };
-    expect(Array.isArray(data.searchClientsByDate)).toBe(true);
+    const data = body.data as { clientsByDate: AnyRow[] };
+    expect(Array.isArray(data.clientsByDate)).toBe(true);
     // All 4 seed clients were created after 2000-01-01
-    expect(data.searchClientsByDate.length).toBeGreaterThanOrEqual(4);
-    const usernames = data.searchClientsByDate.map((c) => c.username);
+    expect(data.clientsByDate.length).toBeGreaterThanOrEqual(4);
+    const usernames = data.clientsByDate.map((c) => c.username);
     expect(usernames).toContain('alice');
     expect(usernames).toContain('bob');
     expect(usernames).toContain('charlie');
@@ -978,14 +1002,156 @@ describe('Tracked Functions — Session Variable Injection', () => {
   });
 });
 
+// ─── Custom Root Field Names (P6.5j) ─────────────────────────────────────
+
+describe('Tracked Functions — Custom Root Field Names', () => {
+  it('should resolve the custom root field name (clientsByDate)', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        clientsByDate(args: { since: "2000-01-01T00:00:00Z" }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { clientsByDate: AnyRow[] };
+    expect(Array.isArray(data.clientsByDate)).toBe(true);
+    expect(data.clientsByDate.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('should resolve the custom aggregate root field name (clientsByDateAggregate)', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        clientsByDateAggregate(args: { since: "2000-01-01T00:00:00Z" }) {
+          aggregate {
+            count
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { clientsByDateAggregate: { aggregate: { count: number } } };
+    expect(data.clientsByDateAggregate.aggregate.count).toBeGreaterThanOrEqual(4);
+  });
+
+  it('should NOT resolve the default field name when custom root fields are set', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsByDate(args: { since: "2000-01-01T00:00:00Z" }) {
+          id
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    // The default name should not exist — expect a validation error
+    expect(body.errors).toBeDefined();
+    expect(body.errors!.length).toBeGreaterThan(0);
+  });
+
+  it('should NOT resolve the default aggregate name when custom root fields are set', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsByDateAggregate(args: { since: "2000-01-01T00:00:00Z" }) {
+          aggregate { count }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    // The default aggregate name should not exist — expect a validation error
+    expect(body.errors).toBeDefined();
+    expect(body.errors!.length).toBeGreaterThan(0);
+  });
+});
+
 // ─── Non-public Schema Functions (P6.5i) ─────────────────────────────────
 
 describe('Tracked Functions — Non-public Schema', () => {
-  it.todo(
-    'should support calling utils.countActiveClients from non-public schema ' +
-    '(currently skipped: server only introspects the public schema by default, ' +
-    'so "utils.count_active_clients" is not found in introspection)'
-  );
+  it('should introspect utils.count_active_clients from non-public schema', () => {
+    const fn = schemaModel.functions.find(
+      (f) => f.name === 'count_active_clients' && f.schema === 'utils',
+    );
+    expect(fn).toBeDefined();
+    expect(fn!.isSetReturning).toBe(true);
+    expect(fn!.volatility).toBe('stable');
+    expect(fn!.returnType).toBe('client');
+  });
+
+  it('should resolve the tracked function config for utils.count_active_clients', () => {
+    const tracked = schemaModel.trackedFunctions.find(
+      (f) => f.name === 'count_active_clients' && f.schema === 'utils',
+    );
+    expect(tracked).toBeDefined();
+    expect(tracked!.permissions).toBeDefined();
+    expect(tracked!.permissions!.some((p) => p.role === 'backoffice')).toBe(true);
+  });
+
+  it('should execute utils.countActiveClients via GraphQL', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        countActiveClients {
+          id
+          username
+          status
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    expect(body.data).toBeDefined();
+    const data = body.data as { countActiveClients: AnyRow[] };
+    expect(Array.isArray(data.countActiveClients)).toBe(true);
+    // All returned clients should have active status
+    for (const client of data.countActiveClients) {
+      expect(client.status).toBe('ACTIVE');
+    }
+  });
+
+  it('should respect permissions on utils.countActiveClients', async () => {
+    const token = await tokens.backoffice();
+    const { body } = await graphqlRequest(
+      `query {
+        countActiveClients {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { countActiveClients: AnyRow[] };
+    expect(Array.isArray(data.countActiveClients)).toBe(true);
+  });
+
+  it('should deny client role access to utils.countActiveClients', async () => {
+    const token = await tokens.client();
+    const { body } = await graphqlRequest(
+      `query {
+        countActiveClients {
+          id
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+
+    expect(body.errors).toBeDefined();
+    expect(body.errors![0].message).toContain('Permission denied');
+  });
 });
 
 // ─── Inherited Role Permissions on Functions (P6.5f) ─────────────────────
@@ -1017,30 +1183,32 @@ describe('Tracked Functions — Inherited Role Permissions', () => {
     const pool = getPool();
     await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
 
-    const token = await createJWT({
-      role: 'backoffice_admin',
-      allowedRoles: ['backoffice_admin', 'backoffice', 'administrator'],
-    });
-    const { body } = await graphqlRequest(
-      `mutation {
-        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
-          id
-          username
-          status
-        }
-      }`,
-      undefined,
-      { authorization: `Bearer ${token}` },
-    );
+    try {
+      const token = await createJWT({
+        role: 'backoffice_admin',
+        allowedRoles: ['backoffice_admin', 'backoffice', 'administrator'],
+      });
+      const { body } = await graphqlRequest(
+        `mutation {
+          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+            id
+            username
+            status
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
 
-    expect(body.errors).toBeUndefined();
-    const data = body.data as { deactivateClient: AnyRow };
-    expect(data.deactivateClient).toBeDefined();
-    expect(data.deactivateClient.username).toBe('charlie');
-    expect(data.deactivateClient.status).toBe('INACTIVE');
-
-    // Restore charlie
-    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+      expect(body.errors).toBeUndefined();
+      const data = body.data as { deactivateClient: AnyRow };
+      expect(data.deactivateClient).toBeDefined();
+      expect(data.deactivateClient.username).toBe('charlie');
+      expect(data.deactivateClient.status).toBe('INACTIVE');
+    } finally {
+      // Restore charlie
+      await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+    }
   });
 
   it('support can call searchClients (backoffice has permission)', async () => {

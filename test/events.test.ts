@@ -176,8 +176,10 @@ describe('Event Triggers', () => {
     // Truncate event_log between tests
     await pool.query('DELETE FROM hakkyra.event_log');
     // Clean up any test invoices created during tests
+    // Note: one test changes provider from 'event-test' to 'updated-provider',
+    // so we need to clean up both
     await pool.query(
-      "DELETE FROM invoice WHERE provider = 'event-test'",
+      "DELETE FROM invoice WHERE provider IN ('event-test', 'updated-provider')",
     );
   });
 

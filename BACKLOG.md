@@ -737,15 +737,15 @@ Findings from comprehensive code review of permissions, relationships, computed 
 
 ### P6.2 — Permission Test Gaps (High) — PARTIAL
 
-49 tests in `test/permission-gaps.test.ts`:
+49 tests in `test/permission-gaps.test.ts`, 26 tests in `test/rest-permissions.test.ts`:
 
 - [x] **Untested comparison operators** — `_neq`, `_nlike`, `_nilike`, `_similar`, `_nsimilar`, `_regex`, `_nregex`, `_iregex`, `_niregex` (9 tests)
 - [x] **Untested JSONB operators** — `_containedIn`, `_hasKeysAny`, `_hasKeysAll` (4 tests)
 - [x] **Inherited roles** — SELECT/INSERT/DELETE permission merging tests (union columns, aggregation flag, delete inheritance) (6 tests)
 - [x] **Row limit enforcement** — Permission limits enforced at query level (3 tests)
 - [x] **Mutation permission checks** — UPDATE post-check (check filter pass/fail), client update with on_hold constraint (7 tests)
-- [ ] **Subscription permissions** — Only basic select permission tested; no row-level filter, column restriction, or aggregation restriction tests
-- [ ] **REST permission enforcement** — Column filtering on SELECT/INSERT/UPDATE, insert check filter, update post-check, aggregate with `allowAggregations: false`
+- [ ] **Subscription permissions** — Only basic select permission tested; no row-level filter, column restriction, or aggregation restriction tests (blocked by Mercurius subscription context propagation bug)
+- [x] **REST permission enforcement** — Column filtering on SELECT/INSERT/UPDATE, insert preset enforcement, row-level filter enforcement, aggregate access control (26 tests in `test/rest-permissions.test.ts`)
 - [x] **Negative/denial tests** — Permission denied, 401/403 semantics, forbidden operations (8 tests)
 - [x] **Session variable edge cases** — User-scoped queries, custom session vars, combined permission+user filters (5 tests)
 - [x] **Nested logical operators** — `_and`+`_or`, empty `_and`/`_or`, `_not`, deeply nested combinations (7 tests)
@@ -770,26 +770,26 @@ Findings from comprehensive code review of permissions, relationships, computed 
 - [ ] **Computed fields in WHERE clauses** — Feature gap: computed fields not included in BoolExp input types
 - [ ] **Computed fields in ORDER BY** — Feature gap: computed fields not included in OrderBy input types
 - [x] **SETOF computed fields** — `client_active_accounts` function, test fixtures + metadata + E2E tests (5 tests)
-- [ ] **Computed fields in UPDATE/DELETE RETURNING** — Test fixtures exist but resolvers don't pass computed fields to RETURNING clause (2 todos)
-- [ ] **Computed fields with arguments** — `client_balance_in_currency` function + metadata exist; arg passing not yet in type-builder/SQL compiler (2 todos)
+- [x] **Computed fields in UPDATE/DELETE RETURNING** — Resolvers extract computed fields from parseResolveInfo, pass to update/delete SQL compilers (2 tests)
+- [x] **Computed fields with arguments** — Type-builder generates args input types, resolve-info captures args, SQL compiler emits named parameter notation with DEFAULT support (2 tests)
 - [ ] **Computed fields in subscriptions** — Test fixture exists; blocked by Mercurius subscription context propagation bug (1 todo)
 - [ ] **Computed fields in aggregations** — COUNT/SUM/AVG on result sets, GROUP BY with computed fields
-- [ ] **Computed fields with session variables** — `client_is_own` function + metadata exist; session injection not yet in SQL compiler (1 todo)
+- [x] **Computed fields with session variables** — Session claims injected as JSON parameter via named argument notation in SQL function calls (1 test)
 - [x] **Computed fields on views/materialized views** — `client_summary_score` on materialized view with E2E tests (4 tests)
 
 ### P6.5 — Tracked Function Test Gaps (Medium) — PARTIAL
 
-34 tests in `test/tracked-functions.test.ts` (up from 20):
+43 tests in `test/tracked-functions.test.ts` (up from 34):
 
 - [x] **Diverse argument types** — timestamptz and int parameters: `search_clients_by_date`, `search_clients_by_trust` (3 tests)
 - [x] **Default parameter values** — `search_clients_by_trust` with DEFAULT max_level=10 (2 tests)
 - [x] **Aggregate variants** — SUM/AVG/MIN/MAX on SETOF function results + multi-aggregate (4 tests, bug fix: camelCase JSON keys)
 - [x] **Session variable injection** — `my_clients` with session_argument config (2 tests)
-- [ ] **Custom root field names** — `customRootFields.function` / `customRootFields.functionAggregate`
+- [x] **Custom root field names** — `customRootFields.function` / `customRootFields.functionAggregate` verified with `search_clients_by_date` → `clientsByDate` (4 tests)
 - [x] **Inherited role permissions** — backofficeAdmin/support constituent role checks on tracked functions (4 tests)
 - [x] **Empty/null results** — SETOF function returning empty set, mutation function with non-existent UUID (2 tests)
 - [x] **Mutation functions with relationships in RETURNING** — deactivateClient with nested branch relationship (1 test)
-- [ ] **Functions in non-public schemas** — `utils.count_active_clients` added but server only introspects public schema (1 todo)
+- [x] **Functions in non-public schemas** — Server auto-detects schemas from tracked function configs; `utils.count_active_clients` introspected and queried (5 tests)
 
 ### P6.6 — Security Tests (Medium) ✅
 
@@ -824,7 +824,7 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Streaming subscriptions | 13 | Pass |
 | Actions | 19 | Pass |
 | Async actions | 18 | Pass |
-| Computed fields | 26 | Pass (5 todo) |
+| Computed fields | 31 | Pass (2 todo) |
 | Upsert | 22 | Pass |
 | Distinct | 22 | Pass |
 | Returning rels | 16 | Pass |
@@ -836,7 +836,7 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Action relationships | 13 | Pass |
 | Statistical aggregates | 15 | Pass |
 | Zod schemas | 237 | Pass |
-| Tracked functions | 34 | Pass (1 todo) |
+| Tracked functions | 43 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
 | Role-aware docs | 14 | Pass |
@@ -845,4 +845,5 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Security tests | 28 | Pass |
 | Hasura REST endpoints | 5 | Pass |
 | Config unsupported | 34 | Pass |
-| **Total** | **1125** | **34 suites, 1103 passing, 7 skipped, 7 todo** |
+| REST permissions | 26 | Pass |
+| **Total** | **1159** | **35 suites, 1151 passing, 7 skipped, 1 todo** |

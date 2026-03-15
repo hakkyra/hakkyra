@@ -396,8 +396,9 @@ function parseFunctions(rows: FunctionRow[]): FunctionInfo[] {
     name: row.function_name,
     schema: row.function_schema,
     returnType: row.return_type,
-    argTypes: row.arg_types ?? [],
-    argNames: row.arg_names ?? [],
+    // Filter out null entries: 0-arg functions produce [null] from LEFT JOIN unnest
+    argTypes: (row.arg_types ?? []).filter((t): t is string => t != null),
+    argNames: (row.arg_names ?? []).filter((n): n is string => n != null),
     isSetReturning: row.is_set_returning,
     volatility: row.volatility as 'immutable' | 'stable' | 'volatile',
     numArgsWithDefaults: row.num_args_with_defaults ?? 0,

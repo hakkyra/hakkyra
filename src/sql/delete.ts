@@ -16,7 +16,7 @@ import type {
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
-import type { RelationshipSelection } from './select.js';
+import type { RelationshipSelection, ComputedFieldSelection } from './select.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,8 @@ export interface DeleteByPkOptions {
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
   returningRelationships?: RelationshipSelection[];
+  /** Computed fields to include in the RETURNING clause */
+  returningComputedFields?: ComputedFieldSelection[];
   /** JSONB path arguments for RETURNING fields */
   returningJsonbPaths?: Map<string, string>;
   permission?: {
@@ -44,6 +46,8 @@ export interface DeleteOptions {
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
   returningRelationships?: RelationshipSelection[];
+  /** Computed fields to include in the RETURNING clause */
+  returningComputedFields?: ComputedFieldSelection[];
   /** JSONB path arguments for RETURNING fields */
   returningJsonbPaths?: Map<string, string>;
   permission?: {
@@ -66,14 +70,19 @@ function buildReturningFields(
   session: SessionVariables,
   relationships?: RelationshipSelection[],
   jsonbPaths?: Map<string, string>,
+  computedFields?: ComputedFieldSelection[],
 ): string {
   const tableColumnNames = new Set(table.columns.map((c) => c.name));
   const validReturning = returningColumns.filter((c) => tableColumnNames.has(c));
 
-  if ((relationships && relationships.length > 0) || (jsonbPaths && jsonbPaths.size > 0)) {
+  const hasRelationships = relationships && relationships.length > 0;
+  const hasJsonbPaths = jsonbPaths && jsonbPaths.size > 0;
+  const hasComputedFields = computedFields && computedFields.length > 0;
+
+  if (hasRelationships || hasJsonbPaths || hasComputedFields) {
     const columns = filterColumns(validReturning, table);
     const aliasCounter = new AliasCounter();
-    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, undefined, undefined, jsonbPaths);
+    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, computedFields, undefined, jsonbPaths);
   }
 
   return validReturning.map(
@@ -125,9 +134,10 @@ export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
   const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
   const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
   const hasJsonbPaths = opts.returningJsonbPaths && opts.returningJsonbPaths.size > 0;
+  const hasComputedFields = opts.returningComputedFields && opts.returningComputedFields.length > 0;
 
-  if (hasRelationships || hasJsonbPaths) {
-    // Use CTE pattern so relationship subqueries / jsonb path extraction can reference the deleted row
+  if (hasRelationships || hasJsonbPaths || hasComputedFields) {
+    // Use CTE pattern so relationship subqueries / jsonb path extraction / computed fields can reference the deleted row
     const returningFields = buildReturningFields(
       opts.table,
       opts.returningColumns,
@@ -136,6 +146,7 @@ export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
       opts.session,
       opts.returningRelationships,
       opts.returningJsonbPaths,
+      opts.returningComputedFields,
     );
 
     const sql = [
@@ -212,9 +223,10 @@ export function compileDelete(opts: DeleteOptions): CompiledQuery {
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
   const hasJsonbPaths = opts.returningJsonbPaths && opts.returningJsonbPaths.size > 0;
+  const hasComputedFields2 = opts.returningComputedFields && opts.returningComputedFields.length > 0;
 
-  if (validReturning.length > 0 || hasRelationships || hasJsonbPaths) {
-    // Use CTE to collect results as JSON array, with optional relationship subqueries and JSONB path extraction
+  if (validReturning.length > 0 || hasRelationships || hasJsonbPaths || hasComputedFields2) {
+    // Use CTE to collect results as JSON array, with optional relationship subqueries, computed fields, and JSONB path extraction
     const returningFields = buildReturningFields(
       opts.table,
       opts.returningColumns,
@@ -223,6 +235,7 @@ export function compileDelete(opts: DeleteOptions): CompiledQuery {
       opts.session,
       opts.returningRelationships,
       opts.returningJsonbPaths,
+      opts.returningComputedFields,
     );
 
     const sql = [

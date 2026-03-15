@@ -84,18 +84,20 @@ describe('INSERT with returning relationships (SQL)', () => {
     expect(query.sql).toContain('json_build_object');
     expect(query.sql).toContain('branch');
 
-    // Execute and verify
-    const result = await pool.query(query.sql, query.params);
-    expect(result.rows).toHaveLength(1);
-    const data = result.rows[0].data;
-    expect(data.id).toBe(newId);
-    expect(data.username).toBe('test_insert_rel_user');
-    expect(data.branch).toBeDefined();
-    expect(data.branch.name).toBe('TestBranch');
-    expect(data.branch.code).toBe('MAIN');
-
-    // Cleanup
-    await pool.query('DELETE FROM client WHERE id = $1', [newId]);
+    try {
+      // Execute and verify
+      const result = await pool.query(query.sql, query.params);
+      expect(result.rows).toHaveLength(1);
+      const data = result.rows[0].data;
+      expect(data.id).toBe(newId);
+      expect(data.username).toBe('test_insert_rel_user');
+      expect(data.branch).toBeDefined();
+      expect(data.branch.name).toBe('TestBranch');
+      expect(data.branch.code).toBe('MAIN');
+    } finally {
+      // Cleanup
+      await pool.query('DELETE FROM client WHERE id = $1', [newId]).catch(() => {});
+    }
   });
 
   it('should compile INSERT ONE with array relationship in RETURNING', async () => {
@@ -126,17 +128,19 @@ describe('INSERT with returning relationships (SQL)', () => {
       session: adminSession,
     });
 
-    const result = await pool.query(query.sql, query.params);
-    expect(result.rows).toHaveLength(1);
-    const data = result.rows[0].data;
-    expect(data.id).toBe(newId);
-    // New user has no accounts yet
-    expect(data.accounts).toBeDefined();
-    expect(Array.isArray(data.accounts)).toBe(true);
-    expect(data.accounts).toHaveLength(0);
-
-    // Cleanup
-    await pool.query('DELETE FROM client WHERE id = $1', [newId]);
+    try {
+      const result = await pool.query(query.sql, query.params);
+      expect(result.rows).toHaveLength(1);
+      const data = result.rows[0].data;
+      expect(data.id).toBe(newId);
+      // New user has no accounts yet
+      expect(data.accounts).toBeDefined();
+      expect(Array.isArray(data.accounts)).toBe(true);
+      expect(data.accounts).toHaveLength(0);
+    } finally {
+      // Cleanup
+      await pool.query('DELETE FROM client WHERE id = $1', [newId]).catch(() => {});
+    }
   });
 
   it('should compile bulk INSERT with relationship in RETURNING', async () => {
@@ -170,17 +174,19 @@ describe('INSERT with returning relationships (SQL)', () => {
     expect(query.sql).toContain('WITH "_inserted" AS');
     expect(query.sql).toContain('json_agg');
 
-    const result = await pool.query(query.sql, query.params);
-    expect(result.rows).toHaveLength(1);
-    const data = result.rows[0].data;
-    expect(Array.isArray(data)).toBe(true);
-    expect(data).toHaveLength(2);
-    expect(data[0].branch).toBeDefined();
-    expect(data[0].branch.name).toBe('TestBranch');
-    expect(data[1].branch).toBeDefined();
-
-    // Cleanup
-    await pool.query('DELETE FROM client WHERE id = ANY($1)', [ids]);
+    try {
+      const result = await pool.query(query.sql, query.params);
+      expect(result.rows).toHaveLength(1);
+      const data = result.rows[0].data;
+      expect(Array.isArray(data)).toBe(true);
+      expect(data).toHaveLength(2);
+      expect(data[0].branch).toBeDefined();
+      expect(data[0].branch.name).toBe('TestBranch');
+      expect(data[1].branch).toBeDefined();
+    } finally {
+      // Cleanup
+      await pool.query('DELETE FROM client WHERE id = ANY($1)', [ids]).catch(() => {});
+    }
   });
 });
 
@@ -212,16 +218,18 @@ describe('UPDATE with returning relationships (SQL)', () => {
     expect(query.sql).toContain('WITH "_updated" AS');
     expect(query.sql).toContain('branch');
 
-    const result = await pool.query(query.sql, query.params);
-    expect(result.rows).toHaveLength(1);
-    const data = result.rows[0].data;
-    expect(data.id).toBe(ALICE_ID);
-    expect(data.trustLevel).toBe(99);
-    expect(data.branch).toBeDefined();
-    expect(data.branch.name).toBe('TestBranch');
-
-    // Reset
-    await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+    try {
+      const result = await pool.query(query.sql, query.params);
+      expect(result.rows).toHaveLength(1);
+      const data = result.rows[0].data;
+      expect(data.id).toBe(ALICE_ID);
+      expect(data.trustLevel).toBe(99);
+      expect(data.branch).toBeDefined();
+      expect(data.branch.name).toBe('TestBranch');
+    } finally {
+      // Reset
+      await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+    }
   });
 
   it('should compile bulk UPDATE with array relationship in RETURNING', async () => {
@@ -249,17 +257,19 @@ describe('UPDATE with returning relationships (SQL)', () => {
     expect(query.sql).toContain('WITH "_updated" AS');
     expect(query.sql).toContain('json_agg');
 
-    const result = await pool.query(query.sql, query.params);
-    expect(result.rows).toHaveLength(1);
-    const data = result.rows[0].data;
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBe(1);
-    expect(data[0].accounts).toBeDefined();
-    expect(Array.isArray(data[0].accounts)).toBe(true);
-    expect(data[0].accounts.length).toBeGreaterThan(0);
-
-    // Reset
-    await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+    try {
+      const result = await pool.query(query.sql, query.params);
+      expect(result.rows).toHaveLength(1);
+      const data = result.rows[0].data;
+      expect(Array.isArray(data)).toBe(true);
+      expect(data.length).toBe(1);
+      expect(data[0].accounts).toBeDefined();
+      expect(Array.isArray(data[0].accounts)).toBe(true);
+      expect(data[0].accounts.length).toBeGreaterThan(0);
+    } finally {
+      // Reset
+      await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+    }
   });
 });
 
@@ -279,31 +289,36 @@ describe('DELETE with returning relationships (SQL)', () => {
       [newId, BRANCH_TEST_ID],
     );
 
-    const relSelection: RelationshipSelection = {
-      relationship: branchRel,
-      remoteTable: branchTable,
-      columns: ['id', 'name'],
-    };
+    try {
+      const relSelection: RelationshipSelection = {
+        relationship: branchRel,
+        remoteTable: branchTable,
+        columns: ['id', 'name'],
+      };
 
-    const query = compileDeleteByPk({
-      table: clientTable,
-      pkValues: { id: newId },
-      returningColumns: ['id', 'username'],
-      returningRelationships: [relSelection],
-      session: adminSession,
-    });
+      const query = compileDeleteByPk({
+        table: clientTable,
+        pkValues: { id: newId },
+        returningColumns: ['id', 'username'],
+        returningRelationships: [relSelection],
+        session: adminSession,
+      });
 
-    // Should use CTE pattern
-    expect(query.sql).toContain('WITH "_deleted" AS');
+      // Should use CTE pattern
+      expect(query.sql).toContain('WITH "_deleted" AS');
 
-    const result = await pool.query(query.sql, query.params);
-    expect(result.rows).toHaveLength(1);
-    const data = result.rows[0].data;
-    expect(data.id).toBe(newId);
-    expect(data.username).toBe('del_rel_test');
-    // Branch still exists after deleting the client
-    expect(data.branch).toBeDefined();
-    expect(data.branch.name).toBe('TestBranch');
+      const result = await pool.query(query.sql, query.params);
+      expect(result.rows).toHaveLength(1);
+      const data = result.rows[0].data;
+      expect(data.id).toBe(newId);
+      expect(data.username).toBe('del_rel_test');
+      // Branch still exists after deleting the client
+      expect(data.branch).toBeDefined();
+      expect(data.branch.name).toBe('TestBranch');
+    } finally {
+      // Cleanup in case the delete query didn't execute
+      await pool.query('DELETE FROM client WHERE id = $1', [newId]).catch(() => {});
+    }
   });
 
   it('should compile bulk DELETE with relationship in RETURNING', async () => {
@@ -335,24 +350,29 @@ describe('DELETE with returning relationships (SQL)', () => {
       [testDataId, ALICE_ID],
     );
 
-    const query = compileDelete({
-      table: clientDataTable,
-      where: { id: { _eq: testDataId } } as BoolExp,
-      returningColumns: ['id', 'key'],
-      returningRelationships: [relSelection],
-      session: adminSession,
-    });
+    try {
+      const query = compileDelete({
+        table: clientDataTable,
+        where: { id: { _eq: testDataId } } as BoolExp,
+        returningColumns: ['id', 'key'],
+        returningRelationships: [relSelection],
+        session: adminSession,
+      });
 
-    expect(query.sql).toContain('WITH "_deleted" AS');
+      expect(query.sql).toContain('WITH "_deleted" AS');
 
-    const result = await pool.query(query.sql, query.params);
-    expect(result.rows).toHaveLength(1);
-    const data = result.rows[0].data;
-    expect(Array.isArray(data)).toBe(true);
-    if (data.length > 0) {
-      expect(data[0].id).toBe(testDataId);
-      expect(data[0].client).toBeDefined();
-      expect(data[0].client.username).toBe('alice');
+      const result = await pool.query(query.sql, query.params);
+      expect(result.rows).toHaveLength(1);
+      const data = result.rows[0].data;
+      expect(Array.isArray(data)).toBe(true);
+      if (data.length > 0) {
+        expect(data[0].id).toBe(testDataId);
+        expect(data[0].client).toBeDefined();
+        expect(data[0].client.username).toBe('alice');
+      }
+    } finally {
+      // Cleanup in case the delete query didn't execute
+      await pool.query('DELETE FROM client_data WHERE id = $1', [testDataId]).catch(() => {});
     }
   });
 });
@@ -406,17 +426,19 @@ describe('INSERT with nested relationships in RETURNING (SQL)', () => {
       session: adminSession,
     });
 
-    const result = await pool.query(query.sql, query.params);
-    const data = result.rows[0].data;
-    expect(data.branch).toBeDefined();
-    expect(data.branch.name).toBe('TestBranch');
-    expect(data.accounts).toBeDefined();
-    expect(Array.isArray(data.accounts)).toBe(true);
-    // New user has no accounts, so empty array
-    expect(data.accounts).toHaveLength(0);
-
-    // Cleanup
-    await pool.query('DELETE FROM client WHERE id = $1', [newId]);
+    try {
+      const result = await pool.query(query.sql, query.params);
+      const data = result.rows[0].data;
+      expect(data.branch).toBeDefined();
+      expect(data.branch.name).toBe('TestBranch');
+      expect(data.accounts).toBeDefined();
+      expect(Array.isArray(data.accounts)).toBe(true);
+      // New user has no accounts, so empty array
+      expect(data.accounts).toHaveLength(0);
+    } finally {
+      // Cleanup
+      await pool.query('DELETE FROM client WHERE id = $1', [newId]).catch(() => {});
+    }
   });
 });
 
@@ -451,16 +473,18 @@ describe('Permission filtering on returning relationships (SQL)', () => {
       session: clientSession,
     });
 
-    const result = await pool.query(query.sql, query.params);
-    const data = result.rows[0].data;
-    expect(data.accounts).toBeDefined();
-    // All returned accounts should be active (due to permission filter)
-    for (const account of data.accounts) {
-      expect(account.active).toBe(true);
+    try {
+      const result = await pool.query(query.sql, query.params);
+      const data = result.rows[0].data;
+      expect(data.accounts).toBeDefined();
+      // All returned accounts should be active (due to permission filter)
+      for (const account of data.accounts) {
+        expect(account.active).toBe(true);
+      }
+    } finally {
+      // Reset
+      await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
     }
-
-    // Reset
-    await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
   });
 });
 
@@ -477,71 +501,75 @@ describe('E2E: Returning relationships via GraphQL', () => {
 
   it('insertOne: should return object relationships in the response', async () => {
     const newId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee40';
-    const { body } = await graphqlRequest(
-      `mutation {
-        insertClient(object: {
-          id: "${newId}"
-          username: "e2e_insert_rel"
-          email: "e2einsertrel@test.com"
-          branchId: "${BRANCH_TEST_ID}"
-          currencyId: "EUR"
-          status: ACTIVE
-        }) {
-          id
-          username
-          branch {
-            id
-            name
-          }
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
-
-    expect(body.errors).toBeUndefined();
-    const data = (body.data as Record<string, unknown>).insertClient as Record<string, unknown>;
-    expect(data.id).toBe(newId);
-    expect(data.branch).toBeDefined();
-    expect((data.branch as Record<string, unknown>).name).toBe('TestBranch');
-
-    // Cleanup
     const pool = getPool();
-    await pool.query('DELETE FROM client WHERE id = $1', [newId]);
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          insertClient(object: {
+            id: "${newId}"
+            username: "e2e_insert_rel"
+            email: "e2einsertrel@test.com"
+            branchId: "${BRANCH_TEST_ID}"
+            currencyId: "EUR"
+            status: ACTIVE
+          }) {
+            id
+            username
+            branch {
+              id
+              name
+            }
+          }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as Record<string, unknown>).insertClient as Record<string, unknown>;
+      expect(data.id).toBe(newId);
+      expect(data.branch).toBeDefined();
+      expect((data.branch as Record<string, unknown>).name).toBe('TestBranch');
+    } finally {
+      // Cleanup
+      await pool.query('DELETE FROM client WHERE id = $1', [newId]).catch(() => {});
+    }
   });
 
   it('insertOne: should return array relationships (empty for new row)', async () => {
     const newId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee41';
-    const { body } = await graphqlRequest(
-      `mutation {
-        insertClient(object: {
-          id: "${newId}"
-          username: "e2e_insert_arr"
-          email: "e2einsertarr@test.com"
-          branchId: "${BRANCH_TEST_ID}"
-          currencyId: "EUR"
-          status: ACTIVE
-        }) {
-          id
-          accounts {
-            id
-            balance
-          }
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
-
-    expect(body.errors).toBeUndefined();
-    const data = (body.data as Record<string, unknown>).insertClient as Record<string, unknown>;
-    expect(data.accounts).toBeDefined();
-    expect(Array.isArray(data.accounts)).toBe(true);
-    expect((data.accounts as unknown[]).length).toBe(0);
-
-    // Cleanup
     const pool = getPool();
-    await pool.query('DELETE FROM client WHERE id = $1', [newId]);
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          insertClient(object: {
+            id: "${newId}"
+            username: "e2e_insert_arr"
+            email: "e2einsertarr@test.com"
+            branchId: "${BRANCH_TEST_ID}"
+            currencyId: "EUR"
+            status: ACTIVE
+          }) {
+            id
+            accounts {
+              id
+              balance
+            }
+          }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as Record<string, unknown>).insertClient as Record<string, unknown>;
+      expect(data.accounts).toBeDefined();
+      expect(Array.isArray(data.accounts)).toBe(true);
+      expect((data.accounts as unknown[]).length).toBe(0);
+    } finally {
+      // Cleanup
+      await pool.query('DELETE FROM client WHERE id = $1', [newId]).catch(() => {});
+    }
   });
 
   it('insert (bulk): should return relationships in returning clause', async () => {
@@ -549,113 +577,119 @@ describe('E2E: Returning relationships via GraphQL', () => {
       'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee42',
       'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee43',
     ];
+    const pool = getPool();
 
-    const { body } = await graphqlRequest(
-      `mutation {
-        insertClients(objects: [
-          { id: "${ids[0]}", username: "e2e_bulk_1", email: "bulk1@e2e.com", branchId: "${BRANCH_TEST_ID}", currencyId: "EUR", status: ACTIVE }
-          { id: "${ids[1]}", username: "e2e_bulk_2", email: "bulk2@e2e.com", branchId: "${BRANCH_TEST_ID}", currencyId: "USD", status: ACTIVE }
-        ]) {
-          affectedRows
-          returning {
-            id
-            username
-            branch {
-              name
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          insertClients(objects: [
+            { id: "${ids[0]}", username: "e2e_bulk_1", email: "bulk1@e2e.com", branchId: "${BRANCH_TEST_ID}", currencyId: "EUR", status: ACTIVE }
+            { id: "${ids[1]}", username: "e2e_bulk_2", email: "bulk2@e2e.com", branchId: "${BRANCH_TEST_ID}", currencyId: "USD", status: ACTIVE }
+          ]) {
+            affectedRows
+            returning {
+              id
+              username
+              branch {
+                name
+              }
             }
           }
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
 
-    expect(body.errors).toBeUndefined();
-    const result = (body.data as Record<string, unknown>).insertClients as Record<string, unknown>;
-    expect(result.affectedRows).toBe(2);
-    const returning = result.returning as Array<Record<string, unknown>>;
-    expect(returning).toHaveLength(2);
-    for (const row of returning) {
-      expect(row.branch).toBeDefined();
-      expect((row.branch as Record<string, unknown>).name).toBe('TestBranch');
+      expect(body.errors).toBeUndefined();
+      const result = (body.data as Record<string, unknown>).insertClients as Record<string, unknown>;
+      expect(result.affectedRows).toBe(2);
+      const returning = result.returning as Array<Record<string, unknown>>;
+      expect(returning).toHaveLength(2);
+      for (const row of returning) {
+        expect(row.branch).toBeDefined();
+        expect((row.branch as Record<string, unknown>).name).toBe('TestBranch');
+      }
+    } finally {
+      // Cleanup
+      await pool.query('DELETE FROM client WHERE id = ANY($1)', [ids]).catch(() => {});
     }
-
-    // Cleanup
-    const pool = getPool();
-    await pool.query('DELETE FROM client WHERE id = ANY($1)', [ids]);
   });
 
   it('updateByPk: should return relationships with updated data', async () => {
-    const { body } = await graphqlRequest(
-      `mutation {
-        updateClientByPk(
-          pkColumns: { id: "${ALICE_ID}" }
-          _set: { trustLevel: 88 }
-        ) {
-          id
-          username
-          trustLevel
-          branch {
-            id
-            name
-          }
-          accounts {
-            id
-            balance
-          }
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
-
-    expect(body.errors).toBeUndefined();
-    const data = (body.data as Record<string, unknown>).updateClientByPk as Record<string, unknown>;
-    expect(data.trustLevel).toBe(88);
-    expect(data.branch).toBeDefined();
-    expect((data.branch as Record<string, unknown>).name).toBe('TestBranch');
-    expect(data.accounts).toBeDefined();
-    expect(Array.isArray(data.accounts)).toBe(true);
-    expect((data.accounts as unknown[]).length).toBeGreaterThan(0);
-
-    // Reset
     const pool = getPool();
-    await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          updateClientByPk(
+            pkColumns: { id: "${ALICE_ID}" }
+            _set: { trustLevel: 88 }
+          ) {
+            id
+            username
+            trustLevel
+            branch {
+              id
+              name
+            }
+            accounts {
+              id
+              balance
+            }
+          }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as Record<string, unknown>).updateClientByPk as Record<string, unknown>;
+      expect(data.trustLevel).toBe(88);
+      expect(data.branch).toBeDefined();
+      expect((data.branch as Record<string, unknown>).name).toBe('TestBranch');
+      expect(data.accounts).toBeDefined();
+      expect(Array.isArray(data.accounts)).toBe(true);
+      expect((data.accounts as unknown[]).length).toBeGreaterThan(0);
+    } finally {
+      // Reset
+      await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+    }
   });
 
   it('update (bulk): should return relationships in returning clause', async () => {
-    const { body } = await graphqlRequest(
-      `mutation {
-        updateClients(
-          where: { id: { _eq: "${ALICE_ID}" } }
-          _set: { trustLevel: 77 }
-        ) {
-          affectedRows
-          returning {
-            id
-            trustLevel
-            branch {
-              name
+    const pool = getPool();
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          updateClients(
+            where: { id: { _eq: "${ALICE_ID}" } }
+            _set: { trustLevel: 77 }
+          ) {
+            affectedRows
+            returning {
+              id
+              trustLevel
+              branch {
+                name
+              }
             }
           }
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
 
-    expect(body.errors).toBeUndefined();
-    const result = (body.data as Record<string, unknown>).updateClients as Record<string, unknown>;
-    expect(result.affectedRows).toBe(1);
-    const returning = result.returning as Array<Record<string, unknown>>;
-    expect(returning).toHaveLength(1);
-    expect(returning[0].trustLevel).toBe(77);
-    expect(returning[0].branch).toBeDefined();
-    expect((returning[0].branch as Record<string, unknown>).name).toBe('TestBranch');
-
-    // Reset
-    const pool = getPool();
-    await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+      expect(body.errors).toBeUndefined();
+      const result = (body.data as Record<string, unknown>).updateClients as Record<string, unknown>;
+      expect(result.affectedRows).toBe(1);
+      const returning = result.returning as Array<Record<string, unknown>>;
+      expect(returning).toHaveLength(1);
+      expect(returning[0].trustLevel).toBe(77);
+      expect(returning[0].branch).toBeDefined();
+      expect((returning[0].branch as Record<string, unknown>).name).toBe('TestBranch');
+    } finally {
+      // Reset
+      await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+    }
   });
 
   it('deleteByPk: should return relationships for deleted row', async () => {
@@ -666,25 +700,30 @@ describe('E2E: Returning relationships via GraphQL', () => {
       [newId, BRANCH_TEST_ID],
     );
 
-    const { body } = await graphqlRequest(
-      `mutation {
-        deleteClientByPk(id: "${newId}") {
-          id
-          username
-          branch {
-            name
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          deleteClientByPk(id: "${newId}") {
+            id
+            username
+            branch {
+              name
+            }
           }
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
 
-    expect(body.errors).toBeUndefined();
-    const data = (body.data as Record<string, unknown>).deleteClientByPk as Record<string, unknown>;
-    expect(data.id).toBe(newId);
-    expect(data.branch).toBeDefined();
-    expect((data.branch as Record<string, unknown>).name).toBe('TestBranch');
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as Record<string, unknown>).deleteClientByPk as Record<string, unknown>;
+      expect(data.id).toBe(newId);
+      expect(data.branch).toBeDefined();
+      expect((data.branch as Record<string, unknown>).name).toBe('TestBranch');
+    } finally {
+      // Cleanup in case the delete mutation didn't execute
+      await pool.query('DELETE FROM client WHERE id = $1', [newId]).catch(() => {});
+    }
   });
 
   it('delete (bulk): should return relationships in returning clause', async () => {
@@ -695,28 +734,33 @@ describe('E2E: Returning relationships via GraphQL', () => {
       [newId, BRANCH_TEST_ID],
     );
 
-    const { body } = await graphqlRequest(
-      `mutation {
-        deleteClients(where: { id: { _eq: "${newId}" } }) {
-          affectedRows
-          returning {
-            id
-            branch {
-              name
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          deleteClients(where: { id: { _eq: "${newId}" } }) {
+            affectedRows
+            returning {
+              id
+              branch {
+                name
+              }
             }
           }
-        }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
 
-    expect(body.errors).toBeUndefined();
-    const result = (body.data as Record<string, unknown>).deleteClients as Record<string, unknown>;
-    expect(result.affectedRows).toBe(1);
-    const returning = result.returning as Array<Record<string, unknown>>;
-    expect(returning).toHaveLength(1);
-    expect(returning[0].branch).toBeDefined();
-    expect((returning[0].branch as Record<string, unknown>).name).toBe('TestBranch');
+      expect(body.errors).toBeUndefined();
+      const result = (body.data as Record<string, unknown>).deleteClients as Record<string, unknown>;
+      expect(result.affectedRows).toBe(1);
+      const returning = result.returning as Array<Record<string, unknown>>;
+      expect(returning).toHaveLength(1);
+      expect(returning[0].branch).toBeDefined();
+      expect((returning[0].branch as Record<string, unknown>).name).toBe('TestBranch');
+    } finally {
+      // Cleanup in case the delete mutation didn't execute
+      await pool.query('DELETE FROM client WHERE id = $1', [newId]).catch(() => {});
+    }
   });
 });
