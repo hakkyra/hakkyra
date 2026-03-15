@@ -10,6 +10,7 @@
  */
 
 import type { TableInfo, ColumnInfo, RESTConfig } from '../types.js';
+import type { CrudOperation } from './role-filter.js';
 
 // ─── OpenAPI types (subset of OpenAPI 3.1) ───────────────────────────────────
 
@@ -318,6 +319,7 @@ function buildTablePaths(
   table: TableInfo,
   basePath: string,
   config: RESTConfig,
+  allowedOps?: Set<CrudOperation>,
 ): Record<string, PathItem> {
   const urlName = getURLName(table);
   const schemaName = getSchemaName(table);
@@ -355,162 +357,127 @@ function buildTablePaths(
     'x-llm-usage': `Fetch ${urlName} rows. Filter with query params like ?column=op.value`,
   };
 
-  paths[listPath] = { get: listOperation };
+  const hasSelect = !allowedOps || allowedOps.has('select');
+  const hasInsert = !allowedOps || allowedOps.has('insert');
+  const hasUpdate = !allowedOps || allowedOps.has('update');
+  const hasDelete = !allowedOps || allowedOps.has('delete');
+
+  if (hasSelect) {
+    paths[listPath] = { get: listOperation };
+  }
 
   if (table.primaryKey.length === 0) {
     return paths;
   }
 
-  // Get by PK
-  const getOperation: OperationObject = {
-    summary: `Get ${urlName} by ID`,
-    description: `Retrieve a single ${urlName} record by its primary key.${table.primaryKey.length > 1 ? ' For composite keys, separate values with commas.' : ''}`,
-    operationId: `get${schemaName}`,
-    tags: [urlName],
-    parameters: [
-      {
-        name: 'id',
-        in: 'path',
-        required: true,
-        schema: { type: 'string' },
-        description: table.primaryKey.length > 1
-          ? `Composite primary key: ${table.primaryKey.join(',')}`
-          : `Primary key (${table.primaryKey[0]})`,
-      },
-    ],
-    responses: {
-      '200': {
-        description: `A single ${urlName} record`,
-        content: {
-          'application/json': {
-            schema: { $ref: `#/components/schemas/${schemaName}` },
-          },
-        },
-      },
-      '404': { description: 'Not found' },
-      '401': { description: 'Unauthorized' },
-      '403': { description: 'Forbidden' },
-    },
-    'x-llm-usage': `Fetch a single ${urlName} by primary key`,
+  const pkParam: ParameterObject = {
+    name: 'id',
+    in: 'path',
+    required: true,
+    schema: { type: 'string' },
+    description: table.primaryKey.length > 1
+      ? `Composite primary key: ${table.primaryKey.join(',')}`
+      : `Primary key (${table.primaryKey[0]})`,
   };
 
-  // Insert
-  const insertOperation: OperationObject = {
-    summary: `Create ${urlName}`,
-    description: `Insert a new ${urlName} record.`,
-    operationId: `create${schemaName}`,
-    tags: [urlName],
-    requestBody: {
-      required: true,
-      content: {
-        'application/json': {
-          schema: { $ref: `#/components/schemas/${schemaName}Insert` },
-        },
-      },
-    },
-    responses: {
-      '201': {
-        description: `Created ${urlName} record`,
-        content: {
-          'application/json': {
-            schema: { $ref: `#/components/schemas/${schemaName}` },
-          },
-        },
-      },
-      '400': { description: 'Bad request — invalid body or constraint violation' },
-      '401': { description: 'Unauthorized' },
-      '403': { description: 'Forbidden' },
-    },
-    'x-llm-usage': `Create a new ${urlName}. Send JSON body with fields.`,
-  };
+  const itemPathItem: PathItem = {};
 
-  // Update
-  const updateOperation: OperationObject = {
-    summary: `Update ${urlName}`,
-    description: `Partially update a ${urlName} record by primary key.`,
-    operationId: `update${schemaName}`,
-    tags: [urlName],
-    parameters: [
-      {
-        name: 'id',
-        in: 'path',
-        required: true,
-        schema: { type: 'string' },
-        description: `Primary key${table.primaryKey.length > 1 ? ` (composite: ${table.primaryKey.join(',')})` : ''}`,
-      },
-    ],
-    requestBody: {
-      required: true,
-      content: {
-        'application/json': {
-          schema: { $ref: `#/components/schemas/${schemaName}Update` },
+  if (hasSelect) {
+    itemPathItem.get = {
+      summary: `Get ${urlName} by ID`,
+      description: `Retrieve a single ${urlName} record by its primary key.${table.primaryKey.length > 1 ? ' For composite keys, separate values with commas.' : ''}`,
+      operationId: `get${schemaName}`,
+      tags: [urlName],
+      parameters: [pkParam],
+      responses: {
+        '200': {
+          description: `A single ${urlName} record`,
+          content: { 'application/json': { schema: { $ref: `#/components/schemas/${schemaName}` } } },
         },
+        '404': { description: 'Not found' },
+        '401': { description: 'Unauthorized' },
+        '403': { description: 'Forbidden' },
       },
-    },
-    responses: {
-      '200': {
-        description: `Updated ${urlName} record`,
-        content: {
-          'application/json': {
-            schema: { $ref: `#/components/schemas/${schemaName}` },
-          },
-        },
-      },
-      '400': { description: 'Bad request' },
-      '404': { description: 'Not found' },
-      '401': { description: 'Unauthorized' },
-      '403': { description: 'Forbidden' },
-    },
-    'x-llm-usage': `Update ${urlName} fields. Only send fields to change.`,
-  };
+      'x-llm-usage': `Fetch a single ${urlName} by primary key`,
+    };
+  }
 
-  // Delete
-  const deleteOperation: OperationObject = {
-    summary: `Delete ${urlName}`,
-    description: `Delete a ${urlName} record by primary key.`,
-    operationId: `delete${schemaName}`,
-    tags: [urlName],
-    parameters: [
-      {
-        name: 'id',
-        in: 'path',
+  if (hasInsert) {
+    if (!paths[listPath]) paths[listPath] = {};
+    paths[listPath].post = {
+      summary: `Create ${urlName}`,
+      description: `Insert a new ${urlName} record.`,
+      operationId: `create${schemaName}`,
+      tags: [urlName],
+      requestBody: {
         required: true,
-        schema: { type: 'string' },
-        description: `Primary key`,
+        content: { 'application/json': { schema: { $ref: `#/components/schemas/${schemaName}Insert` } } },
       },
-    ],
-    responses: {
-      '200': {
-        description: 'Deletion result with affected row count',
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              properties: {
-                affected_rows: { type: 'integer' },
-              },
+      responses: {
+        '201': {
+          description: `Created ${urlName} record`,
+          content: { 'application/json': { schema: { $ref: `#/components/schemas/${schemaName}` } } },
+        },
+        '400': { description: 'Bad request — invalid body or constraint violation' },
+        '401': { description: 'Unauthorized' },
+        '403': { description: 'Forbidden' },
+      },
+      'x-llm-usage': `Create a new ${urlName}. Send JSON body with fields.`,
+    };
+  }
+
+  if (hasUpdate) {
+    itemPathItem.patch = {
+      summary: `Update ${urlName}`,
+      description: `Partially update a ${urlName} record by primary key.`,
+      operationId: `update${schemaName}`,
+      tags: [urlName],
+      parameters: [{ ...pkParam, description: `Primary key${table.primaryKey.length > 1 ? ` (composite: ${table.primaryKey.join(',')})` : ''}` }],
+      requestBody: {
+        required: true,
+        content: { 'application/json': { schema: { $ref: `#/components/schemas/${schemaName}Update` } } },
+      },
+      responses: {
+        '200': {
+          description: `Updated ${urlName} record`,
+          content: { 'application/json': { schema: { $ref: `#/components/schemas/${schemaName}` } } },
+        },
+        '400': { description: 'Bad request' },
+        '404': { description: 'Not found' },
+        '401': { description: 'Unauthorized' },
+        '403': { description: 'Forbidden' },
+      },
+      'x-llm-usage': `Update ${urlName} fields. Only send fields to change.`,
+    };
+  }
+
+  if (hasDelete) {
+    itemPathItem.delete = {
+      summary: `Delete ${urlName}`,
+      description: `Delete a ${urlName} record by primary key.`,
+      operationId: `delete${schemaName}`,
+      tags: [urlName],
+      parameters: [pkParam],
+      responses: {
+        '200': {
+          description: 'Deletion result with affected row count',
+          content: {
+            'application/json': {
+              schema: { type: 'object', properties: { affected_rows: { type: 'integer' } } },
             },
           },
         },
+        '404': { description: 'Not found' },
+        '401': { description: 'Unauthorized' },
+        '403': { description: 'Forbidden' },
       },
-      '404': { description: 'Not found' },
-      '401': { description: 'Unauthorized' },
-      '403': { description: 'Forbidden' },
-    },
-    'x-llm-usage': `Delete a ${urlName} by primary key`,
-  };
-
-  paths[itemPath] = {
-    get: getOperation,
-    patch: updateOperation,
-    delete: deleteOperation,
-  };
-
-  // Add POST at the list path
-  if (!paths[listPath]) {
-    paths[listPath] = {};
+      'x-llm-usage': `Delete a ${urlName} by primary key`,
+    };
   }
-  paths[listPath].post = insertOperation;
+
+  if (Object.keys(itemPathItem).length > 0) {
+    paths[itemPath] = itemPathItem;
+  }
 
   return paths;
 }
@@ -527,7 +494,11 @@ function buildTablePaths(
  * - PostgREST-style filter parameter documentation
  * - `x-llm-description` and `x-llm-usage` extensions for LLM consumption
  */
-export function generateOpenAPISpec(tables: TableInfo[], config: RESTConfig): OpenAPISpec {
+export function generateOpenAPISpec(
+  tables: TableInfo[],
+  config: RESTConfig,
+  operationMap?: Map<string, Set<CrudOperation>>,
+): OpenAPISpec {
   const schemas: Record<string, SchemaObject> = {};
   const paths: Record<string, PathItem> = {};
 
@@ -539,8 +510,9 @@ export function generateOpenAPISpec(tables: TableInfo[], config: RESTConfig): Op
     schemas[`${schemaName}Insert`] = buildInsertSchema(table);
     schemas[`${schemaName}Update`] = buildUpdateSchema(table);
 
-    // Build paths
-    const tablePaths = buildTablePaths(table, config.basePath.replace(/\/$/, ''), config);
+    // Build paths (with operation filtering if provided)
+    const tableOps = operationMap?.get(table.name);
+    const tablePaths = buildTablePaths(table, config.basePath.replace(/\/$/, ''), config, tableOps);
     Object.assign(paths, tablePaths);
   }
 

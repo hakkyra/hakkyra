@@ -8,6 +8,7 @@
  */
 
 import type { TableInfo, RESTConfig, RelationshipConfig } from '../types.js';
+import type { CrudOperation } from './role-filter.js';
 
 // ─── Output types ────────────────────────────────────────────────────────────
 
@@ -122,11 +123,16 @@ function relationLabel(rel: RelationshipConfig): string {
  * Designed for maximum information density with minimum token usage
  * when injected into an LLM context window.
  */
-export function generateLLMDoc(tables: TableInfo[], config: RESTConfig): LLMDoc {
+export function generateLLMDoc(
+  tables: TableInfo[],
+  config: RESTConfig,
+  operationMap?: Map<string, Set<CrudOperation>>,
+): LLMDoc {
   const basePath = config.basePath.replace(/\/$/, '');
 
   const entities: LLMEntity[] = tables.map((table) => {
     const urlName = table.alias ?? table.name;
+    const ops = operationMap?.get(table.name);
 
     // Compact field descriptors: "column_name:type"
     const fields = table.columns.map((col) => {
@@ -135,16 +141,18 @@ export function generateLLMDoc(tables: TableInfo[], config: RESTConfig): LLMDoc 
       return `${col.name}:${type}${suffix}`;
     });
 
-    // Endpoints
-    const endpoints: Record<string, string> = {
-      list: `GET ${basePath}/${urlName}`,
-    };
+    // Endpoints (filtered by allowed operations)
+    const endpoints: Record<string, string> = {};
+
+    if (!ops || ops.has('select')) {
+      endpoints.list = `GET ${basePath}/${urlName}`;
+    }
 
     if (table.primaryKey.length > 0) {
-      endpoints.get = `GET ${basePath}/${urlName}/:id`;
-      endpoints.create = `POST ${basePath}/${urlName}`;
-      endpoints.update = `PATCH ${basePath}/${urlName}/:id`;
-      endpoints.delete = `DELETE ${basePath}/${urlName}/:id`;
+      if (!ops || ops.has('select')) endpoints.get = `GET ${basePath}/${urlName}/:id`;
+      if (!ops || ops.has('insert')) endpoints.create = `POST ${basePath}/${urlName}`;
+      if (!ops || ops.has('update')) endpoints.update = `PATCH ${basePath}/${urlName}/:id`;
+      if (!ops || ops.has('delete')) endpoints.delete = `DELETE ${basePath}/${urlName}/:id`;
     }
 
     // Relationships

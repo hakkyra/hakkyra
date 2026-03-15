@@ -560,6 +560,7 @@ export const RawServerConfigSchema = z
         slow_query_threshold_ms: z.number().optional(),
         log_level: z.string().optional(),
         stringify_numeric_types: z.boolean().optional(),
+        body_limit: z.number().optional(),
       })
       .passthrough()
       .optional(),
@@ -607,6 +608,7 @@ export const RawServerConfigSchema = z
               .optional(),
             audience: z.string().optional(),
             issuer: z.string().optional(),
+            require_exp: z.boolean().optional(),
           })
           .passthrough()
           .optional(),
@@ -690,6 +692,8 @@ export const RawServerConfigSchema = z
       .object({
         timeout_ms: z.number().optional(),
         backoff_cap_seconds: z.number().optional(),
+        allow_private_urls: z.boolean().optional(),
+        max_response_bytes: z.number().optional(),
       })
       .passthrough()
       .optional(),
@@ -699,6 +703,13 @@ export const RawServerConfigSchema = z
         async_retry_limit: z.number().optional(),
         async_retry_delay_seconds: z.number().optional(),
         async_timeout_seconds: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+    graphql: z
+      .object({
+        query_depth: z.number().optional(),
+        max_limit: z.number().optional(),
       })
       .passthrough()
       .optional(),

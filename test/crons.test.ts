@@ -16,6 +16,7 @@ import {
   deliverWebhook,
   resolveWebhookUrl,
   resolveWebhookHeaders,
+  configureWebhookDefaults,
 } from '../src/shared/webhook.js';
 import type { CronTriggerConfig } from '../src/types.js';
 import pino from 'pino';
@@ -231,6 +232,7 @@ describe('Cron Triggers', () => {
 
   beforeAll(async () => {
     process.env['DATABASE_URL'] = TEST_DB_URL;
+    configureWebhookDefaults({ allowPrivateUrls: true });
     await waitForDb();
     await cleanBossSchema();
     webhook = await createMockWebhookServer();

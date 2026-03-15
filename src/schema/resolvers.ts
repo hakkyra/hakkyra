@@ -75,6 +75,9 @@ export interface ResolverContext {
 
   /** Original client HTTP headers (for forwarding to action handlers). */
   clientHeaders?: Record<string, string>;
+
+  /** Maximum allowed limit for GraphQL select queries. */
+  graphqlMaxLimit?: number;
 }
 
 /**
@@ -456,13 +459,23 @@ function getReturningColumns(table: TableInfo): string[] {
 }
 
 /**
- * Resolve the more restrictive limit between user-provided and permission-defined.
+ * Resolve the most restrictive limit among user-provided, permission-defined, and global max.
  */
-function resolveLimit(userLimit?: number, permLimit?: number): number | undefined {
+function resolveLimit(userLimit?: number, permLimit?: number, globalMaxLimit?: number): number | undefined {
+  let limit: number | undefined;
   if (userLimit !== undefined && permLimit !== undefined) {
-    return Math.min(userLimit, permLimit);
+    limit = Math.min(userLimit, permLimit);
+  } else {
+    limit = userLimit ?? permLimit;
   }
-  return userLimit ?? permLimit;
+  if (globalMaxLimit !== undefined && globalMaxLimit > 0) {
+    if (limit !== undefined) {
+      limit = Math.min(limit, globalMaxLimit);
+    } else {
+      limit = globalMaxLimit;
+    }
+  }
+  return limit;
 }
 
 /**
@@ -671,7 +684,7 @@ export function makeSelectResolver(
       args.orderBy as Array<Record<string, unknown>> | undefined,
       columnMap, table, context.tables,
     );
-    const limit = resolveLimit(args.limit as number | undefined, perm?.limit);
+    const limit = resolveLimit(args.limit as number | undefined, perm?.limit, context.graphqlMaxLimit);
 
     // Extract distinctOn — enum values resolve to PG column names directly
     const rawDistinctOn = args.distinctOn as string[] | undefined;
@@ -837,7 +850,7 @@ export function makeSelectAggregateResolver(
       args.orderBy as Array<Record<string, unknown>> | undefined,
       columnMap, table, context.tables,
     );
-    const limit = resolveLimit(args.limit as number | undefined, perm?.limit);
+    const limit = resolveLimit(args.limit as number | undefined, perm?.limit, context.graphqlMaxLimit);
 
     // Extract groupBy — enum values resolve to PG column names directly
     const rawGroupBy = args.groupBy as string[] | undefined;

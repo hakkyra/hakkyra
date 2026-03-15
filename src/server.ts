@@ -22,6 +22,7 @@ import { mergeSchemaModel, resolveTableEnums } from './introspection/merger.js';
 import { buildPermissionLookup } from './permissions/lookup.js';
 import type { PermissionLookup } from './permissions/lookup.js';
 import { generateSchema } from './schema/generator.js';
+import { resetComparisonTypeCache } from './schema/filters.js';
 import { createAuthHook } from './auth/middleware.js';
 import { registerRESTRoutes } from './rest/router.js';
 import type { RESTRouterDeps } from './rest/router.js';
@@ -30,6 +31,7 @@ import type { HasuraRestDeps } from './rest/hasura-endpoints.js';
 import { generateOpenAPISpec } from './docs/openapi.js';
 import { generateLLMDoc } from './docs/llm-format.js';
 import { generateGraphQLSDL } from './docs/graphql-sdl.js';
+import { filterTablesForRole } from './docs/role-filter.js';
 import { createQueryCache } from './sql/cache.js';
 import type { QueryCache } from './sql/cache.js';
 import { createConfigWatcher } from './config/watcher.js';
@@ -55,6 +57,7 @@ import { ensureAsyncActionSchema, registerAsyncActionWorkers } from './actions/i
 import { registerAsyncActionStatusRoute } from './actions/rest.js';
 import { CONFIG_DEFAULTS } from './config/schemas-internal.js';
 import { configureStringifyNumericTypes } from './introspection/type-map.js';
+import { configureWebhookDefaults } from './shared/webhook.js';
 
 // ─── Permission adapters ─────────────────────────────────────────────────────
 
@@ -155,6 +158,12 @@ export async function createServer(
   // 4b. Configure numeric type stringification before schema generation
   configureStringifyNumericTypes(config.server.stringifyNumericTypes);
 
+  // 4c. Configure webhook security defaults
+  configureWebhookDefaults({
+    allowPrivateUrls: config.webhook.allowPrivateUrls,
+    maxResponseBytes: config.webhook.maxResponseBytes,
+  });
+
   // 5. Generate GraphQL schema (with action fields and tracked functions if configured)
   const graphqlSchema = generateSchema(schemaModel, {
     actions: config.actions,
@@ -174,6 +183,7 @@ export async function createServer(
   }
 
   const server = Fastify({
+    bodyLimit: config.server.bodyLimit,
     logger: {
       level: process.env['LOG_LEVEL'] ?? config.server.logLevel,
       transport,
@@ -300,6 +310,7 @@ export async function createServer(
     schema: cjsSchema,
     graphiql: process.env['NODE_ENV'] !== 'production',
     path: '/graphql',
+    queryDepth: config.graphql.queryDepth,
     context: (request) => {
       // Build the ResolverContext from the authenticated request.
       // The auth preHandler hook has already run by the time the context
@@ -338,6 +349,7 @@ export async function createServer(
         jobQueue: asyncActionRef.jobQueue,
         pool: asyncActionRef.pool,
         clientHeaders: request.headers as Record<string, string>,
+        graphqlMaxLimit: config.graphql.maxLimit,
       };
     },
     subscription: {
@@ -393,6 +405,7 @@ export async function createServer(
           subscriptionManager: subscriptionRef.manager,
           jobQueue: asyncActionRef.jobQueue,
           pool: asyncActionRef.pool,
+          graphqlMaxLimit: config.graphql.maxLimit,
         };
       },
     },
@@ -473,6 +486,7 @@ export async function createServer(
           jobQueue: asyncActionRef.jobQueue,
           pool: asyncActionRef.pool,
           clientHeaders: request.headers as Record<string, string>,
+          graphqlMaxLimit: config.graphql.maxLimit,
         };
       },
     };
@@ -495,28 +509,93 @@ export async function createServer(
     }
   });
 
-  // ── API documentation endpoints ────────────────────────────────────────
+  // Cache for role-filtered SDL (cleared on hot-reload)
+  const sdlCache = new Map<string, string>();
+
+  // ── API documentation endpoints (role-filtered) ──────────────────────
   if (config.apiDocs.generate) {
-    const tables = schemaModel.tables;
+    const allTables = schemaModel.tables;
+    const fullSdl = generateGraphQLSDL(graphqlSchema);
+
+    const getDocFilterContext = (request: import('fastify').FastifyRequest) => {
+      const session = request.session;
+      const role = session?.role ?? config.auth.unauthorizedRole ?? 'anonymous';
+      const isAdmin = session?.isAdmin ?? false;
+      return { role, isAdmin };
+    };
 
     // OpenAPI spec endpoint
-    server.get('/openapi.json', async (_request, reply) => {
-      const spec = generateOpenAPISpec(tables, config.rest);
+    server.get('/openapi.json', async (request, reply) => {
+      const { role, isAdmin } = getDocFilterContext(request);
+      const { tables, operationMap } = filterTablesForRole(allTables, role, permissionLookup, isAdmin);
+      const spec = generateOpenAPISpec(tables, config.rest, operationMap);
       void reply.code(200).header('content-type', 'application/json').send(spec);
     });
 
     // LLM-friendly doc endpoint
     if (config.apiDocs.llmFormat) {
-      server.get('/llm-api.json', async (_request, reply) => {
-        const doc = generateLLMDoc(tables, config.rest);
+      server.get('/llm-api.json', async (request, reply) => {
+        const { role, isAdmin } = getDocFilterContext(request);
+        const { tables, operationMap } = filterTablesForRole(allTables, role, permissionLookup, isAdmin);
+        const doc = generateLLMDoc(tables, config.rest, operationMap);
         void reply.code(200).header('content-type', 'application/json').send(doc);
       });
     }
 
-    // GraphQL SDL endpoint
-    const graphqlSdl = generateGraphQLSDL(graphqlSchema);
-    server.get('/sdl', async (_request, reply) => {
-      void reply.code(200).header('content-type', 'text/plain; charset=utf-8').send(graphqlSdl);
+    // GraphQL SDL endpoint (role-filtered with caching)
+    server.get('/sdl', async (request, reply) => {
+      const { role, isAdmin } = getDocFilterContext(request);
+      if (isAdmin) {
+        void reply.code(200).header('content-type', 'text/plain; charset=utf-8').send(fullSdl);
+        return;
+      }
+
+      let cachedSdl = sdlCache.get(role);
+      if (!cachedSdl) {
+        const { tables } = filterTablesForRole(allTables, role, permissionLookup, isAdmin);
+        if (tables.length === 0) {
+          cachedSdl = '# No accessible types for this role\n';
+        } else {
+          // Include all tables referenced by relationships (transitively) so
+          // the schema generator can resolve relationship type lookups.
+          const includedNames = new Set(tables.map(t => t.name));
+          const expandedTables = [...tables];
+          const queue = [...tables];
+          while (queue.length > 0) {
+            const t = queue.pop()!;
+            for (const rel of t.relationships) {
+              if (!includedNames.has(rel.remoteTable.name)) {
+                const remoteTable = allTables.find(at => at.name === rel.remoteTable.name && at.schema === rel.remoteTable.schema);
+                if (remoteTable) {
+                  expandedTables.push(remoteTable);
+                  includedNames.add(remoteTable.name);
+                  queue.push(remoteTable);
+                }
+              }
+            }
+          }
+          try {
+            const filteredModel: SchemaModel = { ...schemaModel, tables: expandedTables };
+            const rootFieldTables = new Set(tables.map(t => t.name));
+            // Reset module-level type caches to avoid conflicts between
+            // the full schema's enum types and the filtered schema's new instances.
+            resetComparisonTypeCache();
+            const filteredSchema = generateSchema(filteredModel, {
+              actions: config.actions,
+              actionsGraphql: config.actionsGraphql,
+              trackedFunctions: config.trackedFunctions,
+              rootFieldTables,
+            });
+            cachedSdl = generateGraphQLSDL(filteredSchema);
+          } catch (err) {
+            server.log.warn({ err }, 'Failed to generate role-filtered SDL, using full SDL');
+            cachedSdl = fullSdl;
+          }
+        }
+        sdlCache.set(role, cachedSdl);
+      }
+
+      void reply.code(200).header('content-type', 'text/plain; charset=utf-8').send(cachedSdl);
     });
   }
 
@@ -772,8 +851,9 @@ export async function createServer(
         Object.assign(resolverPermissionLookup, newResolverPL);
         inheritedRolesRef.current = newConfig.inheritedRoles;
 
-        // Clear query cache on schema change
+        // Clear caches on schema change
         queryCache.clear();
+        sdlCache.clear();
 
         server.log.info('Schema reloaded successfully');
         server.log.info('Note: REST route changes require a server restart');

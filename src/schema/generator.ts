@@ -141,6 +141,9 @@ export interface GenerateSchemaOptions {
   actions?: ActionConfig[];
   actionsGraphql?: string;
   trackedFunctions?: TrackedFunctionConfig[];
+  /** If provided, only these tables get root query/mutation/subscription fields.
+   *  All tables still get object types (needed for relationship resolution). */
+  rootFieldTables?: Set<string>;
 }
 
 export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptions): GraphQLSchema {
@@ -239,8 +242,10 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
   // ── Step 6: Build Query type ───────────────────────────────────────────
   const queryFields: GraphQLFieldConfigMap<unknown, ResolverContext> = {};
+  const rootFieldTables = options?.rootFieldTables;
 
   for (const table of tables) {
+    if (rootFieldTables && !rootFieldTables.has(table.name)) continue;
     const key = tableKey(table.schema, table.name);
     const objectType = typeRegistry.get(key)!;
     const filterType = filterTypes.get(key);
@@ -351,6 +356,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   const mutationFields: GraphQLFieldConfigMap<unknown, ResolverContext> = {};
 
   for (const table of tables) {
+    if (rootFieldTables && !rootFieldTables.has(table.name)) continue;
     const key = tableKey(table.schema, table.name);
     const objectType = typeRegistry.get(key)!;
     const filterType = filterTypes.get(key);
@@ -495,6 +501,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   const subscriptionFields: GraphQLFieldConfigMap<unknown, ResolverContext> = {};
 
   for (const table of tables) {
+    if (rootFieldTables && !rootFieldTables.has(table.name)) continue;
     const key = tableKey(table.schema, table.name);
     const objectType = typeRegistry.get(key)!;
     const filterType = filterTypes.get(key);
