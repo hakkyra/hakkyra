@@ -189,6 +189,7 @@ function buildReturningFields(
 export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
   const params = new ParamCollector();
   const tableRef = quoteTableRef(opts.table.schema, opts.table.name);
+  const alias = '_t';
 
   // Build SET clause
   const setClause = buildSetClause(
@@ -210,6 +211,7 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
     const permResult = opts.permission.filter.toSQL(
       opts.session,
       params.getOffset(),
+      alias,
     );
     if (permResult.sql) {
       for (const p of permResult.params) {
@@ -253,7 +255,7 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
 
     const sql = [
       `WITH "_updated" AS (`,
-      `  UPDATE ${tableRef}`,
+      `  UPDATE ${tableRef} AS ${quoteIdentifier(alias)}`,
       `  SET ${setClause}`,
       `  ${whereClause.trim()}`,
       `  RETURNING *`,
@@ -278,7 +280,7 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
     : '';
 
   const sql = [
-    `UPDATE ${tableRef}`,
+    `UPDATE ${tableRef} AS ${quoteIdentifier(alias)}`,
     `SET ${setClause}`,
     whereClause ? whereClause.trim() : null,
   ].filter(Boolean).join('\n') + returningClause;

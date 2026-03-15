@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS ${quoteIdent(schemaName)}.event_log (
   new_data JSONB,
   session_vars JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
+  delivered BOOLEAN DEFAULT false,
   delivered_at TIMESTAMPTZ,
   retry_count INTEGER DEFAULT 0,
   next_retry TIMESTAMPTZ DEFAULT now(),

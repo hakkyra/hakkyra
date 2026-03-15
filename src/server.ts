@@ -235,6 +235,18 @@ export async function createServer(
     if (typeof payload === 'string') {
       try { body = JSON.parse(payload); } catch { /* keep as string */ }
     }
+
+    // Log GraphQL errors at error level so they're visible even at warn log level
+    if (body && typeof body === 'object' && 'errors' in body) {
+      const { errors } = body as { errors?: unknown[] };
+      if (Array.isArray(errors) && errors.length > 0) {
+        server.log.error(
+          { method: request.method, url: request.url, errors },
+          'GraphQL request returned errors',
+        );
+      }
+    }
+
     server.log.debug(
       { method: request.method, url: request.url, statusCode: reply.statusCode, body },
       'outgoing response',
@@ -301,6 +313,25 @@ export async function createServer(
         }
       }
     }
+  }
+
+  // Hasura compatibility: coerce numeric literals to String-typed arguments
+  // (Hasura accepts e.g. `playerid: 213` for String args)
+  const cjsStringScalar = cjsTypeMap['String'] as import('graphql').GraphQLScalarType | undefined;
+  if (cjsStringScalar) {
+    const { Kind: CjsKind } = cjsGraphql;
+    cjsStringScalar.parseLiteral = (ast) => {
+      if (ast.kind === CjsKind.STRING) return ast.value;
+      if (ast.kind === CjsKind.INT || ast.kind === CjsKind.FLOAT) return (ast as { value: string }).value;
+      throw new cjsGraphql.GraphQLError(
+        `String cannot represent a non string value: ${(ast as { value?: string }).value ?? ast.kind}`,
+      );
+    };
+    const origParseValue = cjsStringScalar.parseValue.bind(cjsStringScalar);
+    cjsStringScalar.parseValue = (value: unknown) => {
+      if (typeof value === 'number') return String(value);
+      return origParseValue(value);
+    };
   }
 
   // 7b. Build the resolver permission lookup adapter

@@ -110,6 +110,7 @@ function buildReturningFields(
 export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
   const params = new ParamCollector();
   const tableRef = quoteTableRef(opts.table.schema, opts.table.name);
+  const alias = '_t';
 
   // Build WHERE for PK
   const whereParts: string[] = [];
@@ -122,6 +123,7 @@ export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
     const permResult = opts.permission.filter.toSQL(
       opts.session,
       params.getOffset(),
+      alias,
     );
     if (permResult.sql) {
       for (const p of permResult.params) {
@@ -151,7 +153,7 @@ export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
 
     const sql = [
       `WITH "_deleted" AS (`,
-      `  DELETE FROM ${tableRef}`,
+      `  DELETE FROM ${tableRef} AS ${quoteIdentifier(alias)}`,
       whereClause ? `  ${whereClause}` : null,
       `  RETURNING *`,
       `)`,
@@ -175,7 +177,7 @@ export function compileDeleteByPk(opts: DeleteByPkOptions): CompiledQuery {
     : '';
 
   const sql = [
-    `DELETE FROM ${tableRef}`,
+    `DELETE FROM ${tableRef} AS ${quoteIdentifier(alias)}`,
     whereClause ? whereClause : null,
   ].filter(Boolean).join('\n') + returningClause;
 
