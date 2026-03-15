@@ -95,6 +95,7 @@ export interface TableInfo {
   customRootFields?: CustomRootFields;
   computedFields?: ComputedFieldConfig[];
   isEnum?: boolean;
+  isView?: boolean;
 }
 
 // ─── Computed Fields ─────────────────────────────────────────────────────────

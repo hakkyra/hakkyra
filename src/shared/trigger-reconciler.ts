@@ -148,9 +148,9 @@ export async function reconcileTriggers(
         await pool.query(d.createTriggerSQL);
         result.created.push(name);
       } catch (err) {
-        // Materialized views cannot have triggers — skip
-        const msg = err instanceof Error ? err.message : '';
-        if (msg.includes('cannot have triggers')) {
+        // Views and materialized views cannot have row-level triggers — skip
+        const code = (err as { code?: string }).code;
+        if (code === '42809') {
           logger.debug({ trigger: name }, 'Skipping trigger on view/materialized view');
           continue;
         }
@@ -209,6 +209,7 @@ export function buildDesiredSubscriptionTriggers(
   const desired: DesiredTrigger[] = [];
 
   for (const table of tables) {
+    if (table.isView) continue;
     const gen = generateSubscriptionTriggerSQL(table);
 
     desired.push({
@@ -236,6 +237,7 @@ export function buildDesiredEventTriggers(
   const desired: DesiredTrigger[] = [];
 
   for (const table of tables) {
+    if (table.isView) continue;
     if (table.eventTriggers.length === 0) continue;
 
     const gen = generateEventTriggerSQL(table, table.eventTriggers);

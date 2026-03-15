@@ -278,6 +278,7 @@ export function mergeSchemaModel(
       customRootFields: configTable?.customRootFields,
       computedFields: configTable?.computedFields,
       isEnum: configTable?.isEnum,
+      isView: introspected.tableType !== 'BASE TABLE' || undefined,
     };
 
     mergedTables.push(tableInfo);
