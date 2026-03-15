@@ -1,6 +1,10 @@
 function:
   name: search_clients_by_date
   schema: public
+configuration:
+  custom_root_fields:
+    function: clientsByDate
+    function_aggregate: clientsByDateAggregate
 permissions:
   - role: backoffice
   - role: administrator

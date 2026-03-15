@@ -46,6 +46,10 @@ export interface OrderByItem {
 export interface ComputedFieldSelection {
   config: ComputedFieldConfig;
   functionInfo: FunctionInfo;
+  /** When set, the session variables are injected as a JSON parameter to this named argument. */
+  sessionArgument?: string;
+  /** User-provided extra arguments (beyond the table row), keyed by snake_case arg name. */
+  args?: Map<string, unknown>;
 }
 
 export interface SetReturningComputedFieldSelection {
@@ -476,7 +480,19 @@ export function buildJsonFields(
       const fnSchema = cf.config.function.schema ?? 'public';
       const fnName = cf.config.function.name;
       const funcRef = `${quoteIdentifier(fnSchema)}.${quoteIdentifier(fnName)}`;
-      const funcCall = `${funcRef}(${quoteIdentifier(alias)})`;
+      // Build function argument list: table row first, then optional extra args
+      const argParts: string[] = [quoteIdentifier(alias)];
+      // User-provided extra arguments (named notation for DEFAULT support)
+      if (cf.args && cf.args.size > 0) {
+        for (const [argName, argValue] of cf.args) {
+          argParts.push(`${quoteIdentifier(argName)} := ${params.add(argValue)}`);
+        }
+      }
+      // When sessionArgument is set, inject session variables as a JSON parameter
+      if (cf.sessionArgument) {
+        argParts.push(`${quoteIdentifier(cf.sessionArgument)} := ${params.add(JSON.stringify(session.claims))}::json`);
+      }
+      const funcCall = `${funcRef}(${argParts.join(', ')})`;
       const expr = shouldCastToText(cf.functionInfo.returnType)
         ? `(${funcCall})::text`
         : funcCall;

@@ -499,6 +499,7 @@ function buildComputedFieldSelections(
   functions: FunctionInfo[],
   permComputedFields?: string[],
   isAdmin?: boolean,
+  computedFieldArgs?: Map<string, Record<string, unknown>>,
 ): ComputedFieldSelection[] {
   if (!computedFieldNames || computedFieldNames.length === 0 || !table.computedFields) {
     return [];
@@ -524,7 +525,33 @@ function buildComputedFieldSelections(
     // Skip set-returning functions — handled by buildSetReturningComputedFieldSelections
     if (fn.isSetReturning) continue;
 
-    selections.push({ config: cfConfig, functionInfo: fn });
+    // Build args map from user-provided arguments (camelCase → snake_case)
+    let argsMap: Map<string, unknown> | undefined;
+    const cfArgsRaw = computedFieldArgs?.get(cfName);
+    if (cfArgsRaw && Object.keys(cfArgsRaw).length > 0) {
+      argsMap = new Map();
+      // Build a camelCase → snake_case mapping for function arg names
+      // (skipping the table row arg and session arg)
+      const tableArgName = cfConfig.tableArgument;
+      const sessionArgName = cfConfig.sessionArgument;
+      for (let i = 0; i < fn.argNames.length; i++) {
+        const argName = fn.argNames[i];
+        if (argName === tableArgName) continue;
+        if (sessionArgName && argName === sessionArgName) continue;
+        const camelName = toCamelCase(argName);
+        if (camelName in cfArgsRaw) {
+          argsMap.set(argName, cfArgsRaw[camelName]);
+        }
+      }
+      if (argsMap.size === 0) argsMap = undefined;
+    }
+
+    selections.push({
+      config: cfConfig,
+      functionInfo: fn,
+      sessionArgument: cfConfig.sessionArgument,
+      args: argsMap,
+    });
   }
 
   return selections;
@@ -661,13 +688,14 @@ export function makeSelectResolver(
     const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const columns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
 
-    // Build computed field selections
+    // Build computed field selections (with user-provided args)
     const computedFields = buildComputedFieldSelections(
       parsed.computedFields,
       table,
       context.functions,
       perm?.computedFields,
       auth.isAdmin,
+      parsed.computedFieldArgs,
     );
 
     // Build set-returning computed field selections
@@ -763,13 +791,14 @@ export function makeSelectByPkResolver(
     const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const columns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
 
-    // Build computed field selections
+    // Build computed field selections (with user-provided args)
     const computedFields = buildComputedFieldSelections(
       parsed.computedFields,
       table,
       context.functions,
       perm?.computedFields,
       auth.isAdmin,
+      parsed.computedFieldArgs,
     );
 
     // Build set-returning computed field selections
@@ -1237,11 +1266,21 @@ export function makeUpdateResolver(
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap, table, context.tables) ?? ({} as BoolExp);
     const returningColumns = getReturningColumns(table);
 
-    // Parse returning selection set for relationships
-    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth);
+    // Parse returning selection set for relationships and computed fields
+    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const returningRelationships = returningParsed?.relationships && returningParsed.relationships.length > 0
       ? returningParsed.relationships
       : undefined;
+
+    // Build computed field selections (use select permission for returning clause access)
+    const updateSelectPerm = permissionLookup.getSelect(table.schema, table.name, auth.role);
+    const returningComputedFields = buildComputedFieldSelections(
+      returningParsed?.computedFields,
+      table,
+      context.functions,
+      updateSelectPerm?.computedFields,
+      auth.isAdmin,
+    );
 
     const compiled = compileUpdate({
       table,
@@ -1249,6 +1288,7 @@ export function makeUpdateResolver(
       _set: setValues,
       returningColumns,
       returningRelationships,
+      returningComputedFields: returningComputedFields.length > 0 ? returningComputedFields : undefined,
       returningJsonbPaths: returningParsed?.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
@@ -1261,9 +1301,10 @@ export function makeUpdateResolver(
 
     const result = await queryWithSession(compiled.sql, compiled.params, auth, 'write');
 
-    // CTE pattern (check OR relationships or jsonbPaths): single row with "data" as JSON array
+    // CTE pattern (check OR relationships, jsonbPaths, or computedFields): single row with "data" as JSON array
     // Without CTE: each row has a "data" column
-    const usesCTE = !!(perm?.check || returningRelationships || returningParsed?.jsonbPaths?.size);
+    const usesCTE = !!(perm?.check || returningRelationships || returningParsed?.jsonbPaths?.size
+      || returningComputedFields.length > 0);
     if (usesCTE) {
       const firstRow = result.rows[0] as Record<string, unknown> | undefined;
       const data = firstRow?.data;
@@ -1319,11 +1360,21 @@ export function makeUpdateByPkResolver(
 
     const returningColumns = getReturningColumns(table);
 
-    // Parse resolve info for relationships (updateByPk returns the type directly)
-    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
+    // Parse resolve info for relationships and computed fields (updateByPk returns the type directly)
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const returningRelationships = parsed.relationships.length > 0
       ? parsed.relationships
       : undefined;
+
+    // Build computed field selections (use select permission for returning clause access)
+    const updateByPkSelectPerm = permissionLookup.getSelect(table.schema, table.name, auth.role);
+    const returningComputedFields = buildComputedFieldSelections(
+      parsed.computedFields,
+      table,
+      context.functions,
+      updateByPkSelectPerm?.computedFields,
+      auth.isAdmin,
+    );
 
     const compiled = compileUpdateByPk({
       table,
@@ -1331,6 +1382,7 @@ export function makeUpdateByPkResolver(
       _set: setValues,
       returningColumns,
       returningRelationships,
+      returningComputedFields: returningComputedFields.length > 0 ? returningComputedFields : undefined,
       returningJsonbPaths: parsed.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
@@ -1466,17 +1518,28 @@ export function makeDeleteResolver(
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap, table, context.tables) ?? ({} as BoolExp);
     const returningColumns = getReturningColumns(table);
 
-    // Parse returning selection set for relationships
-    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth);
+    // Parse returning selection set for relationships and computed fields
+    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const returningRelationships = returningParsed?.relationships && returningParsed.relationships.length > 0
       ? returningParsed.relationships
       : undefined;
+
+    // Build computed field selections (use select permission for returning clause access)
+    const deleteSelectPerm = permissionLookup.getSelect(table.schema, table.name, auth.role);
+    const deleteReturningComputedFields = buildComputedFieldSelections(
+      returningParsed?.computedFields,
+      table,
+      context.functions,
+      deleteSelectPerm?.computedFields,
+      auth.isAdmin,
+    );
 
     const compiled = compileDelete({
       table,
       where,
       returningColumns,
       returningRelationships,
+      returningComputedFields: deleteReturningComputedFields.length > 0 ? deleteReturningComputedFields : undefined,
       returningJsonbPaths: returningParsed?.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
@@ -1528,17 +1591,28 @@ export function makeDeleteByPkResolver(
     const pkValues = remapKeys(args as Record<string, unknown>, columnMap) ?? {};
     const returningColumns = getReturningColumns(table);
 
-    // Parse resolve info for relationships (deleteByPk returns the type directly)
-    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
+    // Parse resolve info for relationships and computed fields (deleteByPk returns the type directly)
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const returningRelationships = parsed.relationships.length > 0
       ? parsed.relationships
       : undefined;
+
+    // Build computed field selections (use select permission for returning clause access)
+    const deleteByPkSelectPerm = permissionLookup.getSelect(table.schema, table.name, auth.role);
+    const deleteByPkReturningCF = buildComputedFieldSelections(
+      parsed.computedFields,
+      table,
+      context.functions,
+      deleteByPkSelectPerm?.computedFields,
+      auth.isAdmin,
+    );
 
     const compiled = compileDeleteByPk({
       table,
       pkValues,
       returningColumns,
       returningRelationships,
+      returningComputedFields: deleteByPkReturningCF.length > 0 ? deleteByPkReturningCF : undefined,
       returningJsonbPaths: parsed.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,

@@ -399,87 +399,100 @@ describe('GraphQL E2E', () => {
 
   describe('mutations', () => {
     it('inserts an invoice as backoffice (insertInvoiceOne)', async () => {
-      const token = await tokens.backoffice();
-      const { body } = await graphqlRequest(
-        `mutation($obj: InvoiceInsertInput!) {
-          insertInvoiceOne(object: $obj) {
-            id
-            amount
-            type
-            state
-          }
-        }`,
-        {
-          obj: {
-            clientId: ALICE_ID,
-            accountId: ACCOUNT_ALICE_ID,
-            currencyId: 'EUR',
-            amount: 77.50,
-            type: 'PAYMENT',
+      let insertedId: unknown;
+      try {
+        const token = await tokens.backoffice();
+        const { body } = await graphqlRequest(
+          `mutation($obj: InvoiceInsertInput!) {
+            insertInvoiceOne(object: $obj) {
+              id
+              amount
+              type
+              state
+            }
+          }`,
+          {
+            obj: {
+              clientId: ALICE_ID,
+              accountId: ACCOUNT_ALICE_ID,
+              currencyId: 'EUR',
+              amount: 77.50,
+              type: 'PAYMENT',
+            },
           },
-        },
-        { authorization: `Bearer ${token}` },
-      );
-      if (body.errors) {
-        // Acceptable: GraphQL input type name might differ slightly
-        // but the error should not be a permission error
-        const msg = body.errors[0].message;
-        expect(msg).not.toContain('Permission denied');
-      } else {
-        const invoice = (body.data as { insertInvoiceOne: AnyRow }).insertInvoiceOne;
-        expect(invoice).toBeDefined();
-        expect(field(invoice, 'id')).toBeDefined();
+          { authorization: `Bearer ${token}` },
+        );
+        if (body.errors) {
+          // Acceptable: GraphQL input type name might differ slightly
+          // but the error should not be a permission error
+          const msg = body.errors[0].message;
+          expect(msg).not.toContain('Permission denied');
+        } else {
+          const invoice = (body.data as { insertInvoiceOne: AnyRow }).insertInvoiceOne;
+          expect(invoice).toBeDefined();
+          insertedId = field(invoice, 'id');
+          expect(insertedId).toBeDefined();
+        }
+      } finally {
         // Cleanup
-        const pool = getPool();
-        await pool.query('DELETE FROM invoice WHERE id = $1', [field(invoice, 'id')]);
+        if (insertedId) {
+          const pool = getPool();
+          await pool.query('DELETE FROM invoice WHERE id = $1', [insertedId]);
+        }
       }
     });
 
     it('updates client status as backoffice (updateClientByPk)', async () => {
-      const token = await tokens.backoffice();
-      const { body } = await graphqlRequest(
-        `mutation($id: Uuid!, $set: ClientSetInput!) {
-          updateClientByPk(pkColumns: { id: $id }, _set: $set) {
-            id
-            status
-          }
-        }`,
-        { id: CHARLIE_ID, set: { status: 'INACTIVE' } },
-        { authorization: `Bearer ${token}` },
-      );
-      if (body.errors) {
-        const msg = body.errors[0].message;
-        expect(msg).not.toContain('Permission denied');
-      } else {
-        const client = (body.data as { updateClientByPk: AnyRow }).updateClientByPk;
-        expect(client).toBeDefined();
-        expect(field(client, 'status')).toBe('INACTIVE');
-      }
-      // Always reset regardless
       const pool = getPool();
-      await pool.query("UPDATE client SET status = 'on_hold' WHERE id = $1", [CHARLIE_ID]);
+      try {
+        const token = await tokens.backoffice();
+        const { body } = await graphqlRequest(
+          `mutation($id: Uuid!, $set: ClientSetInput!) {
+            updateClientByPk(pkColumns: { id: $id }, _set: $set) {
+              id
+              status
+            }
+          }`,
+          { id: CHARLIE_ID, set: { status: 'INACTIVE' } },
+          { authorization: `Bearer ${token}` },
+        );
+        if (body.errors) {
+          const msg = body.errors[0].message;
+          expect(msg).not.toContain('Permission denied');
+        } else {
+          const client = (body.data as { updateClientByPk: AnyRow }).updateClientByPk;
+          expect(client).toBeDefined();
+          expect(field(client, 'status')).toBe('INACTIVE');
+        }
+      } finally {
+        // Always reset regardless
+        await pool.query("UPDATE client SET status = 'on_hold' WHERE id = $1", [CHARLIE_ID]);
+      }
     });
 
     it('client can update own currency preference', async () => {
-      const token = await tokens.client(ALICE_ID);
-      const { body } = await graphqlRequest(
-        `mutation($id: Uuid!, $set: ClientSetInput!) {
-          updateClientByPk(pkColumns: { id: $id }, _set: $set) {
-            id
-            currencyId
-          }
-        }`,
-        { id: ALICE_ID, set: { currencyId: 'USD' } },
-        { authorization: `Bearer ${token}` },
-      );
-      if (!body.errors) {
-        const client = (body.data as { updateClientByPk: AnyRow }).updateClientByPk;
-        const cid = field(client, 'currencyId', 'currency_id');
-        expect(cid).toBe('USD');
-      }
-      // Reset
       const pool = getPool();
-      await pool.query("UPDATE client SET currency_id = 'EUR' WHERE id = $1", [ALICE_ID]);
+      try {
+        const token = await tokens.client(ALICE_ID);
+        const { body } = await graphqlRequest(
+          `mutation($id: Uuid!, $set: ClientSetInput!) {
+            updateClientByPk(pkColumns: { id: $id }, _set: $set) {
+              id
+              currencyId
+            }
+          }`,
+          { id: ALICE_ID, set: { currencyId: 'USD' } },
+          { authorization: `Bearer ${token}` },
+        );
+        if (!body.errors) {
+          const client = (body.data as { updateClientByPk: AnyRow }).updateClientByPk;
+          const cid = field(client, 'currencyId', 'currency_id');
+          expect(cid).toBe('USD');
+        }
+      } finally {
+        // Reset
+        await pool.query("UPDATE client SET currency_id = 'EUR' WHERE id = $1", [ALICE_ID]);
+      }
     });
 
     it('client cannot update another client record', async () => {
@@ -644,32 +657,34 @@ describe('REST API E2E', () => {
 
   describe('POST insert', () => {
     it('inserts an invoice as backoffice', async () => {
-      const token = await tokens.backoffice();
-      const { status, body } = await restRequest('POST', '/api/v1/invoice', {
-        headers: { authorization: `Bearer ${token}` },
-        body: {
-          client_id: BOB_ID,
-          account_id: ACCOUNT_BOB_ID,
-          currency_id: 'USD',
-          amount: 55.00,
-          type: 'payment',
-        },
-      });
-      expect(status).toBe(201);
-      // The response may be the row object or wrapped
-      const invoice = (body && typeof body === 'object') ? body as AnyRow : {};
-      // If the router returns the inserted row, it should have an id
-      // But even if not, the insert succeeded (201)
-      if (invoice.id) {
+      let insertedId: unknown;
+      try {
+        const token = await tokens.backoffice();
+        const { status, body } = await restRequest('POST', '/api/v1/invoice', {
+          headers: { authorization: `Bearer ${token}` },
+          body: {
+            client_id: BOB_ID,
+            account_id: ACCOUNT_BOB_ID,
+            currency_id: 'USD',
+            amount: 55.00,
+            type: 'payment',
+          },
+        });
+        expect(status).toBe(201);
+        // The response may be the row object or wrapped
+        const invoice = (body && typeof body === 'object') ? body as AnyRow : {};
+        insertedId = invoice.id;
+      } finally {
         const pool = getPool();
-        await pool.query('DELETE FROM invoice WHERE id = $1', [invoice.id]);
-      } else {
-        // Cleanup by finding the most recent invoice for BOB
-        const pool = getPool();
-        await pool.query(
-          "DELETE FROM invoice WHERE client_id = $1 AND amount = 55.00 AND type = 'payment' AND state = 'draft'",
-          [BOB_ID],
-        );
+        if (insertedId) {
+          await pool.query('DELETE FROM invoice WHERE id = $1', [insertedId]);
+        } else {
+          // Cleanup by finding the most recent invoice for BOB
+          await pool.query(
+            "DELETE FROM invoice WHERE client_id = $1 AND amount = 55.00 AND type = 'payment' AND state = 'draft'",
+            [BOB_ID],
+          );
+        }
       }
     });
 
@@ -694,32 +709,36 @@ describe('REST API E2E', () => {
 
   describe('PATCH update', () => {
     it('updates client via admin PATCH', async () => {
-      const { status, body } = await restRequest('PATCH', `/api/v1/client/${ALICE_ID}`, {
-        headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
-        body: { trust_level: 5 },
-      });
-      expect(status).toBe(200);
-      const client = body as AnyRow;
-      expect(client.trust_level).toBe(5);
-
-      // Reset
       const pool = getPool();
-      await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+      try {
+        const { status, body } = await restRequest('PATCH', `/api/v1/client/${ALICE_ID}`, {
+          headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+          body: { trust_level: 5 },
+        });
+        expect(status).toBe(200);
+        const client = body as AnyRow;
+        expect(client.trust_level).toBe(5);
+      } finally {
+        // Reset
+        await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
+      }
     });
 
     it('client can update own currency_id via REST', async () => {
-      const token = await tokens.client(ALICE_ID);
-      const { status, body } = await restRequest('PATCH', `/api/v1/client/${ALICE_ID}`, {
-        headers: { authorization: `Bearer ${token}` },
-        body: { currency_id: 'GBP' },
-      });
-      expect(status).toBe(200);
-      const client = body as AnyRow;
-      expect(client.currency_id).toBe('GBP');
-
-      // Reset
       const pool = getPool();
-      await pool.query("UPDATE client SET currency_id = 'EUR' WHERE id = $1", [ALICE_ID]);
+      try {
+        const token = await tokens.client(ALICE_ID);
+        const { status, body } = await restRequest('PATCH', `/api/v1/client/${ALICE_ID}`, {
+          headers: { authorization: `Bearer ${token}` },
+          body: { currency_id: 'GBP' },
+        });
+        expect(status).toBe(200);
+        const client = body as AnyRow;
+        expect(client.currency_id).toBe('GBP');
+      } finally {
+        // Reset
+        await pool.query("UPDATE client SET currency_id = 'EUR' WHERE id = $1", [ALICE_ID]);
+      }
     });
 
     it('client cannot update another client via REST', async () => {

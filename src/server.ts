@@ -135,8 +135,16 @@ export async function createServer(
   const connectionManager = createConnectionManager(config.databases);
 
   // 2. Introspect database
+  // Detect all schemas referenced by tracked functions so non-public schemas
+  // (e.g. "utils") are included in introspection alongside "public".
   const primaryPool = connectionManager.getPool('write');
-  const introspection = await introspectDatabase(primaryPool);
+  const schemas = new Set<string>(['public']);
+  if (config.trackedFunctions) {
+    for (const fn of config.trackedFunctions) {
+      if (fn.schema) schemas.add(fn.schema);
+    }
+  }
+  const introspection = await introspectDatabase(primaryPool, [...schemas]);
 
   // 3. Merge introspection with config -> SchemaModel
   const mergeResult = mergeSchemaModel(introspection, config);
@@ -791,7 +799,13 @@ export async function createServer(
       server.log.info({ files }, 'Config changed, reloading schema...');
       try {
         const newConfig = await loadConfig(options.metadataPath!, options.configPath);
-        const newIntrospection = await introspectDatabase(primaryPool);
+        const newSchemas = new Set<string>(['public']);
+        if (newConfig.trackedFunctions) {
+          for (const fn of newConfig.trackedFunctions) {
+            if (fn.schema) newSchemas.add(fn.schema);
+          }
+        }
+        const newIntrospection = await introspectDatabase(primaryPool, [...newSchemas]);
         const newMerge = mergeSchemaModel(newIntrospection, newConfig);
         await resolveTableEnums(newMerge.model, primaryPool);
         const newPermLookup = buildPermissionLookup(newMerge.model.tables, newConfig.inheritedRoles);

@@ -20,7 +20,7 @@ import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
 import { toCamelCase } from '../schema/type-builder.js';
-import type { RelationshipSelection } from './select.js';
+import type { RelationshipSelection, ComputedFieldSelection } from './select.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -34,6 +34,8 @@ export interface UpdateByPkOptions {
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
   returningRelationships?: RelationshipSelection[];
+  /** Computed fields to include in the RETURNING clause */
+  returningComputedFields?: ComputedFieldSelection[];
   /** JSONB path arguments for RETURNING fields */
   returningJsonbPaths?: Map<string, string>;
   permission?: {
@@ -55,6 +57,8 @@ export interface UpdateOptions {
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
   returningRelationships?: RelationshipSelection[];
+  /** Computed fields to include in the RETURNING clause */
+  returningComputedFields?: ComputedFieldSelection[];
   /** JSONB path arguments for RETURNING fields */
   returningJsonbPaths?: Map<string, string>;
   permission?: {
@@ -153,14 +157,19 @@ function buildReturningFields(
   session: SessionVariables,
   relationships?: RelationshipSelection[],
   jsonbPaths?: Map<string, string>,
+  computedFields?: ComputedFieldSelection[],
 ): string {
   const tableColumnNames = new Set(table.columns.map((c) => c.name));
   const validReturning = returningColumns.filter((c) => tableColumnNames.has(c));
 
-  if ((relationships && relationships.length > 0) || (jsonbPaths && jsonbPaths.size > 0)) {
+  const hasRelationships = relationships && relationships.length > 0;
+  const hasJsonbPaths = jsonbPaths && jsonbPaths.size > 0;
+  const hasComputedFields = computedFields && computedFields.length > 0;
+
+  if (hasRelationships || hasJsonbPaths || hasComputedFields) {
     const columns = filterColumns(validReturning, table);
     const aliasCounter = new AliasCounter();
-    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, undefined, undefined, jsonbPaths);
+    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, computedFields, undefined, jsonbPaths);
   }
 
   return validReturning.map(
@@ -214,9 +223,10 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
 
   const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
   const hasJsonbPaths = opts.returningJsonbPaths && opts.returningJsonbPaths.size > 0;
+  const hasComputedFields = opts.returningComputedFields && opts.returningComputedFields.length > 0;
 
-  // CTE needed for post-update check OR relationships/jsonbPaths in RETURNING
-  if (opts.permission?.check || hasRelationships || hasJsonbPaths) {
+  // CTE needed for post-update check OR relationships/jsonbPaths/computedFields in RETURNING
+  if (opts.permission?.check || hasRelationships || hasJsonbPaths || hasComputedFields) {
     const returningFields = buildReturningFields(
       opts.table,
       opts.returningColumns,
@@ -225,6 +235,7 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
       opts.session,
       opts.returningRelationships,
       opts.returningJsonbPaths,
+      opts.returningComputedFields,
     );
 
     let checkWhere = '';
@@ -255,7 +266,7 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
     return { sql, params: params.getParams() };
   }
 
-  // Simple update without post-check, relationships, or jsonb paths
+  // Simple update without post-check, relationships, jsonb paths, or computed fields
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
@@ -321,9 +332,10 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
 
   const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
   const hasJsonbPaths = opts.returningJsonbPaths && opts.returningJsonbPaths.size > 0;
+  const hasComputedFields2 = opts.returningComputedFields && opts.returningComputedFields.length > 0;
 
-  // CTE needed for post-update check OR relationships/jsonbPaths in RETURNING
-  if (opts.permission?.check || hasRelationships || hasJsonbPaths) {
+  // CTE needed for post-update check OR relationships/jsonbPaths/computedFields in RETURNING
+  if (opts.permission?.check || hasRelationships || hasJsonbPaths || hasComputedFields2) {
     const returningFields = buildReturningFields(
       opts.table,
       opts.returningColumns,
@@ -332,6 +344,7 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
       opts.session,
       opts.returningRelationships,
       opts.returningJsonbPaths,
+      opts.returningComputedFields,
     );
 
     let checkWhere = '';
@@ -362,7 +375,7 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
     return { sql, params: params.getParams() };
   }
 
-  // Simple update without post-check, relationships, or jsonb paths
+  // Simple update without post-check, relationships, jsonb paths, or computed fields
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
@@ -397,6 +410,8 @@ export interface UpdateManyOptions {
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
   returningRelationships?: RelationshipSelection[];
+  /** Computed fields to include in the RETURNING clause */
+  returningComputedFields?: ComputedFieldSelection[];
   /** JSONB path arguments for RETURNING fields */
   returningJsonbPaths?: Map<string, string>;
   permission?: {
@@ -430,6 +445,7 @@ export function compileUpdateMany(opts: UpdateManyOptions): CompiledQuery[] {
       _set: entry._set,
       returningColumns: opts.returningColumns,
       returningRelationships: opts.returningRelationships,
+      returningComputedFields: opts.returningComputedFields,
       returningJsonbPaths: opts.returningJsonbPaths,
       permission: opts.permission,
       session: opts.session,

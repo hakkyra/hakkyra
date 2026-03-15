@@ -372,6 +372,14 @@ describe('Negative and denial tests', () => {
         undefined,
         { authorization: `Bearer ${token}` },
       );
+      // Safety cleanup in case insert unexpectedly succeeded
+      if (!body.errors && body.data) {
+        const inserted = (body.data as { insertInvoiceOne: { id: string } | null }).insertInvoiceOne;
+        if (inserted?.id) {
+          const pool = getPool();
+          await pool.query('DELETE FROM invoice WHERE id = $1', [inserted.id]);
+        }
+      }
       // client role has no insert permission on invoice
       expect(body.errors).toBeDefined();
     });
@@ -769,68 +777,85 @@ describe('Inherited role permission merging', () => {
   });
 
   it('INSERT column union: backofficeAdmin can INSERT all columns (inherits administrator\'s * + backoffice\'s restricted columns)', async () => {
-    const token = await backofficeAdminToken();
-    // administrator has insert columns: "*" with check: {}
-    // backoffice has insert columns: restricted list with check on branch_id
-    // Union gives "*" with check: OR({branch_id not null}, {}) = {} (always true)
-    const { body } = await graphqlRequest(
-      `mutation {
-        insertClient(object: {
-          username: "inherited_insert_test",
-          email: "inherited_insert@test.com",
-          branchId: "${BRANCH_TEST_ID}",
-          currencyId: "EUR",
-          countryId: "FI",
-          languageId: "en",
-          trustLevel: 5
-        }) { id username trustLevel }
-      }`,
-      undefined,
-      { authorization: `Bearer ${token}` },
-    );
-    expect(body.errors).toBeUndefined();
-    const inserted = (body.data as { insertClient: AnyRow }).insertClient;
-    expect(inserted.username).toBe('inherited_insert_test');
-    // administrator's insert has no "set" presets, so trustLevel should be as provided
-    // (or if merging takes the most permissive, the set presets are not forced)
-    expect(inserted.id).toBeDefined();
-
-    // Clean up: delete the inserted row using admin secret
-    const insertedId = inserted.id as string;
-    await graphqlRequest(
-      `mutation { deleteClientByPk(id: "${insertedId}") { id } }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+    let insertedId: string | undefined;
+    try {
+      const token = await backofficeAdminToken();
+      // administrator has insert columns: "*" with check: {}
+      // backoffice has insert columns: restricted list with check on branch_id
+      // Union gives "*" with check: OR({branch_id not null}, {}) = {} (always true)
+      const { body } = await graphqlRequest(
+        `mutation {
+          insertClient(object: {
+            username: "inherited_insert_test",
+            email: "inherited_insert@test.com",
+            branchId: "${BRANCH_TEST_ID}",
+            currencyId: "EUR",
+            countryId: "FI",
+            languageId: "en",
+            trustLevel: 5
+          }) { id username trustLevel }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+      expect(body.errors).toBeUndefined();
+      const inserted = (body.data as { insertClient: AnyRow }).insertClient;
+      insertedId = inserted.id as string;
+      expect(inserted.username).toBe('inherited_insert_test');
+      // administrator's insert has no "set" presets, so trustLevel should be as provided
+      // (or if merging takes the most permissive, the set presets are not forced)
+      expect(inserted.id).toBeDefined();
+    } finally {
+      // Clean up: delete the inserted row using admin secret
+      if (insertedId) {
+        await graphqlRequest(
+          `mutation { deleteClientByPk(id: "${insertedId}") { id } }`,
+          undefined,
+          { 'x-hasura-admin-secret': ADMIN_SECRET },
+        );
+      }
+      // Fallback: clean up by username
+      const pool = getPool();
+      await pool.query("DELETE FROM client WHERE username = 'inherited_insert_test'");
+    }
   });
 
   it('DELETE from inherited role: backofficeAdmin can DELETE (inherits administrator\'s delete permission)', async () => {
-    // First, insert a throwaway client as admin
-    const { body: insertBody } = await graphqlRequest(
-      `mutation {
-        insertClient(object: {
-          username: "delete_test_inherited",
-          email: "delete_inherited@test.com",
-          branchId: "${BRANCH_TEST_ID}",
-          currencyId: "EUR",
-          countryId: "FI"
-        }) { id }
-      }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
-    expect(insertBody.errors).toBeUndefined();
-    const newId = (insertBody.data as { insertClient: AnyRow }).insertClient.id as string;
+    let newId: string | undefined;
+    try {
+      // First, insert a throwaway client as admin
+      const { body: insertBody } = await graphqlRequest(
+        `mutation {
+          insertClient(object: {
+            username: "delete_test_inherited",
+            email: "delete_inherited@test.com",
+            branchId: "${BRANCH_TEST_ID}",
+            currencyId: "EUR",
+            countryId: "FI"
+          }) { id }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      expect(insertBody.errors).toBeUndefined();
+      newId = (insertBody.data as { insertClient: AnyRow }).insertClient.id as string;
 
-    // backoffice_admin should be able to delete (inherits administrator's delete permission)
-    const token = await backofficeAdminToken();
-    const { body: deleteBody } = await graphqlRequest(
-      `mutation { deleteClientByPk(id: "${newId}") { id } }`,
-      undefined,
-      { authorization: `Bearer ${token}` },
-    );
-    expect(deleteBody.errors).toBeUndefined();
-    expect((deleteBody.data as { deleteClientByPk: AnyRow }).deleteClientByPk.id).toBe(newId);
+      // backoffice_admin should be able to delete (inherits administrator's delete permission)
+      const token = await backofficeAdminToken();
+      const { body: deleteBody } = await graphqlRequest(
+        `mutation { deleteClientByPk(id: "${newId}") { id } }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+      expect(deleteBody.errors).toBeUndefined();
+      expect((deleteBody.data as { deleteClientByPk: AnyRow }).deleteClientByPk.id).toBe(newId);
+    } finally {
+      // Clean up in case delete didn't happen
+      if (newId) {
+        const pool = getPool();
+        await pool.query('DELETE FROM client WHERE id = $1', [newId]).catch(() => {});
+      }
+    }
   });
 
   it('DELETE from inherited role: support cannot DELETE (backoffice has no delete permission)', async () => {
@@ -983,36 +1008,41 @@ describe('Mutation permission checks', () => {
   //   columns: client_id, account_id, currency_id, amount, type, provider, external_id, metadata
 
   it('invoice insert succeeds when check passes (amount > 0, client is active)', async () => {
-    // Alice is active, so inserting an invoice with amount > 0 should succeed
-    const token = await tokens.function_(ALICE_ID);
-    const { body } = await graphqlRequest(
-      `mutation {
-        insertInvoiceOne(object: {
-          clientId: "${ALICE_ID}",
-          accountId: "${ACCOUNT_ALICE_ID}",
-          currencyId: "EUR",
-          amount: 25,
-          type: PAYMENT
-        }) { id clientId amount state type }
-      }`,
-      undefined,
-      { authorization: `Bearer ${token}` },
-    );
-    expect(body.errors).toBeUndefined();
-    const invoice = (body.data as { insertInvoiceOne: AnyRow }).insertInvoiceOne;
-    expect(invoice.clientId).toBe(ALICE_ID);
-    expect(Number(invoice.amount)).toBe(25);
-    // state should be preset to 'draft' by the set clause
-    expect(invoice.state).toBe('DRAFT');
-    expect(invoice.type).toBe('PAYMENT');
-
-    // Clean up
-    const invoiceId = invoice.id as string;
-    await graphqlRequest(
-      `mutation { deleteInvoiceByPk(id: "${invoiceId}") { id } }`,
-      undefined,
-      { 'x-hasura-admin-secret': ADMIN_SECRET },
-    );
+    let invoiceId: string | undefined;
+    try {
+      // Alice is active, so inserting an invoice with amount > 0 should succeed
+      const token = await tokens.function_(ALICE_ID);
+      const { body } = await graphqlRequest(
+        `mutation {
+          insertInvoiceOne(object: {
+            clientId: "${ALICE_ID}",
+            accountId: "${ACCOUNT_ALICE_ID}",
+            currencyId: "EUR",
+            amount: 25,
+            type: PAYMENT
+          }) { id clientId amount state type }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+      expect(body.errors).toBeUndefined();
+      const invoice = (body.data as { insertInvoiceOne: AnyRow }).insertInvoiceOne;
+      invoiceId = invoice.id as string;
+      expect(invoice.clientId).toBe(ALICE_ID);
+      expect(Number(invoice.amount)).toBe(25);
+      // state should be preset to 'draft' by the set clause
+      expect(invoice.state).toBe('DRAFT');
+      expect(invoice.type).toBe('PAYMENT');
+    } finally {
+      // Clean up
+      if (invoiceId) {
+        await graphqlRequest(
+          `mutation { deleteInvoiceByPk(id: "${invoiceId}") { id } }`,
+          undefined,
+          { 'x-hasura-admin-secret': ADMIN_SECRET },
+        );
+      }
+    }
   });
 
   it('invoice insert fails when amount is 0 (check: amount > 0)', async () => {
@@ -1033,6 +1063,14 @@ describe('Mutation permission checks', () => {
     // Should fail: amount must be > 0
     expect(body.errors).toBeDefined();
     expect(body.errors!.length).toBeGreaterThan(0);
+
+    // Defensive cleanup: the check constraint may return an error but still leave
+    // the row in the DB if the transaction isn't properly rolled back
+    const pool = getPool();
+    await pool.query(
+      "DELETE FROM invoice WHERE client_id = $1 AND amount = 0 AND id NOT IN ('f0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000002','f0000000-0000-0000-0000-000000000003','f0000000-0000-0000-0000-000000000004')",
+      [ALICE_ID],
+    );
   });
 
   it('invoice insert fails when amount is negative (check: amount > 0)', async () => {
@@ -1053,6 +1091,14 @@ describe('Mutation permission checks', () => {
     // Should fail: amount must be > 0
     expect(body.errors).toBeDefined();
     expect(body.errors!.length).toBeGreaterThan(0);
+
+    // Defensive cleanup: the check constraint may return an error but still leave
+    // the row in the DB if the transaction isn't properly rolled back
+    const pool = getPool();
+    await pool.query(
+      "DELETE FROM invoice WHERE client_id = $1 AND amount = -10 AND id NOT IN ('f0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000002','f0000000-0000-0000-0000-000000000003','f0000000-0000-0000-0000-000000000004')",
+      [ALICE_ID],
+    );
   });
 
   it('invoice insert fails when client is not active (check: client.status = active)', async () => {
@@ -1074,5 +1120,13 @@ describe('Mutation permission checks', () => {
     // Should fail: Charlie's status is 'on_hold', not 'active'
     expect(body.errors).toBeDefined();
     expect(body.errors!.length).toBeGreaterThan(0);
+
+    // Defensive cleanup: the check constraint may return an error but still leave
+    // the row in the DB if the transaction isn't properly rolled back
+    const pool = getPool();
+    await pool.query(
+      "DELETE FROM invoice WHERE client_id = $1 AND amount = 50 AND id NOT IN ('f0000000-0000-0000-0000-000000000001','f0000000-0000-0000-0000-000000000002','f0000000-0000-0000-0000-000000000003','f0000000-0000-0000-0000-000000000004')",
+      [CHARLIE_ID],
+    );
   });
 });

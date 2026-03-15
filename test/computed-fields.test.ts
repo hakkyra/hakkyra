@@ -13,7 +13,7 @@ import {
   getPool, closePool, waitForDb, makeSession,
   startServer, stopServer, graphqlRequest, tokens,
   METADATA_DIR, SERVER_CONFIG_PATH, TEST_DB_URL,
-  ALICE_ID, ACCOUNT_ALICE_ID, ADMIN_SECRET,
+  ALICE_ID, ACCOUNT_ALICE_ID, BRANCH_TEST_ID, ADMIN_SECRET,
 } from './setup.js';
 
 type AnyRow = Record<string, unknown>;
@@ -393,14 +393,72 @@ describe('Computed Fields — E2E via GraphQL', () => {
     expect(client.username).toBe('alice');
   });
 
-  // TODO(P6.4d): Computed fields in mutation RETURNING require resolver + SQL compiler support.
-  // updateByPk/deleteByPk resolvers currently don't pass context.functions to parseResolveInfo
-  // and don't build computed field selections for the RETURNING clause.
-  // Once implemented, these .todo tests should become real tests verifying:
-  //   - UPDATE RETURNING: updateClientByPk _set trustLevel, select totalBalance => 1700
-  //   - DELETE RETURNING: deleteClientByPk select totalBalance => 0 (no accounts)
-  it.todo('UPDATE RETURNING includes computed field (updateClientByPk)');
-  it.todo('DELETE RETURNING includes computed field (deleteClientByPk)');
+  it('UPDATE RETURNING includes computed field (updateClientByPk)', async () => {
+    const pool = getPool();
+    // Save original trust_level so we can restore it
+    const orig = await pool.query('SELECT trust_level FROM client WHERE id = $1', [ALICE_ID]);
+    const origTrustLevel = orig.rows[0].trust_level;
+
+    try {
+      const { status, body } = await graphqlRequest(
+        `mutation($id: Uuid!) {
+          updateClientByPk(pkColumns: { id: $id }, _set: { trustLevel: 5 }) {
+            id
+            trustLevel
+            totalBalance
+          }
+        }`,
+        { id: ALICE_ID },
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const client = (body.data as { updateClientByPk: AnyRow }).updateClientByPk;
+      expect(client).toBeDefined();
+      expect(client.id).toBe(ALICE_ID);
+      expect(client.trustLevel).toBe(5);
+      // Alice: balance=1500 + credit_balance=200 => totalBalance=1700
+      expect(Number(client.totalBalance)).toBe(1700);
+    } finally {
+      // Restore original trust_level
+      await pool.query('UPDATE client SET trust_level = $1 WHERE id = $2', [origTrustLevel, ALICE_ID]);
+    }
+  });
+
+  it('DELETE RETURNING includes computed field (deleteClientByPk)', async () => {
+    const pool = getPool();
+    // Create a temporary client with no accounts (totalBalance should be 0)
+    const tempId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeee30';
+    await pool.query(
+      `INSERT INTO client (id, username, email, branch_id, currency_id, status) VALUES ($1, 'cf_del_test', 'cfdel@test.com', $2, 'EUR', 'active')`,
+      [tempId, BRANCH_TEST_ID],
+    );
+
+    try {
+      const { status, body } = await graphqlRequest(
+        `mutation($id: Uuid!) {
+          deleteClientByPk(id: $id) {
+            id
+            username
+            totalBalance
+          }
+        }`,
+        { id: tempId },
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const client = (body.data as { deleteClientByPk: AnyRow }).deleteClientByPk;
+      expect(client).toBeDefined();
+      expect(client.id).toBe(tempId);
+      expect(client.username).toBe('cf_del_test');
+      // No accounts => totalBalance = 0
+      expect(Number(client.totalBalance)).toBe(0);
+    } finally {
+      // Clean up in case the delete didn't work
+      await pool.query('DELETE FROM client WHERE id = $1', [tempId]).catch(() => {});
+    }
+  });
 });
 
 // ─── SETOF Computed Fields (P6.4c) ─────────────────────────────────────────
@@ -513,15 +571,49 @@ describe('Computed Fields — With Arguments (P6.4e)', () => {
     expect(boPermission.computedFields).toContain('balance_in_currency');
   });
 
-  // TODO(P6.4e): Computed field argument passing is not yet implemented.
-  // The type-builder does not generate an `args` input type for scalar computed
-  // fields with extra function parameters (only the table row is passed).
-  // The SQL compiler calls the function as funcRef(alias) without additional args.
-  // Once implemented, these tests should query:
-  //   - balanceInCurrency(args: { targetCurrency: "EUR" }) => 1500 (Alice's EUR account balance)
-  //   - balanceInCurrency without args => uses DEFAULT 'EUR' => 1500
-  it.todo('backoffice can query balanceInCurrency with explicit args (targetCurrency: "EUR")');
-  it.todo('backoffice can query balanceInCurrency without args (uses DEFAULT)');
+  it('backoffice can query balanceInCurrency with explicit args (targetCurrency: "EUR")', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query($id: Uuid!) {
+        clientByPk(id: $id) {
+          id
+          username
+          balanceInCurrency(args: { targetCurrency: "EUR" })
+        }
+      }`,
+      { id: ALICE_ID },
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const client = (body.data as { clientByPk: AnyRow }).clientByPk;
+    expect(client).toBeDefined();
+    expect(client.id).toBe(ALICE_ID);
+    // Alice has one EUR account with balance=1500
+    expect(Number(client.balanceInCurrency)).toBe(1500);
+  });
+
+  it('backoffice can query balanceInCurrency without args (uses DEFAULT)', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query($id: Uuid!) {
+        clientByPk(id: $id) {
+          id
+          username
+          balanceInCurrency
+        }
+      }`,
+      { id: ALICE_ID },
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const client = (body.data as { clientByPk: AnyRow }).clientByPk;
+    expect(client).toBeDefined();
+    expect(client.id).toBe(ALICE_ID);
+    // Default target_currency is 'EUR', Alice has EUR account with balance=1500
+    expect(Number(client.balanceInCurrency)).toBe(1500);
+  });
 });
 
 // ─── Computed Fields with Session Variables (P6.4h) ────────────────────────
@@ -552,14 +644,28 @@ describe('Computed Fields — Session Variables (P6.4h)', () => {
     expect(clientPerm.computedFields).toContain('is_own');
   });
 
-  // TODO(P6.4h): Session argument injection for computed fields is not yet implemented.
-  // The SQL compiler calls the function as funcRef(alias) without passing session
-  // variables. The config stores sessionArgument but it is not used when building
-  // the SQL function call.
-  // Once implemented, this test should query as client (alice):
-  //   - isOwn on alice's own record => true
-  //   - isOwn on another client's record => false (if visible)
-  it.todo('client (alice) sees isOwn=true on own record via session variable injection');
+  it('client (alice) sees isOwn=true on own record via session variable injection', async () => {
+    const token = await tokens.client(ALICE_ID);
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients {
+          id
+          username
+          isOwn
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    // Client role can only see own record (permission filter: id = x-hasura-user-id)
+    expect(clients.length).toBe(1);
+    expect(clients[0].id).toBe(ALICE_ID);
+    // isOwn should be true because the session x-hasura-user-id matches alice's id
+    expect(clients[0].isOwn).toBeTruthy();
+  });
 });
 
 // ─── Computed Fields on Materialized Views (P6.4i) ─────────────────────────
