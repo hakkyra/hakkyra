@@ -70,6 +70,8 @@ export interface SetReturningComputedFieldSelection {
 
 export interface RelationshipSelection {
   relationship: RelationshipConfig;
+  /** camelCase field name for the JSON key (defaults to relationship.name) */
+  fieldName?: string;
   remoteTable: TableInfo;
   columns: string[];
   where?: BoolExp;
@@ -503,7 +505,7 @@ export function buildJsonFields(
         session,
         aliasCounter,
       );
-      fields.push(`'${relSel.relationship.name}', (${subquery})`);
+      fields.push(`'${relSel.fieldName ?? relSel.relationship.name}', (${subquery})`);
     }
   }
 

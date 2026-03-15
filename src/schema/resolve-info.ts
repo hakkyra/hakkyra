@@ -92,7 +92,7 @@ function camelToColumnMap(table: TableInfo): Map<string, string> {
 function relationshipMap(table: TableInfo): Map<string, TableInfo['relationships'][number]> {
   const map = new Map<string, TableInfo['relationships'][number]>();
   for (const rel of table.relationships) {
-    map.set(rel.name, rel);
+    map.set(toCamelCase(rel.name), rel);
   }
   return map;
 }
@@ -575,6 +575,7 @@ function parseSelectionSet(
         // Build the RelationshipSelection
         const relSelection: RelationshipSelection = {
           relationship: rel,
+          fieldName: toCamelCase(rel.name),
           remoteTable,
           columns: subSelection.columns,
           relationships: subSelection.relationships.length > 0

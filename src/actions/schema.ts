@@ -283,13 +283,13 @@ function buildRelationshipFields(
     }
 
     if (rel.type === 'object') {
-      fields[rel.name] = {
+      fields[toCamelCase(rel.name)] = {
         type: remoteType,
         resolve: makeActionRelationshipResolver(rel, remoteTable),
       };
     } else {
       // array relationship
-      fields[rel.name] = {
+      fields[toCamelCase(rel.name)] = {
         type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(remoteType))),
         resolve: makeActionRelationshipResolver(rel, remoteTable),
       };

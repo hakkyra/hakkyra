@@ -126,7 +126,7 @@
 - [x] Custom scalar types (UUID, DateTime, JSON, JSONB, BigInt, BigDecimal, etc.)
 - [x] graphql-default naming convention
   - [x] PascalCase type names
-  - [x] camelCase field/argument names
+  - [x] camelCase field/argument names (columns and relationship fields)
   - [x] UPPER_CASED enum values
 - [x] Schema tests (34 tests)
 - [x] Relationship resolution via GraphQL resolve info (`src/schema/resolve-info.ts`)

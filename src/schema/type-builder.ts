@@ -214,7 +214,7 @@ export function buildObjectType(
 
         if (rel.type === 'object') {
           // Object relationship — nullable single related object
-          fields[rel.name] = {
+          fields[toCamelCase(rel.name)] = {
             type: relatedType,
             description: `Object relationship to ${rel.remoteTable.name}`,
             extensions: {
@@ -248,7 +248,7 @@ export function buildObjectType(
           args['limit'] = { type: GraphQLInt };
           args['offset'] = { type: GraphQLInt };
 
-          fields[rel.name] = {
+          fields[toCamelCase(rel.name)] = {
             type: new GraphQLNonNull(
               new GraphQLList(new GraphQLNonNull(relatedType)),
             ),

@@ -172,7 +172,7 @@ function remapBoolExp(
   if (table && allTables) {
     for (const rel of table.relationships) {
       if (rel.type === 'array') {
-        aggRelMap.set(`${rel.name}Aggregate`, rel);
+        aggRelMap.set(`${toCamelCase(rel.name)}Aggregate`, rel);
       }
     }
   }
@@ -318,7 +318,7 @@ function remapOrderBy(
         // Check if this is an aggregate ordering (relNameAggregate)
         if (camelKey.endsWith('Aggregate')) {
           const relName = camelKey.slice(0, -'Aggregate'.length);
-          const rel = table.relationships.find((r) => r.name === relName && r.type === 'array');
+          const rel = table.relationships.find((r) => toCamelCase(r.name) === relName && r.type === 'array');
           if (!rel) continue;
 
           const remoteTable = allTables.find(
@@ -367,7 +367,7 @@ function remapOrderBy(
         }
 
         // Check if this is an object relationship ordering
-        const rel = table.relationships.find((r) => r.name === camelKey && r.type === 'object');
+        const rel = table.relationships.find((r) => toCamelCase(r.name) === camelKey && r.type === 'object');
         if (rel) {
           const remoteTable = allTables.find(
             (t) => t.name === rel.remoteTable.name && t.schema === rel.remoteTable.schema,

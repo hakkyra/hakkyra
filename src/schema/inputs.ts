@@ -489,7 +489,7 @@ export function buildMutationInputTypes(
             const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
             const relOrderBy = orderByTypes.get(relKey);
             if (relOrderBy) {
-              fields[rel.name] = {
+              fields[toCamelCase(rel.name)] = {
                 type: relOrderBy,
                 description: `Order by ${rel.name} relationship fields.`,
               };
@@ -504,7 +504,7 @@ export function buildMutationInputTypes(
             const aggOrderByKey = `${relKey}.__aggregateOrderBy`;
             const aggOrderBy = orderByTypes.get(aggOrderByKey);
             if (aggOrderBy) {
-              fields[`${rel.name}Aggregate`] = {
+              fields[`${toCamelCase(rel.name)}Aggregate`] = {
                 type: aggOrderBy,
                 description: `Order by aggregated values of the ${rel.name} array relationship.`,
               };

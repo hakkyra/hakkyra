@@ -385,14 +385,14 @@ export function buildFilterTypes(
           const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
           const relBoolExp = filterTypes.get(relKey);
           if (relBoolExp) {
-            fields[rel.name] = { type: relBoolExp };
+            fields[toCamelCase(rel.name)] = { type: relBoolExp };
           }
 
           // Aggregate filter for array relationships
           if (rel.type === 'array') {
             const aggBoolExp = aggregateBoolExpTypes.get(relKey);
             if (aggBoolExp) {
-              fields[`${rel.name}Aggregate`] = { type: aggBoolExp };
+              fields[`${toCamelCase(rel.name)}Aggregate`] = { type: aggBoolExp };
             }
           }
         }
