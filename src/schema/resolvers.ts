@@ -180,7 +180,7 @@ function remapKeys(
  * When `table` and `allTables` are provided, aggregate filter keys (e.g., `accountsAggregate`)
  * are detected and converted into internal `_aggregateFilter` entries for the SQL compiler.
  */
-function remapBoolExp(
+export function remapBoolExp(
   boolExp: BoolExp | undefined | null,
   columnMap: Map<string, string>,
   table?: TableInfo,

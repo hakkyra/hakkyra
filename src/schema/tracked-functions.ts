@@ -47,6 +47,7 @@ import { customScalars } from './scalars.js';
 import { toCamelCase, toPascalCase, tableKey } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import type { ResolverContext, ResolverPermissionLookup } from './resolvers.js';
+import { remapBoolExp as remapBoolExpFull } from './resolvers.js';
 import { parseResolveInfo } from './resolve-info.js';
 import {
   compileSelect,
@@ -750,7 +751,7 @@ function makeTrackedFunctionResolver(
 
     // ── Remap camelCase args to snake_case ────────────────────────────
     const colMap = camelToColumnMap(returnTable);
-    const where = remapBoolExp(args.where as BoolExp | undefined, colMap);
+    const where = remapBoolExpFull(args.where as BoolExp | undefined, colMap, returnTable, tables);
     const orderBy = remapOrderBy(
       args.orderBy as Array<Record<string, string>> | undefined,
       colMap,
@@ -802,7 +803,7 @@ function makeTrackedFunctionAggregateResolver(
   trackedFn: TrackedFunctionInfo,
 ): (parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: import('graphql').GraphQLResolveInfo) => Promise<unknown> {
   return async (_parent, args, context, info) => {
-    const { auth, queryWithSession, permissionLookup, inheritedRoles } = context;
+    const { auth, queryWithSession, permissionLookup, inheritedRoles, tables } = context;
     const { config, functionInfo: fn, returnTable } = trackedFn;
     if (!returnTable) throw new Error(`No return table for function ${config.name}`);
 
@@ -844,7 +845,7 @@ function makeTrackedFunctionAggregateResolver(
 
     // ── Remap camelCase args to snake_case ────────────────────────────
     const colMap = camelToColumnMap(returnTable);
-    const where = remapBoolExp(args.where as BoolExp | undefined, colMap);
+    const where = remapBoolExpFull(args.where as BoolExp | undefined, colMap, returnTable, tables);
 
     // ── Build aggregate SQL using function as source ─────────────────
     // We build a custom SQL that uses the function call as the FROM source
