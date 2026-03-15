@@ -457,7 +457,12 @@ function parseSelectionSet(
             (f) => f.name === cf.function.name && f.schema === fnSchema,
           );
 
-          if (fn?.isSetReturning && selection.selectionSet) {
+          // Check if return type is a tracked table (handles both SETOF and non-SETOF composite returns)
+          const returnsTrackedTable = fn && allTables.some(
+            (t) => t.name === fn.returnType || `${t.schema}.${t.name}` === fn.returnType,
+          );
+
+          if ((fn?.isSetReturning || returnsTrackedTable) && selection.selectionSet) {
             // Find the return table
             const returnTable = allTables.find(
               (t) => t.name === fn.returnType || `${t.schema}.${t.name}` === fn.returnType,
