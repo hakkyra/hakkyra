@@ -16,6 +16,14 @@ configuration:
     created_at: createdAt
   comment: "Materialized view for optimized client summary queries"
 
+computed_fields:
+  - name: score
+    definition:
+      function:
+        name: client_summary_score
+        schema: public
+    comment: "Computed score: total_balance + (payment_count * 100)"
+
 object_relationships:
   - name: client
     using:
@@ -40,9 +48,13 @@ select_permissions:
       columns: "*"
       filter: {}
       allow_aggregations: true
+      computed_fields:
+        - score
 
   - role: administrator
     permission:
       columns: "*"
       filter: {}
       allow_aggregations: true
+      computed_fields:
+        - score

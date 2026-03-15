@@ -1,0 +1,50 @@
+table:
+  schema: public
+  name: category
+
+configuration:
+  custom_root_fields:
+    select: categories
+    select_by_pk: categoryByPk
+    insert: insertCategories
+    insert_one: insertCategory
+    update: updateCategories
+    update_by_pk: updateCategoryByPk
+    delete: deleteCategories
+    delete_by_pk: deleteCategoryByPk
+  custom_column_names:
+    id: id
+    name: name
+    parent_id: parentId
+    level: level
+
+object_relationships:
+  - name: parent
+    using:
+      foreign_key_constraint_on: parent_id
+
+array_relationships:
+  - name: children
+    using:
+      foreign_key_constraint_on:
+        column: parent_id
+        table:
+          schema: public
+          name: category
+
+select_permissions:
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+insert_permissions:
+  - role: administrator
+    permission:
+      columns: "*"
+      check: {}

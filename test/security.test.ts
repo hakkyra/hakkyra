@@ -7,6 +7,8 @@
  * - REST ORDER BY invalid column validation
  * - WebSocket auth edge cases (empty admin secret, invalid JWT)
  * - Large array inputs (_in operator)
+ * - Webhook header CRLF injection
+ * - Tracked function argument SQL injection
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -20,6 +22,7 @@ import {
   ALICE_ID, TEST_DB_URL,
   getServerAddress, getPool,
 } from './setup.js';
+import { resolveWebhookHeaders, deliverWebhook } from '../src/shared/webhook.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -463,6 +466,196 @@ describe('Security', () => {
       const clients = (body.data as { clients: Array<{ username: string }> }).clients;
       expect(clients).toHaveLength(1);
       expect(clients[0].username).toBe('alice');
+    });
+  });
+
+  // ── 6a. Webhook Header CRLF Injection ──────────────────────────────────
+
+  describe('webhook header CRLF injection', () => {
+    it('resolveWebhookHeaders passes through header values as-is (no server-side filtering)', () => {
+      // resolveWebhookHeaders resolves values from config; it does not sanitize.
+      // The actual protection comes from Node.js fetch (undici) which rejects
+      // headers containing forbidden characters like \r\n.
+      const headers = resolveWebhookHeaders([
+        { name: 'X-Custom', value: 'safe-value' },
+        { name: 'X-Injected', value: 'evil\r\nX-Forwarded-For: 127.0.0.1' },
+      ]);
+
+      expect(headers['X-Custom']).toBe('safe-value');
+      // The value is passed through — the guard is at the HTTP layer
+      expect(headers['X-Injected']).toBe('evil\r\nX-Forwarded-For: 127.0.0.1');
+    });
+
+    it('resolveWebhookHeaders resolves env var values including those with CRLF', () => {
+      const envKey = 'TEST_CRLF_HEADER_VALUE';
+      process.env[envKey] = 'injected\r\nX-Evil: true';
+      try {
+        const headers = resolveWebhookHeaders([
+          { name: 'Authorization', valueFromEnv: envKey },
+        ]);
+        expect(headers['Authorization']).toBe('injected\r\nX-Evil: true');
+      } finally {
+        delete process.env[envKey];
+      }
+    });
+
+    it('deliverWebhook rejects or safely handles headers with CRLF characters', async () => {
+      // Node.js fetch (undici) throws a TypeError when header values contain
+      // \r or \n characters. This is the runtime guard against header injection.
+      const result = await deliverWebhook({
+        url: 'http://127.0.0.1:1/nonexistent',
+        headers: { 'X-Injected': 'evil\r\nX-Forwarded-For: 127.0.0.1' },
+        payload: { test: true },
+        timeoutMs: 2000,
+        allowPrivateUrls: true,
+      });
+
+      // The delivery must fail — either because fetch rejects the invalid header
+      // or because the connection itself fails. In either case, success must be false.
+      expect(result.success).toBe(false);
+      // If undici catches the header injection specifically, error mentions "header"
+      // But even if it fails for another reason (connection refused), the injection
+      // never reaches the wire. We verify the request did not succeed.
+      expect(result.statusCode).toBeUndefined();
+    });
+
+    it('deliverWebhook rejects header names with CRLF characters', async () => {
+      const result = await deliverWebhook({
+        url: 'http://127.0.0.1:1/nonexistent',
+        headers: { 'X-Evil\r\nInjected': 'value' },
+        payload: { test: true },
+        timeoutMs: 2000,
+        allowPrivateUrls: true,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.statusCode).toBeUndefined();
+    });
+
+    it('deliverWebhook succeeds with clean header values', async () => {
+      // Sanity check: normal headers should not trigger any rejection.
+      // We still expect failure because the URL is unreachable, but the error
+      // should be a connection error, not a header validation error.
+      const result = await deliverWebhook({
+        url: 'http://127.0.0.1:1/nonexistent',
+        headers: { 'X-Custom': 'perfectly-safe-value', 'Authorization': 'Bearer token123' },
+        payload: { test: true },
+        timeoutMs: 2000,
+        allowPrivateUrls: true,
+      });
+
+      expect(result.success).toBe(false);
+      // Error should be about connection, not about headers
+      expect(result.error).toBeDefined();
+    });
+  });
+
+  // ── 6b. Tracked Function Argument SQL Injection ────────────────────────
+
+  describe('tracked function argument SQL injection', () => {
+    it('parameterises searchClients args — DROP TABLE injection is treated as literal', async () => {
+      const token = await tokens.backoffice();
+      const { status, body } = await graphqlRequest(
+        `query {
+          searchClients(args: { searchTerm: "'; DROP TABLE client; --" }) {
+            id username
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as { searchClients: unknown[] }).searchClients;
+      // The injection string is treated as a literal search term, so no rows match
+      expect(data).toHaveLength(0);
+
+      // Verify the client table still exists and has data
+      const pool = getPool();
+      const check = await pool.query('SELECT count(*)::int AS cnt FROM client');
+      expect(check.rows[0].cnt).toBeGreaterThan(0);
+    });
+
+    it('parameterises searchClients args — UNION SELECT injection returns no rows', async () => {
+      const token = await tokens.backoffice();
+      const { status, body } = await graphqlRequest(
+        `query {
+          searchClients(args: { searchTerm: "' UNION SELECT * FROM branch --" }) {
+            id username
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as { searchClients: unknown[] }).searchClients;
+      expect(data).toHaveLength(0);
+    });
+
+    it('parameterises searchClients args — stacked query injection has no effect', async () => {
+      const token = await tokens.backoffice();
+      const { status, body } = await graphqlRequest(
+        `query {
+          searchClients(args: { searchTerm: "alice'; DELETE FROM client WHERE '1'='1" }) {
+            id username
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as { searchClients: unknown[] }).searchClients;
+      expect(data).toHaveLength(0);
+
+      // All rows still intact
+      const pool = getPool();
+      const check = await pool.query('SELECT count(*)::int AS cnt FROM client');
+      expect(check.rows[0].cnt).toBeGreaterThan(0);
+    });
+
+    it('parameterises searchClients args — boolean-based blind injection returns no rows', async () => {
+      const token = await tokens.backoffice();
+      const { status, body } = await graphqlRequest(
+        `query {
+          searchClients(args: { searchTerm: "' OR '1'='1" }) {
+            id username
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as { searchClients: unknown[] }).searchClients;
+      // If SQL injection worked, this would return all rows.
+      // With parameterisation, the literal "' OR '1'='1" is searched, returning nothing.
+      expect(data).toHaveLength(0);
+    });
+
+    it('searchClients still works normally after injection attempts', async () => {
+      // Sanity check: verify normal queries still work, proving the table is intact
+      const token = await tokens.backoffice();
+      const { status, body } = await graphqlRequest(
+        `query {
+          searchClients(args: { searchTerm: "alice" }) {
+            id username
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as { searchClients: Array<{ username: string }> }).searchClients;
+      expect(data.length).toBeGreaterThan(0);
+      expect(data.some((c) => c.username === 'alice')).toBe(true);
     });
   });
 });

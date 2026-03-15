@@ -221,6 +221,45 @@ CREATE TABLE "user" (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- ─── Self-referential table (P6.3a) ──────────────────────────────────────
+
+CREATE TABLE category (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  parent_id UUID REFERENCES category(id),
+  level INT DEFAULT 0
+);
+
+-- ─── Multiple FKs to same table (P6.3d) ─────────────────────────────────
+
+CREATE TABLE transfer (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  from_account_id UUID NOT NULL REFERENCES account(id),
+  to_account_id UUID NOT NULL REFERENCES account(id),
+  amount NUMERIC(20,4) NOT NULL,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- ─── Composite foreign key (P6.3b) ──────────────────────────────────────
+
+CREATE TABLE fiscal_period (
+  year INT NOT NULL,
+  quarter INT NOT NULL,
+  name TEXT NOT NULL,
+  PRIMARY KEY (year, quarter)
+);
+
+CREATE TABLE fiscal_report (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fiscal_year INT NOT NULL,
+  fiscal_quarter INT NOT NULL,
+  title TEXT NOT NULL,
+  amount NUMERIC(20,4) DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  FOREIGN KEY (fiscal_year, fiscal_quarter) REFERENCES fiscal_period(year, quarter)
+);
+
 -- ─── Materialized view ─────────────────────────────────────────────────────
 
 CREATE MATERIALIZED VIEW client_summary AS
@@ -267,11 +306,45 @@ RETURNS TEXT AS $$
   END
 $$ LANGUAGE SQL IMMUTABLE;
 
+-- ─── SETOF computed field (P6.4c) ────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION client_active_accounts(client_row client)
+RETURNS SETOF account AS $$
+  SELECT * FROM account WHERE client_id = client_row.id AND active = true
+$$ LANGUAGE SQL STABLE;
+
+-- ─── Computed field with arguments (P6.4e) ──────────────────────────────
+
+CREATE OR REPLACE FUNCTION client_balance_in_currency(
+  client_row client,
+  target_currency text DEFAULT 'EUR'
+) RETURNS NUMERIC AS $$
+  SELECT COALESCE(SUM(balance), 0)
+  FROM account
+  WHERE client_id = client_row.id AND currency_id = target_currency
+$$ LANGUAGE SQL STABLE;
+
+-- ─── Computed field with session variable (P6.4h) ───────────────────────
+
+CREATE OR REPLACE FUNCTION client_is_own(
+  client_row client,
+  hasura_session json DEFAULT '{}'::json
+) RETURNS BOOLEAN AS $$
+  SELECT client_row.id = (hasura_session->>'x-hasura-user-id')::uuid
+$$ LANGUAGE SQL STABLE;
+
+-- ─── Computed field on materialized view (P6.4i) ────────────────────────
+
+CREATE OR REPLACE FUNCTION client_summary_score(cs client_summary)
+RETURNS NUMERIC AS $$
+  SELECT cs.total_balance + (cs.payment_count * 100)
+$$ LANGUAGE SQL IMMUTABLE;
+
 -- ─── Tracked function: SETOF query ───────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION search_clients(search_term text)
 RETURNS SETOF client AS $$
-  SELECT * FROM client WHERE first_name ILIKE '%' || search_term || '%' OR last_name ILIKE '%' || search_term || '%' OR username ILIKE '%' || search_term || '%' OR email ILIKE '%' || search_term || '%'
+  SELECT * FROM client WHERE username ILIKE '%' || search_term || '%' OR email ILIKE '%' || search_term || '%'
 $$ LANGUAGE SQL STABLE;
 
 -- ─── Tracked function: mutation (single row) ────────────────────────────
@@ -280,6 +353,34 @@ CREATE OR REPLACE FUNCTION deactivate_client(client_uuid uuid)
 RETURNS client AS $$
   UPDATE client SET status = 'inactive' WHERE id = client_uuid RETURNING *
 $$ LANGUAGE SQL VOLATILE;
+
+-- ─── Tracked function: diverse arg types (P6.5a) ────────────────────────
+
+CREATE OR REPLACE FUNCTION search_clients_by_date(since timestamptz)
+RETURNS SETOF client AS $$
+  SELECT * FROM client WHERE created_at >= since
+$$ LANGUAGE SQL STABLE;
+
+CREATE OR REPLACE FUNCTION search_clients_by_trust(min_level int, max_level int DEFAULT 10)
+RETURNS SETOF client AS $$
+  SELECT * FROM client WHERE trust_level >= min_level AND trust_level <= max_level
+$$ LANGUAGE SQL STABLE;
+
+-- ─── Tracked function: session variable injection (P6.5d) ───────────────
+
+CREATE OR REPLACE FUNCTION my_clients(hasura_session json)
+RETURNS SETOF client AS $$
+  SELECT * FROM client WHERE id = (hasura_session->>'x-hasura-user-id')::uuid
+$$ LANGUAGE SQL STABLE;
+
+-- ─── Non-public schema function (P6.5i) ─────────────────────────────────
+
+CREATE SCHEMA IF NOT EXISTS utils;
+
+CREATE OR REPLACE FUNCTION utils.count_active_clients()
+RETURNS SETOF client AS $$
+  SELECT * FROM client WHERE status = 'active'
+$$ LANGUAGE SQL STABLE;
 
 -- ─── Indexes ────────────────────────────────────────────────────────────────
 
@@ -386,6 +487,28 @@ INSERT INTO appointment (client_id, product_id, branch_id, currency_id, priority
 INSERT INTO "user" (email, name, role_id) VALUES
   ('admin@test.com', 'Admin User', 1),
   ('support@test.com', 'Support User', 2);
+
+-- Categories (self-referential hierarchy)
+INSERT INTO category (id, name, parent_id, level) VALUES
+  ('ca000000-0000-0000-0000-000000000001', 'Funeral Services', NULL, 0),
+  ('ca000000-0000-0000-0000-000000000002', 'Traditional', 'ca000000-0000-0000-0000-000000000001', 1),
+  ('ca000000-0000-0000-0000-000000000003', 'Cremation', 'ca000000-0000-0000-0000-000000000001', 1),
+  ('ca000000-0000-0000-0000-000000000004', 'Full Service Cremation', 'ca000000-0000-0000-0000-000000000003', 2);
+
+-- Transfers (multiple FKs to same table)
+INSERT INTO transfer (id, from_account_id, to_account_id, amount, note) VALUES
+  ('cc000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000002', 100.00, 'EUR to USD transfer'),
+  ('cc000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000004', 'e0000000-0000-0000-0000-000000000001', 250.00, 'GBP to EUR transfer');
+
+-- Fiscal periods + reports (composite FK)
+INSERT INTO fiscal_period (year, quarter, name) VALUES
+  (2025, 1, 'Q1 2025'),
+  (2025, 2, 'Q2 2025'),
+  (2025, 3, 'Q3 2025');
+
+INSERT INTO fiscal_report (id, fiscal_year, fiscal_quarter, title, amount) VALUES
+  ('cd000000-0000-0000-0000-000000000001', 2025, 1, 'Revenue Report Q1', 50000.00),
+  ('cd000000-0000-0000-0000-000000000002', 2025, 2, 'Revenue Report Q2', 65000.00);
 
 -- Refresh materialized view
 REFRESH MATERIALIZED VIEW client_summary;

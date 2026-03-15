@@ -13,6 +13,7 @@ import {
   tokens, ADMIN_SECRET,
   ALICE_ID, BOB_ID, CHARLIE_ID, DIANA_ID,
   BRANCH_TEST_ID, BRANCH_OTHER_ID,
+  ACCOUNT_ALICE_ID,
   TEST_DB_URL, getPool,
 } from './setup.js';
 
@@ -678,5 +679,400 @@ describe('Nested logical operators', () => {
     // _not of empty filter: NOT(TRUE) => no rows  OR  NOT(no-op) => all rows
     // Implementation may vary; just ensure the query executes without error
     expect(Array.isArray(clients)).toBe(true);
+  });
+});
+
+// =============================================================================
+// 7. Inherited role permission merging (P6.2a)
+// =============================================================================
+
+describe('Inherited role permission merging', () => {
+  // Inherited roles from inherited_roles.yaml:
+  //   backoffice_admin → backoffice + administrator
+  //   support          → backoffice
+  //   auditor          → backoffice + function
+
+  // Helper to create JWTs for inherited roles
+  async function backofficeAdminToken(): Promise<string> {
+    return createJWT({
+      role: 'backoffice_admin',
+      allowedRoles: ['backoffice_admin', 'backoffice', 'administrator'],
+    });
+  }
+
+  async function supportToken(): Promise<string> {
+    return createJWT({
+      role: 'support',
+      allowedRoles: ['support', 'backoffice'],
+    });
+  }
+
+  async function auditorToken(clientId: string = ALICE_ID): Promise<string> {
+    return createJWT({
+      role: 'auditor',
+      allowedRoles: ['auditor', 'backoffice', 'function'],
+      extra: { 'x-hasura-client-id': clientId },
+    });
+  }
+
+  it('SELECT column union: backofficeAdmin can SELECT all columns (inherits administrator\'s * columns)', async () => {
+    const token = await backofficeAdminToken();
+    // administrator has columns: "*", backoffice has columns: "*"
+    // Union of both is "*", so backoffice_admin should be able to read all columns
+    // including on_hold and metadata which are available via both roles
+    const { body } = await graphqlRequest(
+      `query {
+        clients {
+          id username email status branchId currencyId countryId
+          languageId trustLevel onHold tags metadata
+          lastContactAt createdAt updatedAt
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients.length).toBeGreaterThanOrEqual(4);
+    // Verify all columns are present (not null/undefined at schema level)
+    const first = clients[0];
+    expect(first).toHaveProperty('id');
+    expect(first).toHaveProperty('username');
+    expect(first).toHaveProperty('onHold');
+    expect(first).toHaveProperty('metadata');
+    expect(first).toHaveProperty('updatedAt');
+  });
+
+  it('SELECT column union: support inherits backoffice columns (*)', async () => {
+    const token = await supportToken();
+    // support inherits backoffice which has columns: "*"
+    // So support should be able to read all columns
+    const { body } = await graphqlRequest(
+      `query {
+        clients {
+          id username email status branchId currencyId countryId
+          languageId trustLevel onHold tags metadata
+          lastContactAt createdAt updatedAt
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients.length).toBeGreaterThanOrEqual(4);
+    const first = clients[0];
+    expect(first).toHaveProperty('id');
+    expect(first).toHaveProperty('onHold');
+    expect(first).toHaveProperty('metadata');
+    expect(first).toHaveProperty('updatedAt');
+  });
+
+  it('INSERT column union: backofficeAdmin can INSERT all columns (inherits administrator\'s * + backoffice\'s restricted columns)', async () => {
+    const token = await backofficeAdminToken();
+    // administrator has insert columns: "*" with check: {}
+    // backoffice has insert columns: restricted list with check on branch_id
+    // Union gives "*" with check: OR({branch_id not null}, {}) = {} (always true)
+    const { body } = await graphqlRequest(
+      `mutation {
+        insertClient(object: {
+          username: "inherited_insert_test",
+          email: "inherited_insert@test.com",
+          branchId: "${BRANCH_TEST_ID}",
+          currencyId: "EUR",
+          countryId: "FI",
+          languageId: "en",
+          trustLevel: 5
+        }) { id username trustLevel }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(body.errors).toBeUndefined();
+    const inserted = (body.data as { insertClient: AnyRow }).insertClient;
+    expect(inserted.username).toBe('inherited_insert_test');
+    // administrator's insert has no "set" presets, so trustLevel should be as provided
+    // (or if merging takes the most permissive, the set presets are not forced)
+    expect(inserted.id).toBeDefined();
+
+    // Clean up: delete the inserted row using admin secret
+    const insertedId = inserted.id as string;
+    await graphqlRequest(
+      `mutation { deleteClientByPk(id: "${insertedId}") { id } }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+  });
+
+  it('DELETE from inherited role: backofficeAdmin can DELETE (inherits administrator\'s delete permission)', async () => {
+    // First, insert a throwaway client as admin
+    const { body: insertBody } = await graphqlRequest(
+      `mutation {
+        insertClient(object: {
+          username: "delete_test_inherited",
+          email: "delete_inherited@test.com",
+          branchId: "${BRANCH_TEST_ID}",
+          currencyId: "EUR",
+          countryId: "FI"
+        }) { id }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(insertBody.errors).toBeUndefined();
+    const newId = (insertBody.data as { insertClient: AnyRow }).insertClient.id as string;
+
+    // backoffice_admin should be able to delete (inherits administrator's delete permission)
+    const token = await backofficeAdminToken();
+    const { body: deleteBody } = await graphqlRequest(
+      `mutation { deleteClientByPk(id: "${newId}") { id } }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(deleteBody.errors).toBeUndefined();
+    expect((deleteBody.data as { deleteClientByPk: AnyRow }).deleteClientByPk.id).toBe(newId);
+  });
+
+  it('DELETE from inherited role: support cannot DELETE (backoffice has no delete permission)', async () => {
+    const token = await supportToken();
+    // support inherits only backoffice, which has no delete permission on client
+    const { body } = await graphqlRequest(
+      `mutation { deleteClientByPk(id: "${ALICE_ID}") { id } }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    // Should fail: no delete permission
+    expect(body.errors).toBeDefined();
+    expect(body.errors!.length).toBeGreaterThan(0);
+  });
+
+  it('allow_aggregations flag: support can aggregate on clients (inherits backoffice\'s allow_aggregations: true)', async () => {
+    const token = await supportToken();
+    // backoffice has allow_aggregations: true on client table
+    // support inherits backoffice, so should be able to use aggregate queries
+    const { body } = await graphqlRequest(
+      `query {
+        clientsAggregate {
+          aggregate { count }
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(body.errors).toBeUndefined();
+    const agg = (body.data as { clientsAggregate: { aggregate: { count: number } } }).clientsAggregate;
+    expect(agg.aggregate.count).toBeGreaterThanOrEqual(4);
+  });
+
+  it('filter OR merge: auditor sees ALL clients (OR of backoffice filter:{} and function filter)', async () => {
+    const token = await auditorToken(ALICE_ID);
+    // backoffice has filter: {} (no restriction = always true)
+    // function has filter: { id: { _eq: X-Hasura-Client-Id } }
+    // OR(true, conditional) = true → auditor should see ALL clients
+    const { body } = await graphqlRequest(
+      `query { clients { id username } }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    // Should see all 4 seed clients, not just the one matching X-Hasura-Client-Id
+    expect(clients.length).toBeGreaterThanOrEqual(4);
+    const names = clients.map((c) => c.username);
+    expect(names).toContain('alice');
+    expect(names).toContain('bob');
+    expect(names).toContain('charlie');
+    expect(names).toContain('diana');
+  });
+});
+
+// =============================================================================
+// 8. Mutation permission checks (P6.2b)
+// =============================================================================
+
+describe('Mutation permission checks', () => {
+  // Client update check: _and: [{ status: { _eq: active } }, { on_hold: { _eq: false } }]
+  // Client update columns (client role): language_id, currency_id
+  // Client update filter: { id: { _eq: X-Hasura-User-Id } }
+
+  it('client update succeeds when check passes (status=active, on_hold=false)', async () => {
+    // Alice is active with on_hold=false by default in seed data
+    const token = await tokens.client(ALICE_ID);
+
+    // Update Alice's languageId to 'fi' — should succeed
+    const { body } = await graphqlRequest(
+      `mutation {
+        updateClientByPk(
+          pkColumns: { id: "${ALICE_ID}" },
+          _set: { languageId: "fi" }
+        ) { id languageId }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(body.errors).toBeUndefined();
+    const updated = (body.data as { updateClientByPk: AnyRow }).updateClientByPk;
+    expect(updated.id).toBe(ALICE_ID);
+    expect(updated.languageId).toBe('fi');
+
+    // Restore Alice's languageId to 'en'
+    await graphqlRequest(
+      `mutation {
+        updateClientByPk(
+          pkColumns: { id: "${ALICE_ID}" },
+          _set: { languageId: "en" }
+        ) { id }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+  });
+
+  it('client update fails when check fails (on_hold=true)', async () => {
+    // Set Alice's on_hold to true using admin
+    await graphqlRequest(
+      `mutation {
+        updateClientByPk(
+          pkColumns: { id: "${ALICE_ID}" },
+          _set: { onHold: true }
+        ) { id }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    try {
+      // Now try to update as client role — should fail because on_hold=true
+      const token = await tokens.client(ALICE_ID);
+      const { body } = await graphqlRequest(
+        `mutation {
+          updateClientByPk(
+            pkColumns: { id: "${ALICE_ID}" },
+            _set: { languageId: "fi" }
+          ) { id languageId }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+      // The update should fail or return null (no rows matched the check)
+      // Hasura returns null for updateByPk when check constraint prevents update
+      if (body.errors) {
+        expect(body.errors.length).toBeGreaterThan(0);
+      } else {
+        // If no error, the result should be null (row didn't pass post-update check)
+        expect((body.data as { updateClientByPk: AnyRow | null }).updateClientByPk).toBeNull();
+      }
+    } finally {
+      // Restore Alice's on_hold to false
+      await graphqlRequest(
+        `mutation {
+          updateClientByPk(
+            pkColumns: { id: "${ALICE_ID}" },
+            _set: { onHold: false }
+          ) { id }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+    }
+  });
+
+  // Invoice insert check for function role:
+  //   check: _and: [{ amount: { _gt: 0 } }, { client: { status: { _eq: active } } }]
+  //   set: { state: draft }
+  //   columns: client_id, account_id, currency_id, amount, type, provider, external_id, metadata
+
+  it('invoice insert succeeds when check passes (amount > 0, client is active)', async () => {
+    // Alice is active, so inserting an invoice with amount > 0 should succeed
+    const token = await tokens.function_(ALICE_ID);
+    const { body } = await graphqlRequest(
+      `mutation {
+        insertInvoiceOne(object: {
+          clientId: "${ALICE_ID}",
+          accountId: "${ACCOUNT_ALICE_ID}",
+          currencyId: "EUR",
+          amount: 25,
+          type: PAYMENT
+        }) { id clientId amount state type }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(body.errors).toBeUndefined();
+    const invoice = (body.data as { insertInvoiceOne: AnyRow }).insertInvoiceOne;
+    expect(invoice.clientId).toBe(ALICE_ID);
+    expect(Number(invoice.amount)).toBe(25);
+    // state should be preset to 'draft' by the set clause
+    expect(invoice.state).toBe('DRAFT');
+    expect(invoice.type).toBe('PAYMENT');
+
+    // Clean up
+    const invoiceId = invoice.id as string;
+    await graphqlRequest(
+      `mutation { deleteInvoiceByPk(id: "${invoiceId}") { id } }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+  });
+
+  it('invoice insert fails when amount is 0 (check: amount > 0)', async () => {
+    const token = await tokens.function_(ALICE_ID);
+    const { body } = await graphqlRequest(
+      `mutation {
+        insertInvoiceOne(object: {
+          clientId: "${ALICE_ID}",
+          accountId: "${ACCOUNT_ALICE_ID}",
+          currencyId: "EUR",
+          amount: 0,
+          type: PAYMENT
+        }) { id }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    // Should fail: amount must be > 0
+    expect(body.errors).toBeDefined();
+    expect(body.errors!.length).toBeGreaterThan(0);
+  });
+
+  it('invoice insert fails when amount is negative (check: amount > 0)', async () => {
+    const token = await tokens.function_(ALICE_ID);
+    const { body } = await graphqlRequest(
+      `mutation {
+        insertInvoiceOne(object: {
+          clientId: "${ALICE_ID}",
+          accountId: "${ACCOUNT_ALICE_ID}",
+          currencyId: "EUR",
+          amount: -10,
+          type: PAYMENT
+        }) { id }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    // Should fail: amount must be > 0
+    expect(body.errors).toBeDefined();
+    expect(body.errors!.length).toBeGreaterThan(0);
+  });
+
+  it('invoice insert fails when client is not active (check: client.status = active)', async () => {
+    // Charlie is on_hold, so inserting an invoice for Charlie should fail the check
+    const token = await tokens.function_(CHARLIE_ID);
+    const { body } = await graphqlRequest(
+      `mutation {
+        insertInvoiceOne(object: {
+          clientId: "${CHARLIE_ID}",
+          accountId: "e0000000-0000-0000-0000-000000000003",
+          currencyId: "EUR",
+          amount: 50,
+          type: PAYMENT
+        }) { id }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    // Should fail: Charlie's status is 'on_hold', not 'active'
+    expect(body.errors).toBeDefined();
+    expect(body.errors!.length).toBeGreaterThan(0);
   });
 });

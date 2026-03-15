@@ -8,7 +8,7 @@ import type { SchemaModel, TableInfo, FunctionInfo, TrackedFunctionConfig } from
 import { resolveTrackedFunctions } from '../src/schema/tracked-functions.js';
 import {
   getPool, closePool, waitForDb, makeSession,
-  startServer, stopServer, graphqlRequest, tokens,
+  startServer, stopServer, graphqlRequest, tokens, createJWT,
   METADATA_DIR, SERVER_CONFIG_PATH, TEST_DB_URL,
   ALICE_ID, BOB_ID, CHARLIE_ID, DIANA_ID, ADMIN_SECRET,
 } from './setup.js';
@@ -545,5 +545,542 @@ describe('Tracked Functions — Aggregate', () => {
     expect(data.searchClientsAggregate).toBeDefined();
     expect(data.searchClientsAggregate.aggregate).toBeDefined();
     expect(data.searchClientsAggregate.aggregate.count).toBeGreaterThan(0);
+  });
+
+  it('should execute aggregate sum on a SETOF function', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsAggregate(args: { searchTerm: "" }) {
+          aggregate {
+            sum { trustLevel }
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsAggregate: { aggregate: { sum: { trustLevel: number } } } };
+    expect(data.searchClientsAggregate.aggregate.sum).toBeDefined();
+    // alice=2, bob=1, charlie=0, diana=3 => sum=6
+    expect(Number(data.searchClientsAggregate.aggregate.sum.trustLevel)).toBe(6);
+  });
+
+  it('should execute aggregate avg on a SETOF function', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsAggregate(args: { searchTerm: "" }) {
+          aggregate {
+            avg { trustLevel }
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsAggregate: { aggregate: { avg: { trustLevel: number } } } };
+    expect(data.searchClientsAggregate.aggregate.avg).toBeDefined();
+    // alice=2, bob=1, charlie=0, diana=3 => avg=1.5
+    expect(Number(data.searchClientsAggregate.aggregate.avg.trustLevel)).toBe(1.5);
+  });
+
+  it('should execute aggregate min on a SETOF function', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsAggregate(args: { searchTerm: "" }) {
+          aggregate {
+            min { trustLevel }
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsAggregate: { aggregate: { min: { trustLevel: number } } } };
+    expect(data.searchClientsAggregate.aggregate.min).toBeDefined();
+    // charlie has trust_level=0 => min=0
+    expect(Number(data.searchClientsAggregate.aggregate.min.trustLevel)).toBe(0);
+  });
+
+  it('should execute aggregate max on a SETOF function', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsAggregate(args: { searchTerm: "" }) {
+          aggregate {
+            max { trustLevel }
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsAggregate: { aggregate: { max: { trustLevel: number } } } };
+    expect(data.searchClientsAggregate.aggregate.max).toBeDefined();
+    // diana has trust_level=3 => max=3
+    expect(Number(data.searchClientsAggregate.aggregate.max.trustLevel)).toBe(3);
+  });
+
+  it('should execute multiple aggregate functions together on a SETOF function', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsAggregate(args: { searchTerm: "" }) {
+          aggregate {
+            count
+            sum { trustLevel }
+            avg { trustLevel }
+            min { trustLevel }
+            max { trustLevel }
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const agg = (body.data as { searchClientsAggregate: { aggregate: AnyRow } })
+      .searchClientsAggregate.aggregate;
+    expect(agg.count).toBeGreaterThanOrEqual(4);
+    expect(Number((agg.sum as AnyRow).trustLevel)).toBe(6);
+    expect(Number((agg.avg as AnyRow).trustLevel)).toBe(1.5);
+    expect(Number((agg.min as AnyRow).trustLevel)).toBe(0);
+    expect(Number((agg.max as AnyRow).trustLevel)).toBe(3);
+  });
+});
+
+// ─── Empty / Null Results (P6.5g) ────────────────────────────────────────
+
+describe('Tracked Functions — Empty/Null Results', () => {
+  it('SETOF function returns empty array when nothing matches', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClients(args: { searchTerm: "zzzzznonexistent" }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClients: AnyRow[] };
+    expect(Array.isArray(data.searchClients)).toBe(true);
+    expect(data.searchClients.length).toBe(0);
+  });
+
+  it('mutation function returns null for non-existent UUID', async () => {
+    const nonExistentId = '00000000-0000-0000-0000-000000000099';
+    const { body } = await graphqlRequest(
+      `mutation {
+        deactivateClient(args: { clientUuid: "${nonExistentId}" }) {
+          id
+          username
+          status
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    // Non-SETOF function returning no rows produces a GraphQL error
+    // because the return type is non-nullable Client!
+    expect(body.errors).toBeDefined();
+    expect(body.errors.length).toBeGreaterThan(0);
+  });
+});
+
+// ─── Mutation Functions with Relationships (P6.5h) ──────────────────────
+
+describe('Tracked Functions — Mutation with Relationships', () => {
+  it('mutation function resolves relationships in RETURNING', async () => {
+    // Ensure charlie is active first
+    const pool = getPool();
+    await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
+
+    const { body } = await graphqlRequest(
+      `mutation {
+        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          id
+          username
+          status
+          branch {
+            name
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { deactivateClient: AnyRow };
+    expect(data.deactivateClient).toBeDefined();
+    expect(data.deactivateClient.username).toBe('charlie');
+    expect(data.deactivateClient.status).toBe('INACTIVE');
+    expect(data.deactivateClient.branch).toBeDefined();
+    // Charlie is in OtherBranch (branch_id = a0...0002)
+    expect((data.deactivateClient.branch as AnyRow).name).toBe('OtherBranch');
+
+    // Restore charlie
+    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+  });
+
+  it('mutation function resolves array relationships in RETURNING', async () => {
+    // Ensure charlie is active first
+    const pool = getPool();
+    await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
+
+    const { body } = await graphqlRequest(
+      `mutation {
+        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          id
+          username
+          accounts {
+            balance
+            currencyId
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { deactivateClient: AnyRow };
+    expect(data.deactivateClient).toBeDefined();
+    expect(data.deactivateClient.username).toBe('charlie');
+    expect(Array.isArray(data.deactivateClient.accounts)).toBe(true);
+    // Charlie has one account with balance=0
+    const accounts = data.deactivateClient.accounts as AnyRow[];
+    expect(accounts.length).toBe(1);
+    expect(Number(accounts[0].balance)).toBe(0);
+
+    // Restore charlie
+    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+  });
+
+  it('SETOF query function resolves nested relationships', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClients(args: { searchTerm: "alice" }) {
+          id
+          username
+          branch {
+            name
+          }
+          accounts {
+            balance
+            creditBalance
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClients: AnyRow[] };
+    expect(data.searchClients.length).toBeGreaterThan(0);
+    const alice = data.searchClients.find((c) => c.username === 'alice');
+    expect(alice).toBeDefined();
+    expect(alice!.branch).toBeDefined();
+    expect((alice!.branch as AnyRow).name).toBe('TestBranch');
+    expect(Array.isArray(alice!.accounts)).toBe(true);
+    const accounts = alice!.accounts as AnyRow[];
+    expect(accounts.length).toBe(1);
+    expect(Number(accounts[0].balance)).toBe(1500);
+    expect(Number(accounts[0].creditBalance)).toBe(200);
+  });
+});
+
+// ─── Diverse Argument Types (P6.5a) ──────────────────────────────────────
+
+describe('Tracked Functions — Diverse Argument Types', () => {
+  it('should call searchClientsByDate with a date in the past and return clients', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsByDate(args: { since: "2000-01-01T00:00:00Z" }) {
+          id
+          username
+          createdAt
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsByDate: AnyRow[] };
+    expect(Array.isArray(data.searchClientsByDate)).toBe(true);
+    // All 4 seed clients were created after 2000-01-01
+    expect(data.searchClientsByDate.length).toBeGreaterThanOrEqual(4);
+    const usernames = data.searchClientsByDate.map((c) => c.username);
+    expect(usernames).toContain('alice');
+    expect(usernames).toContain('bob');
+    expect(usernames).toContain('charlie');
+    expect(usernames).toContain('diana');
+  });
+
+  it('should call searchClientsByTrust with minLevel=2 and return alice and diana', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsByTrust(args: { minLevel: 2 }) {
+          id
+          username
+          trustLevel
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsByTrust: AnyRow[] };
+    expect(Array.isArray(data.searchClientsByTrust)).toBe(true);
+    const usernames = data.searchClientsByTrust.map((c) => c.username);
+    // alice has trust_level=2, diana has trust_level=3
+    expect(usernames).toContain('alice');
+    expect(usernames).toContain('diana');
+    // bob (trust=1) and charlie (trust=0) should NOT be returned
+    expect(usernames).not.toContain('bob');
+    expect(usernames).not.toContain('charlie');
+  });
+
+  it('should call searchClientsByTrust with minLevel=0, maxLevel=1 and return bob and charlie', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsByTrust(args: { minLevel: 0, maxLevel: 1 }) {
+          id
+          username
+          trustLevel
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsByTrust: AnyRow[] };
+    expect(Array.isArray(data.searchClientsByTrust)).toBe(true);
+    const usernames = data.searchClientsByTrust.map((c) => c.username);
+    // bob has trust_level=1, charlie has trust_level=0
+    expect(usernames).toContain('bob');
+    expect(usernames).toContain('charlie');
+    // alice (trust=2) and diana (trust=3) should NOT be returned
+    expect(usernames).not.toContain('alice');
+    expect(usernames).not.toContain('diana');
+  });
+});
+
+// ─── Default Parameter Values (P6.5b) ────────────────────────────────────
+
+describe('Tracked Functions — Default Parameter Values', () => {
+  it('should use DEFAULT 10 for maxLevel when only minLevel is provided', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsByTrust(args: { minLevel: 2 }) {
+          id
+          username
+          trustLevel
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsByTrust: AnyRow[] };
+    expect(Array.isArray(data.searchClientsByTrust)).toBe(true);
+    const usernames = data.searchClientsByTrust.map((c) => c.username);
+    // With DEFAULT max_level=10, alice (trust=2) and diana (trust=3) should be returned
+    expect(usernames).toContain('alice');
+    expect(usernames).toContain('diana');
+    expect(usernames).not.toContain('bob');
+    expect(usernames).not.toContain('charlie');
+  });
+
+  it('should use explicit maxLevel when both minLevel and maxLevel are provided', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsByTrust(args: { minLevel: 0, maxLevel: 1 }) {
+          id
+          username
+          trustLevel
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsByTrust: AnyRow[] };
+    expect(Array.isArray(data.searchClientsByTrust)).toBe(true);
+    const usernames = data.searchClientsByTrust.map((c) => c.username);
+    // Explicit maxLevel=1 limits results to bob (trust=1) and charlie (trust=0)
+    expect(usernames).toContain('bob');
+    expect(usernames).toContain('charlie');
+    expect(usernames).not.toContain('alice');
+    expect(usernames).not.toContain('diana');
+  });
+});
+
+// ─── Session Variable Injection (P6.5d) ──────────────────────────────────
+
+describe('Tracked Functions — Session Variable Injection', () => {
+  it('should return only the calling client row when called as alice', async () => {
+    const token = await tokens.client(ALICE_ID);
+    const { body } = await graphqlRequest(
+      `query {
+        myClients {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { myClients: AnyRow[] };
+    expect(Array.isArray(data.myClients)).toBe(true);
+    expect(data.myClients.length).toBe(1);
+    expect(data.myClients[0].username).toBe('alice');
+    expect(data.myClients[0].id).toBe(ALICE_ID);
+  });
+
+  it('should return the row matching the backoffice user ID (or empty if no user-id claim)', async () => {
+    const token = await tokens.backoffice();
+    const { body } = await graphqlRequest(
+      `query {
+        myClients {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { myClients: AnyRow[] };
+    expect(Array.isArray(data.myClients)).toBe(true);
+    // backoffice token has no x-hasura-user-id, so the cast to uuid will fail
+    // or return no matching rows
+    expect(data.myClients.length).toBe(0);
+  });
+});
+
+// ─── Non-public Schema Functions (P6.5i) ─────────────────────────────────
+
+describe('Tracked Functions — Non-public Schema', () => {
+  it.todo(
+    'should support calling utils.countActiveClients from non-public schema ' +
+    '(currently skipped: server only introspects the public schema by default, ' +
+    'so "utils.count_active_clients" is not found in introspection)'
+  );
+});
+
+// ─── Inherited Role Permissions on Functions (P6.5f) ─────────────────────
+
+describe('Tracked Functions — Inherited Role Permissions', () => {
+  it('backoffice_admin can call searchClients (backoffice has permission)', async () => {
+    const token = await createJWT({
+      role: 'backoffice_admin',
+      allowedRoles: ['backoffice_admin', 'backoffice', 'administrator'],
+    });
+    const { body } = await graphqlRequest(
+      `query {
+        searchClients(args: { searchTerm: "" }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClients: AnyRow[] };
+    expect(Array.isArray(data.searchClients)).toBe(true);
+    expect(data.searchClients.length).toBeGreaterThan(0);
+  });
+
+  it('backoffice_admin can call deactivateClient (administrator has permission)', async () => {
+    const pool = getPool();
+    await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
+
+    const token = await createJWT({
+      role: 'backoffice_admin',
+      allowedRoles: ['backoffice_admin', 'backoffice', 'administrator'],
+    });
+    const { body } = await graphqlRequest(
+      `mutation {
+        deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          id
+          username
+          status
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { deactivateClient: AnyRow };
+    expect(data.deactivateClient).toBeDefined();
+    expect(data.deactivateClient.username).toBe('charlie');
+    expect(data.deactivateClient.status).toBe('INACTIVE');
+
+    // Restore charlie
+    await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+  });
+
+  it('support can call searchClients (backoffice has permission)', async () => {
+    const token = await createJWT({
+      role: 'support',
+      allowedRoles: ['support', 'backoffice'],
+    });
+    const { body } = await graphqlRequest(
+      `query {
+        searchClients(args: { searchTerm: "" }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClients: AnyRow[] };
+    expect(Array.isArray(data.searchClients)).toBe(true);
+    expect(data.searchClients.length).toBeGreaterThan(0);
+  });
+
+  it('support CANNOT call deactivateClient (only administrator has permission)', async () => {
+    const token = await createJWT({
+      role: 'support',
+      allowedRoles: ['support', 'backoffice'],
+    });
+    const { body } = await graphqlRequest(
+      `mutation {
+        deactivateClient(args: { clientUuid: "${ALICE_ID}" }) {
+          id
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+
+    expect(body.errors).toBeDefined();
+    expect(body.errors![0].message).toContain('Permission denied');
   });
 });

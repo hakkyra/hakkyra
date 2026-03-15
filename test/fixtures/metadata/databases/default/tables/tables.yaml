@@ -18,3 +18,7 @@
 - !include public_client_service.yaml
 - !include public_user.yaml
 - !include public_client_summary.yaml
+- !include public_category.yaml
+- !include public_transfer.yaml
+- !include public_fiscal_period.yaml
+- !include public_fiscal_report.yaml

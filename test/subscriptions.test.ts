@@ -409,6 +409,34 @@ describe('Subscriptions', () => {
     });
   });
 
+  describe('computed fields in subscriptions', () => {
+    it.todo('returns computed fields in subscription results — needs Mercurius subscription context fix', async () => {
+      const token = await createJWT({ role: 'backoffice' });
+      const client = createWsClient({ Authorization: `Bearer ${token}` });
+
+      try {
+        const data = await firstResult<{
+          clients: Array<{ id: string; username: string; totalBalance: number }>;
+        }>(client, `
+          subscription {
+            clients(where: { id: { _eq: "${ALICE_ID}" } }) {
+              id
+              username
+              totalBalance
+            }
+          }
+        `);
+        expect(data.clients).toBeDefined();
+        expect(data.clients.length).toBe(1);
+        expect(data.clients[0].username).toBe('alice');
+        // Alice: balance=1500 + credit_balance=200 => 1700
+        expect(Number(data.clients[0].totalBalance)).toBe(1700);
+      } finally {
+        await client.dispose();
+      }
+    });
+  });
+
   describe('streaming subscriptions', () => {
     it('returns initial data from branchStream', async () => {
       const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });

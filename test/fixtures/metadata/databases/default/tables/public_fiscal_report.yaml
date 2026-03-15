@@ -1,0 +1,37 @@
+table:
+  schema: public
+  name: fiscal_report
+
+configuration:
+  custom_root_fields:
+    select: fiscalReports
+    select_by_pk: fiscalReportByPk
+  custom_column_names:
+    id: id
+    fiscal_year: fiscalYear
+    fiscal_quarter: fiscalQuarter
+    title: title
+    amount: amount
+    created_at: createdAt
+
+object_relationships:
+  - name: fiscalPeriod
+    using:
+      manual_configuration:
+        remote_table:
+          schema: public
+          name: fiscal_period
+        column_mapping:
+          fiscal_year: year
+          fiscal_quarter: quarter
+
+select_permissions:
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}

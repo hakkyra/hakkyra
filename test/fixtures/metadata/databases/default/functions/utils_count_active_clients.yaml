@@ -1,0 +1,6 @@
+function:
+  name: count_active_clients
+  schema: utils
+permissions:
+  - role: backoffice
+  - role: administrator

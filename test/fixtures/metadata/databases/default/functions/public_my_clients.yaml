@@ -1,0 +1,9 @@
+function:
+  name: my_clients
+  schema: public
+configuration:
+  session_argument: hasura_session
+permissions:
+  - role: client
+  - role: backoffice
+  - role: administrator
