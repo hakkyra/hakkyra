@@ -35,7 +35,10 @@ export function resolveWebhookUrl(webhook: string, webhookFromEnv?: string): str
     const envValue = process.env[webhookFromEnv];
     if (envValue) return envValue;
   }
-  return webhook;
+  // Resolve Hasura-style {{ENV_VAR}} templates in the URL
+  return webhook.replace(/\{\{(\w+)\}\}/g, (_match, envName) => {
+    return process.env[envName] ?? '';
+  });
 }
 
 /**
