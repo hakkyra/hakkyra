@@ -162,7 +162,7 @@ export function pgTypeToGraphQL(
     };
   }
 
-  const mapping = stringifyNumericOverrides?.[baseType] ?? PG_TO_GRAPHQL[baseType];
+  const mapping = PG_TO_GRAPHQL[baseType];
   if (mapping) {
     return {
       name: mapping.name,
