@@ -102,9 +102,17 @@ function buildSetClause(
   const allowedColumns = permission?.columns;
   const assignments: string[] = [];
 
+  const presets = permission?.presets;
+
   // User-provided SET values
   for (const [col, val] of Object.entries(_set)) {
     if (!tableColumnNames.has(col)) continue;
+    // Reject user input for preset columns — presets are authoritative
+    if (presets && col in presets) {
+      throw new Error(
+        `Column "${col}" has a preset and cannot be provided for update on table "${table.schema}"."${table.name}"`,
+      );
+    }
     if (allowedColumns && allowedColumns !== '*' && !allowedColumns.includes(col)) {
       throw new Error(
         `Column "${col}" is not allowed for update on table "${table.schema}"."${table.name}"`,
@@ -113,20 +121,11 @@ function buildSetClause(
     assignments.push(`${quoteIdentifier(col)} = ${params.add(val)}`);
   }
 
-  // Apply presets (override user values)
-  if (permission?.presets) {
-    for (const [col, presetValue] of Object.entries(permission.presets)) {
+  // Apply presets
+  if (presets) {
+    for (const [col, presetValue] of Object.entries(presets)) {
       const resolved = resolvePreset(presetValue, session);
-      // Remove any existing assignment for this column (preset overrides)
-      const existingIdx = assignments.findIndex((a) =>
-        a.startsWith(quoteIdentifier(col) + ' = '),
-      );
-      const assignment = `${quoteIdentifier(col)} = ${params.add(resolved)}`;
-      if (existingIdx >= 0) {
-        assignments[existingIdx] = assignment;
-      } else {
-        assignments.push(assignment);
-      }
+      assignments.push(`${quoteIdentifier(col)} = ${params.add(resolved)}`);
     }
   }
 

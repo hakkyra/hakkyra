@@ -10,7 +10,7 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 
 - **GraphQL API** — auto-generated queries, mutations, and subscriptions for every tracked table
 - **REST API** — CRUD endpoints with PostgREST-style filtering and pagination
-- **Permissions** — row-level and column-level security per role, compiled to SQL at startup, with inherited role support
+- **Permissions** — row-level and column-level security per role, compiled to SQL at startup, with inherited role support and column presets
 - **Authentication** — JWT (HS256, RS256, ES256, Ed25519), JWKS auto-rotation, webhook auth
 - **Relationships** — object and array relationships resolved in a single SQL query
 - **Actions** — proxy mutations/queries to external webhook handlers with request/response transforms, async support, and action relationships
@@ -157,8 +157,10 @@ insert_permissions:
         branch_id:
           _is_null: false
       set:
-        status: active
+        status: active      # preset — cannot be provided by caller, always set to "active"
 ```
+
+Column presets (`set`) inject values automatically on insert/update. Preset columns cannot be provided by the caller — attempting to do so returns an error. Presets can reference session variables (e.g., `x-hasura-User-Id`) or literal values. InsertInput fields are all optional at the schema level since different roles have different presets and allowed columns; strict per-role validation happens at runtime.
 
 ## API Endpoints
 

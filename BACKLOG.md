@@ -61,7 +61,7 @@
 - [x] Session variable resolution (X-Hasura-* → JWT claim values)
 - [x] Computed field references in permission filters (emit function calls instead of column refs)
 - [x] Column-level permission enforcement (allowed columns per role per operation)
-- [x] Column presets (set) for insert/update
+- [x] Column presets (set) for insert/update — rejected at input if provided by caller, applied from session/literal at runtime
 - [x] Row limit enforcement
 - [x] Aggregation permission flag
 - [x] Admin role bypass
@@ -110,7 +110,7 @@
   - [x] Add relationship fields (object + array)
 - [x] Generate filter input types (BoolExp per table, camelCase field names)
 - [x] Generate order_by input types (camelCase)
-- [x] Generate mutation input types (camelCase: InsertInput, SetInput, PkColumnsInput)
+- [x] Generate mutation input types (camelCase: InsertInput with all-optional fields for per-role runtime validation, SetInput, PkColumnsInput)
 - [x] Generate aggregate types (count, sum, avg, min, max, nodes)
 - [x] Generate MutationResponse type (affectedRows, returning)
 - [x] Register Query root fields (camelCase: e.g. users, userByPk, usersAggregate)

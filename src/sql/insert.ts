@@ -112,6 +112,9 @@ function resolvePreset(value: string, session: SessionVariables): unknown {
 /**
  * Filter columns based on permission and apply presets.
  * Returns the final column-value pairs for the INSERT.
+ *
+ * Preset columns cannot be provided by the caller — they are always set from
+ * the permission configuration (session variables or literal values).
  */
 function prepareInsertData(
   obj: Record<string, unknown>,
@@ -122,19 +125,24 @@ function prepareInsertData(
   const result: Record<string, unknown> = {};
   const tableColumnNames = new Set(table.columns.map((c) => c.name));
   const allowedColumns = permission?.columns;
+  const presets = permission?.presets;
 
   // Add user-provided columns (filtered by permissions)
   for (const [col, val] of Object.entries(obj)) {
     if (!tableColumnNames.has(col)) continue; // skip unknown columns
+    // Reject user input for preset columns — presets are authoritative
+    if (presets && col in presets) {
+      throw new Error(`Column "${col}" has a preset and cannot be provided for insert on table "${table.schema}"."${table.name}"`);
+    }
     if (allowedColumns && allowedColumns !== '*' && !allowedColumns.includes(col)) {
       throw new Error(`Column "${col}" is not allowed for insert on table "${table.schema}"."${table.name}"`);
     }
     result[col] = val;
   }
 
-  // Apply presets (override user values)
-  if (permission?.presets) {
-    for (const [col, presetValue] of Object.entries(permission.presets)) {
+  // Apply presets
+  if (presets) {
+    for (const [col, presetValue] of Object.entries(presets)) {
       result[col] = resolvePreset(presetValue, session);
     }
   }

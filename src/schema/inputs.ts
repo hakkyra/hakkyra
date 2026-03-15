@@ -383,6 +383,8 @@ export function buildMutationInputTypes(
 ): MutationInputTypes {
   const typeName = getTypeName(table);
   // ── InsertInput ────────────────────────────────────────────────────────
+  // All fields are optional in the schema because different roles have different
+  // presets and allowed columns. Strict per-role validation happens at runtime.
   const insertInput = new GraphQLInputObjectType({
     name: `${typeName}InsertInput`,
     description: `Input type for inserting a row into ${typeName}.`,
@@ -390,12 +392,7 @@ export function buildMutationInputTypes(
       const fields: GraphQLInputFieldConfigMap = {};
       for (const column of table.columns) {
         const fieldName = toCamelCase(column.name);
-        let fieldType = columnToInputType(column, enumTypes, enumNames);
-
-        // For insert: columns without defaults and not nullable are required
-        if (!column.isNullable && !column.hasDefault) {
-          fieldType = new GraphQLNonNull(fieldType);
-        }
+        const fieldType = columnToInputType(column, enumTypes, enumNames);
 
         fields[fieldName] = {
           type: fieldType,
