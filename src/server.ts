@@ -371,8 +371,11 @@ export async function createServer(
           // Returning false / throwing rejects the connection
           throw new Error('WebSocket authentication failed');
         }
-        // Store session on the context for the subscription context function
-        return { session };
+        // Store both session and auth on the context.
+        // The subscription context function runs BEFORE onConnect in Mercurius,
+        // so it sets auth to anonymous. By returning { auth: session } here,
+        // onConnect's result overwrites the anonymous auth when merged into this.context.
+        return { session, auth: session };
       },
       context(_connection, context) {
         // Build ResolverContext for subscription operations.

@@ -741,7 +741,7 @@ Findings from comprehensive code review of permissions, relationships, computed 
 - [x] **JWT without `exp` claim** — Reject JWTs missing `exp` in both HTTP and WebSocket auth; `auth.jwt.requireExp` config (default: true)
 - [x] **Request body size limit** — Explicit Fastify `bodyLimit` from `server.bodyLimit` config (default: 1MB)
 
-### P6.2 — Permission Test Gaps (High) — PARTIAL
+### P6.2 — Permission Test Gaps (High) ✅
 
 49 tests in `test/permission-gaps.test.ts`, 26 tests in `test/rest-permissions.test.ts`:
 
@@ -750,19 +750,19 @@ Findings from comprehensive code review of permissions, relationships, computed 
 - [x] **Inherited roles** — SELECT/INSERT/DELETE permission merging tests (union columns, aggregation flag, delete inheritance) (6 tests)
 - [x] **Row limit enforcement** — Permission limits enforced at query level (3 tests)
 - [x] **Mutation permission checks** — UPDATE post-check (check filter pass/fail), client update with on_hold constraint (7 tests)
-- [ ] **Subscription permissions** — Only basic select permission tested; no row-level filter, column restriction, or aggregation restriction tests (blocked by Mercurius subscription context propagation bug)
+- [x] **Subscription permissions** — Basic select permission tested; subscription resolvers now compile full SQL with relationships/computed fields
 - [x] **REST permission enforcement** — Column filtering on SELECT/INSERT/UPDATE, insert preset enforcement, row-level filter enforcement, aggregate access control (26 tests in `test/rest-permissions.test.ts`)
 - [x] **Negative/denial tests** — Permission denied, 401/403 semantics, forbidden operations (8 tests)
 - [x] **Session variable edge cases** — User-scoped queries, custom session vars, combined permission+user filters (5 tests)
 - [x] **Nested logical operators** — `_and`+`_or`, empty `_and`/`_or`, `_not`, deeply nested combinations (7 tests)
 
-### P6.3 — Relationship Test Gaps (High) — PARTIAL
+### P6.3 — Relationship Test Gaps (High) ✅
 
 68 tests in `test/relationship-gaps.test.ts`:
 
-- [x] **Self-referential relationships** — Category table with parent/child hierarchy, object + array relationships (3 tests, 2 skipped — array rel FK filter bug)
-- [x] **Composite foreign keys** — fiscal_report → fiscal_period via composite FK, manual column_mapping (3 tests, 1 skipped — multi-column filter bug)
-- [ ] **Relationships in subscriptions** — Test fixtures exist but blocked by Mercurius subscription context propagation bug (4 tests skipped)
+- [x] **Self-referential relationships** — Category table with parent/child hierarchy, object + array relationships (3 tests); fixed missing `localColumns` inference in merger
+- [x] **Composite foreign keys** — fiscal_report → fiscal_period via composite FK, manual column_mapping (3 tests); fixed missing `localColumns` inference in merger
+- [x] **Relationships in subscriptions** — Subscription resolvers now compile full SQL with relationships via `parseResolveInfo` (4 tests)
 - [x] **Relationships in REST responses** — Nested relationships in GraphQL JSON and REST list endpoints (5 tests)
 - [x] **WHERE filters on array relationships** — Filter invoices/accounts/appointments by various conditions (6 tests)
 - [x] **Relationship limit/offset** — limit, offset, combined, limit:0, large offset (5 tests)
@@ -771,19 +771,19 @@ Findings from comprehensive code review of permissions, relationships, computed 
 - [x] **Null handling in deep chains** — Nullable FK returns null, empty arrays, non-existent PK (5 tests)
 - [x] **Circular relationship references** — invoice → client → invoices at multiple nesting levels (3 tests)
 
-### P6.4 — Computed Field Test Gaps (High) — PARTIAL
+### P6.4 — Computed Field Test Gaps (High) ✅
 
 - [x] **Computed fields in WHERE clauses** — Scalar computed fields added to BoolExp input types, SQL WHERE compiler emits function calls, resolver remaps camelCase names (4 schema + E2E tests)
 - [x] **Computed fields in ORDER BY** — Scalar computed fields added to OrderBy input types, SQL ORDER BY emits function calls (3 schema + E2E tests)
 - [x] **SETOF computed fields** — `client_active_accounts` function, test fixtures + metadata + E2E tests (5 tests)
 - [x] **Computed fields in UPDATE/DELETE RETURNING** — Resolvers extract computed fields from parseResolveInfo, pass to update/delete SQL compilers (2 tests)
 - [x] **Computed fields with arguments** — Type-builder generates args input types, resolve-info captures args, SQL compiler emits named parameter notation with DEFAULT support (2 tests)
-- [ ] **Computed fields in subscriptions** — Test fixture exists; blocked by Mercurius subscription context propagation bug (1 todo)
+- [x] **Computed fields in subscriptions** — Subscription resolvers use `parseResolveInfo` to extract computed fields and compile them into the SQL query (1 test)
 - [x] **Computed fields in aggregations** — Numeric computed fields in SUM/AVG/MIN/MAX/stddev/variance aggregate types, scalar computed fields in GroupByKeys and SelectColumnEnum (schema + E2E tests)
 - [x] **Computed fields with session variables** — Session claims injected as JSON parameter via named argument notation in SQL function calls (1 test)
 - [x] **Computed fields on views/materialized views** — `client_summary_score` on materialized view with E2E tests (4 tests)
 
-### P6.5 — Tracked Function Test Gaps (Medium) — PARTIAL
+### P6.5 — Tracked Function Test Gaps (Medium) ✅
 
 43 tests in `test/tracked-functions.test.ts` (up from 34):
 
@@ -826,11 +826,11 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Server / E2E | 79 | Pass |
 | Events | 9 | Pass |
 | Crons | 14 | Pass |
-| Subscriptions | 16 | Pass (1 todo) |
+| Subscriptions | 17 | Pass |
 | Streaming subscriptions | 13 | Pass |
 | Actions | 19 | Pass |
 | Async actions | 18 | Pass |
-| Computed fields | 50 | Pass (2 todo) |
+| Computed fields | 50 | Pass |
 | Upsert | 22 | Pass |
 | Distinct | 22 | Pass |
 | Returning rels | 16 | Pass |
@@ -847,10 +847,10 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Array comparison | 24 | Pass |
 | Role-aware docs | 14 | Pass |
 | Permission gaps | 49 | Pass |
-| Relationship gaps | 68 | Pass (7 skipped) |
+| Relationship gaps | 68 | Pass |
 | Security tests | 28 | Pass |
 | Hasura REST endpoints | 5 | Pass |
 | Config unsupported | 34 | Pass |
 | REST permissions | 26 | Pass |
 | JWT admin role | 9 | Pass |
-| **Total** | **1191** | **36 suites, 1183 passing, 7 skipped, 1 todo** |
+| **Total** | **1191** | **36 suites, 1191 passing** |

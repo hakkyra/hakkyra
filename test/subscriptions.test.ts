@@ -410,7 +410,7 @@ describe('Subscriptions', () => {
   });
 
   describe('computed fields in subscriptions', () => {
-    it.todo('returns computed fields in subscription results — needs Mercurius subscription context fix', async () => {
+    it('returns computed fields in subscription results', async () => {
       const token = await createJWT({ role: 'backoffice' });
       const client = createWsClient({ Authorization: `Bearer ${token}` });
 
