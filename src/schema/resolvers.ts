@@ -96,6 +96,36 @@ function permissionDenied(operation: string, table: string, role: string): Error
   );
 }
 
+// ─── Root Field Visibility Check ─────────────────────────────────────────────
+
+/**
+ * Check if a query root field operation is allowed for the role.
+ *
+ * `queryRootFields` on the compiled permission controls which query operations
+ * the role can access:
+ * - undefined → all operations allowed (default)
+ * - [] → no operations allowed (role can only access via relationships)
+ * - ['select', 'select_by_pk'] → only those operations allowed
+ */
+export function isQueryRootFieldAllowed(
+  perm: { queryRootFields?: string[] } | null | undefined,
+  rootFieldType: 'select' | 'select_by_pk' | 'select_aggregate',
+): boolean {
+  if (!perm || perm.queryRootFields === undefined) return true;
+  return perm.queryRootFields.includes(rootFieldType);
+}
+
+/**
+ * Same as isQueryRootFieldAllowed but for subscription root fields.
+ */
+export function isSubscriptionRootFieldAllowed(
+  perm: { subscriptionRootFields?: string[] } | null | undefined,
+  rootFieldType: 'select' | 'select_by_pk' | 'select_aggregate' | 'select_stream',
+): boolean {
+  if (!perm || perm.subscriptionRootFields === undefined) return true;
+  return perm.subscriptionRootFields.includes(rootFieldType);
+}
+
 // ─── camelCase ↔ snake_case Conversion ──────────────────────────────────────
 
 /**
@@ -609,6 +639,11 @@ export function makeSelectResolver(
       throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
     }
 
+    // Check query root field visibility
+    if (!auth.isAdmin && !isQueryRootFieldAllowed(perm, 'select')) {
+      throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
+    }
+
     // Parse resolve info to extract requested columns and relationships
     const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const columns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
@@ -703,6 +738,11 @@ export function makeSelectByPkResolver(
       throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
     }
 
+    // Check query root field visibility
+    if (!auth.isAdmin && !isQueryRootFieldAllowed(perm, 'select_by_pk')) {
+      throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
+    }
+
     // Build PK values from camelCase args → snake_case column names
     const pkValues = remapKeys(args as Record<string, unknown>, columnMap) ?? {};
 
@@ -771,6 +811,11 @@ export function makeSelectAggregateResolver(
     const perm = permissionLookup.getSelect(table.schema, table.name, auth.role);
 
     if (!perm && !auth.isAdmin) {
+      throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
+    }
+
+    // Check query root field visibility
+    if (!auth.isAdmin && !isQueryRootFieldAllowed(perm, 'select_aggregate')) {
       throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
     }
 

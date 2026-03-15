@@ -64,3 +64,11 @@ export {
   resetCustomOutputTypeCache,
 } from './custom-queries.js';
 export type { CustomQueryFields } from './custom-queries.js';
+
+// Native queries
+export {
+  buildNativeQueryFields,
+  resetLogicalModelTypeCache,
+  parseNativeQuerySQL,
+} from './native-queries.js';
+export type { NativeQueryFields } from './native-queries.js';
