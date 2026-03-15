@@ -14,6 +14,7 @@ import type {
   CompiledFilter,
   ComputedFieldConfig,
   ExistsExp,
+  RelationshipConfig,
   SessionVariables,
 } from '../types.js';
 
@@ -231,6 +232,61 @@ function existsNode(tableName: string, tableSchema: string, whereNode: FilterNod
   };
 }
 
+/** Counter for relationship subquery aliases within a single compilation. */
+let relAliasCounter = 0;
+
+/**
+ * Relationship EXISTS subquery node.
+ *
+ * Compiles `{ relName: { remote_col: { _eq: ... } } }` into:
+ *   EXISTS (SELECT 1 FROM "schema"."remote_table" AS "_rel_0"
+ *     WHERE "_rel_0"."remote_col" = "tableAlias"."local_col"
+ *     AND <nested filter on _rel_0>)
+ */
+function relationshipExistsNode(
+  rel: RelationshipConfig,
+  nestedNode: FilterNode,
+): FilterNode {
+  return {
+    toSQL(session, paramOffset, tableAlias) {
+      const subAlias = `_rel_${relAliasCounter++}`;
+      const qualifiedTable = `${quoteIdent(rel.remoteTable.schema)}.${quoteIdent(rel.remoteTable.name)}`;
+
+      // Build join conditions from the relationship's column mapping
+      const joinConds: string[] = [];
+      if (rel.columnMapping) {
+        for (const [localCol, remoteCol] of Object.entries(rel.columnMapping)) {
+          const localRef = tableAlias
+            ? `${quoteIdent(tableAlias)}.${quoteIdent(localCol)}`
+            : quoteIdent(localCol);
+          joinConds.push(`${quoteIdent(subAlias)}.${quoteIdent(remoteCol)} = ${localRef}`);
+        }
+      } else if (rel.localColumns && rel.remoteColumns) {
+        for (let i = 0; i < rel.localColumns.length; i++) {
+          const localRef = tableAlias
+            ? `${quoteIdent(tableAlias)}.${quoteIdent(rel.localColumns[i])}`
+            : quoteIdent(rel.localColumns[i]);
+          joinConds.push(`${quoteIdent(subAlias)}.${quoteIdent(rel.remoteColumns[i])} = ${localRef}`);
+        }
+      }
+
+      // Compile the nested filter scoped to the subquery alias
+      const nested = nestedNode.toSQL(session, paramOffset, subAlias);
+
+      const allConds = [...joinConds];
+      if (nested.sql && nested.sql !== 'TRUE') {
+        allConds.push(nested.sql);
+      }
+
+      const whereClause = allConds.length > 0 ? allConds.join(' AND ') : 'TRUE';
+      return {
+        sql: `EXISTS (SELECT 1 FROM ${qualifiedTable} ${quoteIdent(subAlias)} WHERE ${whereClause})`,
+        params: nested.params,
+      };
+    },
+  };
+}
+
 /**
  * Build a SQL reference for a computed field: "schema"."fn_name"("alias").
  */
@@ -368,10 +424,13 @@ function isColumnOperators(value: unknown): value is ColumnOperators {
  * @param computedFieldMap - Optional map of computed field name → config,
  *   so that BoolExp keys referencing computed fields emit function calls
  *   instead of column references.
+ * @param relationshipMap - Optional map of relationship name → config,
+ *   so that BoolExp keys referencing relationships emit EXISTS subqueries.
  */
 function parseBoolExp(
   filter: BoolExp,
   computedFieldMap?: Map<string, ComputedFieldConfig>,
+  relationshipMap?: Map<string, RelationshipConfig>,
 ): FilterNode {
   // Empty object = no restriction
   const keys = Object.keys(filter);
@@ -382,20 +441,20 @@ function parseBoolExp(
   // ── Logical operators ─────────────────────────────────────────────────
   if ('_and' in filter) {
     const children = (filter as { _and: BoolExp[] })._and.map(
-      (sub) => parseBoolExp(sub, computedFieldMap),
+      (sub) => parseBoolExp(sub, computedFieldMap, relationshipMap),
     );
     return andNode(children);
   }
 
   if ('_or' in filter) {
     const children = (filter as { _or: BoolExp[] })._or.map(
-      (sub) => parseBoolExp(sub, computedFieldMap),
+      (sub) => parseBoolExp(sub, computedFieldMap, relationshipMap),
     );
     return orNode(children);
   }
 
   if ('_not' in filter) {
-    const child = parseBoolExp((filter as { _not: BoolExp })._not, computedFieldMap);
+    const child = parseBoolExp((filter as { _not: BoolExp })._not, computedFieldMap, relationshipMap);
     return notNode(child);
   }
 
@@ -422,20 +481,21 @@ function parseBoolExp(
         }
       }
     } else {
-      // Nested BoolExp for relationship traversal — this is a sub-filter
-      // where the column name represents the relationship. At SQL level,
-      // this is handled the same as a regular boolean expression but scoped
-      // to the relationship. The query builder layer resolves relationships
-      // into proper JOINs or subqueries. Here we compile it as-is.
-      const nestedFilter = parseBoolExp(ops as BoolExp);
-      // Wrap in an AND with the column context
-      children.push({
-        toSQL(session, paramOffset, _tableAlias) {
-          // Relationship filters are rendered with the relationship name as the table alias.
-          // The query builder is expected to establish this alias via JOIN.
-          return nestedFilter.toSQL(session, paramOffset, column);
-        },
-      });
+      // Nested BoolExp for relationship traversal
+      const rel = relationshipMap?.get(column);
+      if (rel) {
+        // Compile as EXISTS subquery with proper join conditions
+        const nestedFilter = parseBoolExp(ops as BoolExp);
+        children.push(relationshipExistsNode(rel, nestedFilter));
+      } else {
+        // No relationship info — fall back to nested column filter on same table
+        const nestedFilter = parseBoolExp(ops as BoolExp);
+        children.push({
+          toSQL(session, paramOffset, _tableAlias) {
+            return nestedFilter.toSQL(session, paramOffset, column);
+          },
+        });
+      }
     }
   }
 
@@ -465,11 +525,16 @@ function parseBoolExp(
 export function compileFilter(
   filter: BoolExp,
   computedFields?: ComputedFieldConfig[],
+  relationships?: RelationshipConfig[],
 ): CompiledFilter {
   const cfMap = computedFields && computedFields.length > 0
     ? new Map(computedFields.map((cf) => [cf.name, cf]))
     : undefined;
-  const node = parseBoolExp(filter, cfMap);
+  const relMap = relationships && relationships.length > 0
+    ? new Map(relationships.map((r) => [r.name, r]))
+    : undefined;
+  relAliasCounter = 0;
+  const node = parseBoolExp(filter, cfMap, relMap);
   return {
     toSQL(session: SessionVariables, paramOffset: number, tableAlias?: string) {
       return node.toSQL(session, paramOffset, tableAlias);

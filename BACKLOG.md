@@ -57,6 +57,7 @@
 - [x] JSONB operators (_contains, _contained_in, _has_key, _has_keys_any, _has_keys_all)
 - [x] Logical operators (_and, _or, _not)
 - [x] Relationship operator (_exists)
+- [x] Relationship traversal in permission filters (compile to EXISTS subqueries)
 - [x] Session variable resolution (X-Hasura-* → JWT claim values)
 - [x] Computed field references in permission filters (emit function calls instead of column refs)
 - [x] Column-level permission enforcement (allowed columns per role per operation)
@@ -65,7 +66,7 @@
 - [x] Aggregation permission flag
 - [x] Admin role bypass
 - [x] Permission lookup: Map<table+role+operation, CompiledPermission>
-- [x] Unit tests: all operators, session variable substitution, computed fields, edge cases (37 tests)
+- [x] Unit tests: all operators, session variable substitution, computed fields, relationship traversal, edge cases (41 tests)
 
 ### P1.6 — SQL Query Compiler (`src/sql/`)
 - [x] SELECT compiler with json_build_object response shaping
@@ -558,7 +559,7 @@ Hasura supports marking a table as `is_enum: true` in metadata, turning its prim
 |-------|-------|--------|
 | Config loader | 19 | Pass |
 | Introspection | 30 | Pass |
-| Permissions | 37 | Pass |
+| Permissions | 41 | Pass |
 | SQL compiler | 35 | Pass |
 | Schema generator | 52 | Pass |
 | REST filters | 30 | Pass |
@@ -584,4 +585,4 @@ Hasura supports marking a table as `is_enum: true` in metadata, turning its prim
 | Tracked functions | 20 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
-| **Total** | **~889** | **29 suites, all passing** |
+| **Total** | **~893** | **29 suites, all passing** |

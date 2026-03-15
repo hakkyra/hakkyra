@@ -4,7 +4,7 @@ import { buildPermissionLookup } from '../src/permissions/lookup.js';
 import { loadConfig } from '../src/config/loader.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
-import type { BoolExp, ComputedFieldConfig, SchemaModel } from '../src/types.js';
+import type { BoolExp, ComputedFieldConfig, RelationshipConfig, SchemaModel } from '../src/types.js';
 import {
   getPool, closePool, waitForDb, makeSession,
   METADATA_DIR, SERVER_CONFIG_PATH, TEST_DB_URL, ALICE_ID,
@@ -285,6 +285,89 @@ describe('Permission Filter Compiler', () => {
       const result = filter.toSQL(session, 0, 't0');
       expect(result.sql).toContain('"t0"."status"');
       expect(result.sql).not.toContain('campaign_player_visible');
+    });
+  });
+
+  describe('relationship filter (EXISTS subquery)', () => {
+    const relationships: RelationshipConfig[] = [
+      {
+        name: 'connectedPlayers',
+        type: 'array',
+        remoteTable: { name: 'connected_players', schema: 'public' },
+        columnMapping: { player_id: 'player_id' },
+      },
+      {
+        name: 'branch',
+        type: 'object',
+        remoteTable: { name: 'branch', schema: 'public' },
+        localColumns: ['branch_id'],
+        remoteColumns: ['id'],
+      },
+    ];
+
+    it('should compile relationship filter as EXISTS subquery', () => {
+      const filter = compileFilter(
+        { connectedPlayers: { connected_player_id: { _eq: 'X-Hasura-User-Id' } } } as BoolExp,
+        undefined,
+        relationships,
+      );
+      const result = filter.toSQL(session, 0, 't0');
+      expect(result.sql).toContain('EXISTS');
+      expect(result.sql).toContain('"public"."connected_players"');
+      expect(result.sql).toContain('"connected_player_id"');
+      expect(result.sql).toContain('"t0"."player_id"');
+      expect(result.params).toEqual([ALICE_ID]);
+    });
+
+    it('should compile relationship filter with localColumns/remoteColumns', () => {
+      const filter = compileFilter(
+        { branch: { name: { _eq: 'HQ' } } } as BoolExp,
+        undefined,
+        relationships,
+      );
+      const result = filter.toSQL(session, 0, 't0');
+      expect(result.sql).toContain('EXISTS');
+      expect(result.sql).toContain('"public"."branch"');
+      expect(result.sql).toContain('"t0"."branch_id"');
+      expect(result.params).toEqual(['HQ']);
+    });
+
+    it('should compile relationship filter inside _or with column filters', () => {
+      const filter = compileFilter(
+        {
+          _or: [
+            { connectedPlayers: { connected_player_id: { _eq: 'X-Hasura-User-Id' } } },
+            { player_id: { _eq: 'X-Hasura-User-Id' } },
+          ],
+        } as BoolExp,
+        undefined,
+        relationships,
+      );
+      const result = filter.toSQL(session, 0, 't0');
+      expect(result.sql).toContain('OR');
+      expect(result.sql).toContain('EXISTS');
+      expect(result.sql).toContain('"t0"."player_id"');
+      expect(result.params).toEqual([ALICE_ID, ALICE_ID]);
+    });
+
+    it('should compile relationship filter inside _and with computed fields', () => {
+      const computedFields2: ComputedFieldConfig[] = [
+        { name: 'active', function: { name: 'player_limit_active_column', schema: 'public' } },
+      ];
+      const filter = compileFilter(
+        {
+          _and: [
+            { connectedPlayers: { connected_player_id: { _eq: 'X-Hasura-User-Id' } } },
+            { active: { _eq: true } },
+          ],
+        } as BoolExp,
+        computedFields2,
+        relationships,
+      );
+      const result = filter.toSQL(session, 0, 't0');
+      expect(result.sql).toContain('EXISTS');
+      expect(result.sql).toContain('"public"."player_limit_active_column"("t0")');
+      expect(result.params).toEqual([ALICE_ID, true]);
     });
   });
 });
