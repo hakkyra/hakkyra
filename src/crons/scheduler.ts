@@ -32,6 +32,7 @@ export async function registerCronTriggers(
       options.expireInSeconds = trigger.retryConf.timeoutSeconds;
     }
 
+    await jobQueue.createQueue(queueName, options);
     await jobQueue.schedule(
       queueName,
       trigger.schedule,

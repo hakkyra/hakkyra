@@ -30,7 +30,7 @@ import {
 export interface IntrospectedTable {
   name: string;
   schema: string;
-  tableType: 'BASE TABLE' | 'VIEW';
+  tableType: 'BASE TABLE' | 'VIEW' | 'MATERIALIZED VIEW';
   comment?: string;
   columns: ColumnInfo[];
   primaryKey: string[];
@@ -205,7 +205,7 @@ export async function introspectDatabase(
     return {
       name: row.table_name,
       schema: row.table_schema,
-      tableType: row.table_type as 'BASE TABLE' | 'VIEW',
+      tableType: row.table_type as 'BASE TABLE' | 'VIEW' | 'MATERIALIZED VIEW',
       comment: row.comment ?? undefined,
       columns,
       primaryKey: pkColumns,
