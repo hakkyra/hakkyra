@@ -396,7 +396,7 @@ export function buildTrackedFunctionFields(
  */
 function compileTrackedFunctionCall(opts: {
   trackedFn: TrackedFunctionInfo;
-  funcArgs: unknown[];
+  funcArgs: NamedArg[];
   table: TableInfo;
   columns: string[];
   where?: BoolExp;
@@ -419,9 +419,8 @@ function compileTrackedFunctionCall(opts: {
   const { trackedFn, table } = opts;
   const fn = trackedFn.functionInfo;
 
-  // Build function call with parameters
-  const funcParamPlaceholders = opts.funcArgs.map((arg) => params.add(arg));
-  const funcCall = `${quoteIdentifier(fn.schema)}.${quoteIdentifier(fn.name)}(${funcParamPlaceholders.join(', ')})`;
+  // Build function call with named parameters so PG uses DEFAULT for omitted args
+  const funcCall = buildNamedFuncCall(fn.schema, fn.name, opts.funcArgs, params);
 
   // Filter columns against permissions
   const columns = filterColumns(
@@ -515,6 +514,22 @@ function compileTrackedFunctionCall(opts: {
 
     return { sql, params: params.getParams() };
   }
+}
+
+/**
+ * Build a function call using named parameter notation so that omitted
+ * arguments fall back to their PostgreSQL DEFAULT values.
+ */
+function buildNamedFuncCall(
+  schema: string,
+  name: string,
+  namedArgs: NamedArg[],
+  params: ParamCollector,
+): string {
+  const parts = namedArgs.map(
+    (arg) => `${quoteIdentifier(arg.name)} := ${params.add(arg.value)}`,
+  );
+  return `${quoteIdentifier(schema)}.${quoteIdentifier(name)}(${parts.join(', ')})`;
 }
 
 function resolveLimit(userLimit?: number, permLimit?: number): number | undefined {
@@ -626,46 +641,49 @@ function remapDistinctOn(
 
 // ─── Resolver Factories ─────────────────────────────────────────────────
 
+interface NamedArg {
+  name: string;
+  value: unknown;
+}
+
 function extractFuncArgs(
   trackedFn: TrackedFunctionInfo,
   args: Record<string, unknown>,
   session: SessionVariables,
-): unknown[] {
+): NamedArg[] {
   const fnArgs = args.args as Record<string, unknown> | undefined;
-  const result: unknown[] = [];
+  const result: NamedArg[] = [];
 
-  for (const fn of trackedFn.functionInfo.argTypes) {
-    // We need to iterate in the same order as the PG function's arguments
-    void fn; // consumed below
-  }
-
-  // Build args in order of the PG function's arg list
+  // Build args using named parameters so that unprovided arguments with
+  // PG DEFAULT values are omitted (letting PostgreSQL use the defaults).
   const { functionInfo: fn, config } = trackedFn;
-  for (let i = 0; i < fn.argTypes.length; i++) {
+  // In PG, defaults apply to the last N input arguments (pronargdefaults).
+  const totalArgs = fn.argTypes.length;
+  const firstDefaultIdx = totalArgs - fn.numArgsWithDefaults;
+
+  for (let i = 0; i < totalArgs; i++) {
     const argName = fn.argNames[i] ?? `arg${i}`;
 
     // Session argument: inject the session JSON
     if (config.sessionArgument && argName === config.sessionArgument) {
-      result.push(JSON.stringify(session.claims));
+      result.push({ name: argName, value: JSON.stringify(session.claims) });
       continue;
     }
 
     // Table-row argument: skip (not applicable for root-level tracked functions)
-    // We detect this the same way resolveTrackedFunctions does
-    const argType = fn.argTypes[i];
-    // Check if it's a known table type by looking at tracked function's user args
     const isUserArg = trackedFn.userArgs.some((ua) => ua.name === argName);
     if (!isUserArg && argName !== config.sessionArgument) {
-      // This is a table-row argument — not applicable for root-level calls
-      // We pass NULL as a placeholder (shouldn't happen for well-configured functions)
-      result.push(null);
       continue;
     }
 
     // User argument: get from args input
     const camelName = toCamelCase(argName);
-    const value = fnArgs?.[camelName] ?? null;
-    result.push(value);
+    const value = fnArgs?.[camelName];
+
+    // If not provided and this arg has a PG DEFAULT, omit it
+    if (value === undefined && i >= firstDefaultIdx) continue;
+
+    result.push({ name: argName, value: value ?? null });
   }
 
   return result;
@@ -833,9 +851,8 @@ function makeTrackedFunctionAggregateResolver(
     const params = new ParamCollector();
     const alias = 't0';
 
-    // Build function call
-    const funcParamPlaceholders = funcArgs.map((arg) => params.add(arg));
-    const funcCall = `${quoteIdentifier(fn.schema)}.${quoteIdentifier(fn.name)}(${funcParamPlaceholders.join(', ')})`;
+    // Build function call with named parameters
+    const funcCall = buildNamedFuncCall(fn.schema, fn.name, funcArgs, params);
 
     // Build WHERE
     const whereParts: string[] = [];

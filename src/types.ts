@@ -133,6 +133,8 @@ export interface FunctionInfo {
   argNames: string[];
   isSetReturning: boolean;
   volatility: 'immutable' | 'stable' | 'volatile';
+  /** Number of trailing input arguments that have DEFAULT values in PostgreSQL. */
+  numArgsWithDefaults: number;
 }
 
 // ─── Relationships ──────────────────────────────────────────────────────────

@@ -118,6 +118,7 @@ interface FunctionRow {
   arg_names: string[];
   is_set_returning: boolean;
   volatility: string;
+  num_args_with_defaults: number;
 }
 
 // ─── Table key helper ────────────────────────────────────────────────────────
@@ -399,5 +400,6 @@ function parseFunctions(rows: FunctionRow[]): FunctionInfo[] {
     argNames: row.arg_names ?? [],
     isSetReturning: row.is_set_returning,
     volatility: row.volatility as 'immutable' | 'stable' | 'volatile',
+    numArgsWithDefaults: row.num_args_with_defaults ?? 0,
   }));
 }

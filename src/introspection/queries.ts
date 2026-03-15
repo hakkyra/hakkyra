@@ -277,13 +277,14 @@ export const FUNCTIONS_QUERY = `
       WHEN 'i' THEN 'immutable'
       WHEN 's' THEN 'stable'
       WHEN 'v' THEN 'volatile'
-    END AS volatility
+    END AS volatility,
+    COALESCE(p.pronargdefaults, 0) AS num_args_with_defaults
   FROM pg_catalog.pg_proc p
   JOIN pg_catalog.pg_namespace n
     ON n.oid = p.pronamespace
   LEFT JOIN LATERAL unnest(p.proargtypes) WITH ORDINALITY AS unnested(type_oid, ord) ON true
   WHERE n.nspname = ANY($1)
     AND p.prokind = 'f'
-  GROUP BY n.nspname, p.proname, p.prorettype, p.proretset, p.provolatile, p.proargnames
+  GROUP BY n.nspname, p.proname, p.prorettype, p.proretset, p.provolatile, p.proargnames, p.pronargdefaults
   ORDER BY n.nspname, p.proname;
 `;
