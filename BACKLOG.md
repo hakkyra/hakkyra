@@ -241,7 +241,7 @@
   - [x] Header forwarding (configured headers + client header forwarding)
   - [x] Request/response transformation — template interpolation engine (32 tests)
 - [x] Async actions (return immediately, deliver result later, 18 tests)
-- [x] Action permissions per role
+- [x] Action permissions per role (checks all allowed roles from JWT, not just active role — Hasura-compatible)
 - [x] Action relationship mapping — object/array relationships to DB tables (13 tests)
 - [x] Inline arguments support — actions with direct args (Hasura default) in addition to wrapped input types
 - [x] Integration tests (19 tests)

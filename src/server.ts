@@ -216,7 +216,12 @@ export async function createServer(
     const logData: Record<string, unknown> = {
       method: request.method,
       url: request.url,
-      headers: { ...request.headers, authorization: undefined },
+      headers: {
+        ...request.headers,
+        authorization: request.headers.authorization
+          ? request.headers.authorization.slice(0, 20) + '…'
+          : undefined,
+      },
     };
     if (request.body !== undefined && request.body !== null) {
       logData.body = request.body;
