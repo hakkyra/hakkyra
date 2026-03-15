@@ -15,6 +15,7 @@ import type {
   Job,
   QueueOptions,
   ScheduleOptions,
+  WorkOptions,
 } from './types.js';
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
@@ -49,8 +50,11 @@ export class PgBossAdapter implements JobQueue {
     return this.boss.send(queue, data);
   }
 
-  async work<T extends JobData>(queue: string, handler: JobHandler<T>): Promise<void> {
-    await this.boss.work<T>(queue, async (pgBossJobs: PgBossJob<T>[]) => {
+  async work<T extends JobData>(queue: string, handler: JobHandler<T>, options?: WorkOptions): Promise<void> {
+    const workOptions = options?.concurrency && options.concurrency > 1
+      ? { localConcurrency: options.concurrency }
+      : {};
+    await this.boss.work<T>(queue, workOptions, async (pgBossJobs: PgBossJob<T>[]) => {
       // Map pg-boss Job objects to our abstract Job type
       const jobs: Job<T>[] = pgBossJobs.map((j) => ({
         id: j.id,

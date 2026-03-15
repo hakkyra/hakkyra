@@ -281,6 +281,7 @@ export const RawEventTriggerSchema = z
     webhook: z.string().optional(),
     webhook_from_env: z.string().optional(),
     headers: z.array(RawHeaderSchema).optional(),
+    concurrency: z.number().optional(),
   })
   .strict();
 
@@ -692,6 +693,7 @@ export const RawServerConfigSchema = z
     event_delivery: z
       .object({
         batch_size: z.number().optional(),
+        http_concurrency: z.number().optional(),
       })
       .strict()
       .optional(),

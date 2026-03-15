@@ -134,11 +134,13 @@ export async function registerEventWorkers(
   tables: TableInfo[],
   logger: Logger,
   schemaName: string = 'hakkyra',
+  defaultConcurrency: number = 1,
 ): Promise<void> {
   const triggerLookup = buildTriggerLookup(tables);
 
   for (const [triggerName, { trigger }] of triggerLookup) {
     const queueName = `event/${triggerName}`;
+    const concurrency = trigger.concurrency ?? defaultConcurrency;
 
     // Configure the queue with retry settings
     await jobQueue.createQueue(queueName, {
@@ -207,6 +209,6 @@ export async function registerEventWorkers(
         throw new Error(`Webhook delivery failed: ${result.error ?? `HTTP ${result.statusCode}`}`);
       }
       }
-    });
+    }, { concurrency });
   }
 }

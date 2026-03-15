@@ -150,6 +150,7 @@ event_log:
 
 event_delivery:
   batch_size: 100                 # Events per delivery batch (default: 100)
+  http_concurrency: 1             # Concurrent webhook deliveries per trigger (default: 1)
 
 event_cleanup:
   schedule: "0 3 * * *"          # Cron schedule for event log cleanup (default: 0 3 * * *)
@@ -391,6 +392,7 @@ event_triggers:
     headers:
       - name: x-webhook-secret
         value_from_env: WEBHOOK_SECRET
+    concurrency: 10               # Override per-trigger concurrency (default: event_delivery.http_concurrency)
 ```
 
 Events follow the **transactional outbox pattern**: PG triggers write to `hakkyra.event_log` in the same transaction as the data change, then the job queue delivers the webhook with exponential backoff retry.

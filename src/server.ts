@@ -666,7 +666,7 @@ export async function createServer(
           schemaModel.tables,
           sessionConnectionString,
           log,
-          { batchSize: config.eventDelivery.batchSize, schemaName },
+          { batchSize: config.eventDelivery.batchSize, schemaName, httpConcurrency: config.eventDelivery.httpConcurrency },
         );
 
         // Register event log cleanup

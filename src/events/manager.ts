@@ -43,6 +43,8 @@ export interface EventTriggerOptions {
   batchSize?: number;
   /** Internal schema name (default: 'hakkyra'). */
   schemaName?: string;
+  /** Default concurrency for event webhook delivery per trigger (default: 1). */
+  httpConcurrency?: number;
 }
 
 export async function initEventTriggers(
@@ -84,7 +86,7 @@ export async function initEventTriggers(
   );
 
   // 3. Register job queue workers
-  await registerEventWorkers(jobQueue, pool, tables, logger, schemaName);
+  await registerEventWorkers(jobQueue, pool, tables, logger, schemaName, options?.httpConcurrency);
 
   const batchSize = options?.batchSize;
 

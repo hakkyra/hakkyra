@@ -33,6 +33,13 @@ export interface ScheduleOptions {
   expireInSeconds?: number;
 }
 
+// ─── Worker options ─────────────────────────────────────────────────────────
+
+export interface WorkOptions {
+  /** Number of jobs to process concurrently (default: 1). */
+  concurrency?: number;
+}
+
 // ─── Handler type ───────────────────────────────────────────────────────────
 
 export type JobHandler<T extends JobData = JobData> = (jobs: Job<T>[]) => Promise<void>;
@@ -60,7 +67,7 @@ export interface JobQueue {
   send<T extends JobData>(queue: string, data: T): Promise<string | null>;
 
   /** Register a worker for a queue. Handler receives an array of jobs. */
-  work<T extends JobData>(queue: string, handler: JobHandler<T>): Promise<void>;
+  work<T extends JobData>(queue: string, handler: JobHandler<T>, options?: WorkOptions): Promise<void>;
 
   /** Create/configure a queue with options (retry, expiry, etc.). */
   createQueue(name: string, options?: QueueOptions): Promise<void>;
