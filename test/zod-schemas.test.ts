@@ -1825,7 +1825,7 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
     it('defaults server when missing', () => {
       const { server, ...rest } = minimalConfig;
       const result = expectValid(HakkyraConfigSchema, rest);
-      expect(result.server).toEqual({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false });
+      expect(result.server).toEqual({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false, bodyLimit: 1048576 });
     });
 
     it('rejects missing databases', () => {
@@ -1858,7 +1858,7 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
       expect(result.subscriptions).toEqual({ debounceMs: 50, keepAliveMs: 30000 });
       expect(result.eventDelivery).toEqual({ batchSize: 100 });
       expect(result.eventCleanup).toEqual({ schedule: '0 3 * * *' });
-      expect(result.webhook).toEqual({ timeoutMs: 30000, backoffCapSeconds: 3600 });
+      expect(result.webhook).toEqual({ timeoutMs: 30000, backoffCapSeconds: 3600, allowPrivateUrls: false, maxResponseBytes: 1048576 });
       expect(result.actionDefaults).toEqual({
         timeoutSeconds: 30,
         asyncRetryLimit: 3,
@@ -1869,6 +1869,10 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
         arrayAnyThreshold: 20,
         unnestThreshold: 500,
         batchChunkSize: 100,
+      });
+      expect(result.graphql).toEqual({
+        queryDepth: 10,
+        maxLimit: 100,
       });
     });
 

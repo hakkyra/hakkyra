@@ -98,7 +98,7 @@ describe('Actions', () => {
     let sdl: string;
 
     beforeAll(async () => {
-      const res = await fetch(`${serverAddress}/sdl`);
+      const res = await fetch(`${serverAddress}/sdl`, { headers: { 'x-hasura-admin-secret': ADMIN_SECRET } });
       sdl = await res.text();
     });
 
@@ -432,7 +432,7 @@ describe('Actions', () => {
 
   describe('inline arguments (no input wrapper)', () => {
     it('registers inline-arg mutations in the schema', async () => {
-      const res = await fetch(`${serverAddress}/sdl`);
+      const res = await fetch(`${serverAddress}/sdl`, { headers: { 'x-hasura-admin-secret': ADMIN_SECRET } });
       const sdl = await res.text();
       expect(sdl).toContain('updateLimit(type: String!, amount: Float, endTime: String): UpdateLimitResult');
     });

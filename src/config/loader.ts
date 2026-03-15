@@ -323,6 +323,7 @@ export async function loadConfig(
       host: serverConfig?.server?.host,
       logLevel: serverConfig?.server?.log_level,
       stringifyNumericTypes: serverConfig?.server?.stringify_numeric_types,
+      bodyLimit: serverConfig?.server?.body_limit,
     }) ?? {},
     auth: transformAuth(serverConfig),
     databases: transformDatabases(databases, serverConfig),
@@ -360,12 +361,18 @@ export async function loadConfig(
     webhook: stripUndefined({
       timeoutMs: serverConfig?.webhook?.timeout_ms,
       backoffCapSeconds: serverConfig?.webhook?.backoff_cap_seconds,
+      allowPrivateUrls: serverConfig?.webhook?.allow_private_urls,
+      maxResponseBytes: serverConfig?.webhook?.max_response_bytes,
     }),
     actionDefaults: stripUndefined({
       timeoutSeconds: serverConfig?.action_defaults?.timeout_seconds,
       asyncRetryLimit: serverConfig?.action_defaults?.async_retry_limit,
       asyncRetryDelaySeconds: serverConfig?.action_defaults?.async_retry_delay_seconds,
       asyncTimeoutSeconds: serverConfig?.action_defaults?.async_timeout_seconds,
+    }),
+    graphql: stripUndefined({
+      queryDepth: serverConfig?.graphql?.query_depth,
+      maxLimit: serverConfig?.graphql?.max_limit,
     }),
     sql: stripUndefined({
       arrayAnyThreshold: serverConfig?.sql?.array_any_threshold,
@@ -1221,6 +1228,7 @@ function transformAuth(serverConfig: RawServerConfig | null): AuthConfig {
       claimsMap: auth.jwt.claims_map,
       audience: auth.jwt.audience,
       issuer: auth.jwt.issuer,
+      requireExp: auth.jwt.require_exp,
     });
   }
 

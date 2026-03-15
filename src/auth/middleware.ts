@@ -156,6 +156,13 @@ export function createAuthHook(config: AuthConfig): any {
         let session: SessionVariables;
         try {
           const payload = await verifier.verify(token);
+
+          // Reject JWTs without an exp claim when requireExp is enabled
+          if (config.jwt?.requireExp !== false && payload.exp === undefined) {
+            sendUnauthorized(reply, 'JWT must contain an "exp" (expiration) claim');
+            return;
+          }
+
           session = extractSessionVariables(payload, config);
         } catch (err) {
           const message = err instanceof Error ? err.message : 'JWT verification failed';

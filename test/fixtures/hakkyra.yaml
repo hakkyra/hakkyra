@@ -14,6 +14,9 @@ auth:
   admin_secret_from_env: HAKKYRA_ADMIN_SECRET
   unauthorized_role: anonymous
 
+webhook:
+  allow_private_urls: true
+
 databases:
   primary:
     url_from_env: DATABASE_URL

@@ -298,6 +298,7 @@ export const AuthConfigSchema = z.object({
         .optional(),
       audience: z.string().optional(),
       issuer: z.string().optional(),
+      requireExp: z.boolean().default(true),
     })
     .optional(),
   adminSecretEnv: z.string().optional(),
@@ -475,7 +476,8 @@ export const HakkyraConfigSchema = z.object({
     host: z.string().default('0.0.0.0'),
     logLevel: z.string().default('info'),
     stringifyNumericTypes: z.boolean().default(false),
-  }).default({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false }),
+    bodyLimit: z.number().default(1048576),
+  }).default({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false, bodyLimit: 1048576 }),
   auth: AuthConfigSchema,
   databases: DatabasesConfigSchema,
   tables: z.array(z.any()), // TableInfo contains introspection data — not validated
@@ -512,13 +514,19 @@ export const HakkyraConfigSchema = z.object({
   webhook: z.object({
     timeoutMs: z.number().default(30000),
     backoffCapSeconds: z.number().default(3600),
-  }).default({ timeoutMs: 30000, backoffCapSeconds: 3600 }),
+    allowPrivateUrls: z.boolean().default(false),
+    maxResponseBytes: z.number().default(1048576),
+  }).default({ timeoutMs: 30000, backoffCapSeconds: 3600, allowPrivateUrls: false, maxResponseBytes: 1048576 }),
   actionDefaults: z.object({
     timeoutSeconds: z.number().default(30),
     asyncRetryLimit: z.number().default(3),
     asyncRetryDelaySeconds: z.number().default(10),
     asyncTimeoutSeconds: z.number().default(120),
   }).default({ timeoutSeconds: 30, asyncRetryLimit: 3, asyncRetryDelaySeconds: 10, asyncTimeoutSeconds: 120 }),
+  graphql: z.object({
+    queryDepth: z.number().default(10),
+    maxLimit: z.number().default(100),
+  }).default({ queryDepth: 10, maxLimit: 100 }),
   sql: z.object({
     arrayAnyThreshold: z.number().default(20),
     unnestThreshold: z.number().default(500),

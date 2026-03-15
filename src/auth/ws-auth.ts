@@ -160,6 +160,12 @@ export async function authenticateWsConnection(
 
     try {
       const payload = await verifier.verify(token);
+
+      // Reject JWTs without an exp claim when requireExp is enabled
+      if (authConfig.jwt?.requireExp !== false && payload.exp === undefined) {
+        return null;
+      }
+
       let session = extractSessionVariables(payload, authConfig);
 
       // Active role resolution

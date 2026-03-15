@@ -139,7 +139,7 @@ describe('Action Relationships', () => {
     let sdl: string;
 
     beforeAll(async () => {
-      const res = await fetch(`${serverAddress}/sdl`);
+      const res = await fetch(`${serverAddress}/sdl`, { headers: { 'x-hasura-admin-secret': ADMIN_SECRET } });
       sdl = await res.text();
     });
 
