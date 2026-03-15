@@ -54,7 +54,7 @@ npm run dev -- --dev --config ./hakkyra.yaml --metadata ./metadata
 
 ```bash
 docker compose up -d   # starts PostgreSQL 17
-npm test               # runs the full test suite (~900 tests)
+npm test               # runs the full test suite (~1200 tests)
 ```
 
 ## Configuration
@@ -63,35 +63,137 @@ Hakkyra uses two configuration layers:
 
 ### 1. Server config (`hakkyra.yaml`)
 
+All options use `snake_case` in YAML. Every option below is optional unless marked **required**.
+
 ```yaml
+# ─── Server ──────────────────────────────────────────────────────────────────
 server:
-  port: 3000
-  host: 0.0.0.0
+  port: 3000                    # HTTP port (default: 3000)
+  host: 0.0.0.0                 # Bind address (default: 0.0.0.0)
+  log_level: info               # Pino log level (default: info)
+  body_limit: 1048576           # Max request body in bytes (default: 1MB)
+  schema_name: hakkyra          # Internal PG schema for triggers/events (default: hakkyra)
+  stringify_numeric_types: false # Return numeric types as strings (default: false)
+  slow_query_threshold_ms: 200  # Log queries slower than this (default: 200)
 
+# ─── Authentication ──────────────────────────────────────────────────────────
 auth:
-  jwt:
-    type: RS256
-    jwk_url: https://auth.example.com/.well-known/jwks.json
-    claims_namespace: https://hasura.io/jwt/claims
-    audience: my-app
-    issuer: https://auth.example.com
-  admin_secret_from_env: HAKKYRA_ADMIN_SECRET
-  unauthorized_role: anonymous
+  admin_secret_from_env: HAKKYRA_ADMIN_SECRET  # Env var with admin secret
+  unauthorized_role: anonymous                  # Fallback role when no auth provided
 
+  jwt:
+    type: RS256                   # Algorithm: HS256, RS256, ES256, Ed25519 (default: HS256)
+    key: "secret"                 # Raw secret key (HS256)
+    key_from_env: JWT_SECRET      # ...or from env var
+    jwk_url: https://.../.well-known/jwks.json  # JWKS endpoint (RS256/ES256/Ed25519)
+    claims_namespace: https://hasura.io/jwt/claims  # JWT claims namespace
+    claims_map:                   # Alternative: map claims from arbitrary JWT paths
+      x-hasura-user-id:
+        path: $.sub
+        default: ""
+    audience: my-app              # Expected JWT aud claim
+    issuer: https://auth.example.com  # Expected JWT iss claim
+    require_exp: true             # Reject JWTs without exp claim (default: true)
+    admin_role_is_admin: false    # Treat JWT role=admin as full admin (default: false)
+
+  webhook:
+    url: https://auth.example.com/verify  # Auth webhook URL
+    url_from_env: AUTH_WEBHOOK_URL         # ...or from env var
+    mode: GET                              # HTTP method: GET or POST (default: GET)
+    forward_headers: true                  # Forward client headers to webhook
+
+# ─── Databases ───────────────────────────────────────────────────────────────
 databases:
   primary:
-    url_from_env: DATABASE_URL
+    url_from_env: DATABASE_URL    # REQUIRED — env var with connection string
     pool:
-      max: 20
-      idle_timeout: 30
-  replicas:
+      max: 10                     # Max connections (default: 10)
+      idle_timeout: 30            # Idle timeout in seconds (default: 30)
+      connection_timeout: 5       # Connect timeout in seconds (default: 5)
+      max_lifetime: 3600          # Max connection lifetime in seconds (optional)
+      allow_exit_on_idle: false   # Allow process exit when pool is idle
+
+  replicas:                       # Read replicas for load distribution
     - url_from_env: DATABASE_REPLICA_URL
       pool:
         max: 40
+
+  session:                        # Dedicated connection for LISTEN/NOTIFY (PgBouncer compat)
+    url_from_env: DATABASE_SESSION_URL
+
   read_your_writes:
-    enabled: true
-    window_seconds: 5
-  subscription_query_routing: primary  # "primary" (default) or "replica"
+    enabled: true                 # Enable read-your-writes consistency (default: false)
+    window_seconds: 5             # Route reads to primary for N seconds after write (default: 5)
+
+  prepared_statements:
+    enabled: true                 # Enable prepared statement caching
+    max_cached: 500               # Max cached statements
+
+  subscription_query_routing: primary  # Route subscription re-queries: primary or replica (default: primary)
+
+# ─── GraphQL ─────────────────────────────────────────────────────────────────
+graphql:
+  query_depth: 10                 # Max query nesting depth (default: 10)
+  max_limit: 100                  # Max rows per query (default: 100)
+
+# ─── REST API ────────────────────────────────────────────────────────────────
+# Note: REST config is in api_config.yaml (metadata), not hakkyra.yaml
+
+# ─── Subscriptions ───────────────────────────────────────────────────────────
+subscriptions:
+  debounce_ms: 50                 # Debounce NOTIFY events before re-query (default: 50)
+  keep_alive_ms: 30000            # WebSocket keep-alive ping interval (default: 30000)
+
+# ─── Event Triggers ──────────────────────────────────────────────────────────
+event_log:
+  retention_days: 7               # Delete delivered events older than N days (default: 7)
+
+event_delivery:
+  batch_size: 100                 # Events per delivery batch (default: 100)
+
+event_cleanup:
+  schedule: "0 3 * * *"          # Cron schedule for event log cleanup (default: 0 3 * * *)
+
+# ─── Webhooks ────────────────────────────────────────────────────────────────
+webhook:
+  timeout_ms: 30000               # Webhook request timeout (default: 30000)
+  backoff_cap_seconds: 3600       # Max retry backoff in seconds (default: 3600)
+  allow_private_urls: false       # Allow webhooks to private IPs — SSRF protection (default: false)
+  max_response_bytes: 1048576     # Max webhook response size in bytes (default: 1MB)
+
+# ─── Actions ─────────────────────────────────────────────────────────────────
+action_defaults:
+  timeout_seconds: 30             # Sync action timeout (default: 30)
+  async_retry_limit: 3            # Async action max retries (default: 3)
+  async_retry_delay_seconds: 10   # Async action initial retry delay (default: 10)
+  async_timeout_seconds: 120      # Async action timeout (default: 120)
+
+# ─── Job Queue ───────────────────────────────────────────────────────────────
+job_queue:
+  provider: pg-boss               # pg-boss (default) or bullmq (requires Redis)
+  connection_string: postgres://...  # Override connection string for pg-boss
+  redis:                           # Redis config for BullMQ provider
+    url: redis://localhost:6379
+    host: localhost
+    port: 6379
+    password: secret
+
+# ─── Redis (multi-instance subscription fanout) ─────────────────────────────
+redis:
+  url: redis://localhost:6379     # Redis connection URL
+  host: localhost                 # Or host/port/password separately
+  port: 6379                     # Default: 6379
+  password: secret
+
+# ─── Query Cache ─────────────────────────────────────────────────────────────
+query_cache:
+  max_size: 1000                  # LRU cache entries for compiled SQL (default: 1000)
+
+# ─── SQL Compilation Tuning ──────────────────────────────────────────────────
+sql:
+  array_any_threshold: 20         # Switch _in arrays to ANY($N) above this size (default: 20)
+  unnest_threshold: 500           # Switch bulk inserts to UNNEST above this size (default: 500)
+  batch_chunk_size: 100           # Rows per batch chunk (default: 100)
 ```
 
 ### 2. Metadata directory (Hasura-compatible)
@@ -407,7 +509,7 @@ All queries — GraphQL and REST — compile to a single parameterized SQL state
 ```bash
 npm install
 docker compose up -d        # start PostgreSQL 17
-npm test                    # run tests (~883 tests, 28 suites)
+npm test                    # run tests (~1200 tests, 36 suites)
 npm run typecheck           # type-check without emitting
 npm run build               # compile TypeScript
 ```

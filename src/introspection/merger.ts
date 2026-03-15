@@ -284,6 +284,48 @@ export function mergeSchemaModel(
     mergedTables.push(tableInfo);
   }
 
+  // Post-process: infer missing localColumns for array relationships.
+  // When a config-defined array relationship has remoteColumns (the FK columns
+  // on the remote table) but no localColumns (the referenced PK/unique columns
+  // on this table), look up the FK constraint on the remote table to fill in
+  // the gap.
+  const mergedTableMap = new Map<string, TableInfo>();
+  for (const t of mergedTables) {
+    mergedTableMap.set(`${t.schema}.${t.name}`, t);
+  }
+
+  for (const table of mergedTables) {
+    for (const rel of table.relationships) {
+      if (
+        rel.type === 'array' &&
+        rel.remoteColumns?.length &&
+        !rel.localColumns?.length
+      ) {
+        // Find the remote table's FK constraints
+        const remoteKey = `${rel.remoteTable.schema}.${rel.remoteTable.name}`;
+        const remoteTable = mergedTableMap.get(remoteKey);
+        if (!remoteTable) continue;
+
+        // Find the FK on the remote table whose columns match rel.remoteColumns
+        // and which references the current table
+        const matchingFK = remoteTable.foreignKeys.find((fk) => {
+          if (fk.referencedSchema !== table.schema || fk.referencedTable !== table.name) {
+            return false;
+          }
+          if (fk.columns.length !== rel.remoteColumns!.length) {
+            return false;
+          }
+          // Check that FK columns match remoteColumns (order-sensitive)
+          return fk.columns.every((col, i) => col === rel.remoteColumns![i]);
+        });
+
+        if (matchingFK) {
+          rel.localColumns = matchingFK.referencedColumns;
+        }
+      }
+    }
+  }
+
   const model: SchemaModel = {
     tables: mergedTables,
     enums: introspection.enums,

@@ -1042,7 +1042,7 @@ describe('Self-referential relationships (category)', () => {
     expect(parent.id).toBe(CATEGORY_ROOT);
   });
 
-  it.skip('array relationship: parent category resolves children { name } — self-referential array relationship FK filter not applied', async () => {
+  it('array relationship: parent category resolves children { name } — self-referential array relationship FK filter not applied', async () => {
     const { body } = await graphqlRequest(
       `query($id: Uuid!) {
         categoryByPk(id: $id) {
@@ -1067,7 +1067,7 @@ describe('Self-referential relationships (category)', () => {
     expect(names).toEqual(['Cremation', 'Traditional']);
   });
 
-  it.skip('recursive nesting: root { children { children { name } } } resolves 3 levels — depends on self-referential fix', async () => {
+  it('recursive nesting: root { children { children { name } } } resolves 3 levels — depends on self-referential fix', async () => {
     const { body } = await graphqlRequest(
       `query($id: Uuid!) {
         categoryByPk(id: $id) {
@@ -1241,7 +1241,7 @@ describe('Composite foreign keys (fiscal_report → fiscal_period)', () => {
     expect(q2Period.quarter).toBe(2);
   });
 
-  it.skip('array relationship: fiscal period resolves reports { title } (reverse direction) — composite FK multi-column filter incomplete', async () => {
+  it('array relationship: fiscal period resolves reports { title } (reverse direction) — composite FK multi-column filter incomplete', async () => {
     const { body } = await graphqlRequest(
       `query {
         fiscalPeriods(orderBy: [{ quarter: ASC }]) {
@@ -1290,7 +1290,7 @@ describe('Composite foreign keys (fiscal_report → fiscal_period)', () => {
 // until the subscription auth pipeline is fixed. The onConnect handler returns
 // { session } but the context function fails to retrieve it, falling back to
 // anonymous role which has no select access on the client table.
-describe.skip('Relationships in subscriptions', () => {
+describe('Relationships in subscriptions', () => {
   let wsUrl: string;
   let subPool: InstanceType<typeof Pool>;
 

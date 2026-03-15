@@ -10,17 +10,19 @@
  */
 
 import { randomUUID } from 'crypto';
+import type { GraphQLResolveInfo } from 'graphql';
 import type {
   TableInfo,
   SessionVariables,
   BoolExp,
 } from '../types.js';
 import type { SubscriptionManager } from '../subscriptions/manager.js';
-import type { OrderByItem } from '../sql/select.js';
+import type { OrderByItem, RelationshipSelection } from '../sql/select.js';
 import { compileSelect, compileSelectByPk } from '../sql/select.js';
 import { toCamelCase } from './type-builder.js';
 import type { ResolverContext } from './resolvers.js';
-import { isSubscriptionRootFieldAllowed } from './resolvers.js';
+import { isSubscriptionRootFieldAllowed, buildComputedFieldSelections, buildSetReturningComputedFieldSelections } from './resolvers.js';
+import { parseResolveInfo, type ParsedSelection, type SetReturningComputedFieldParsed } from './resolve-info.js';
 
 // ─── Async Queue (push-to-pull adapter) ─────────────────────────────────────
 
@@ -228,6 +230,48 @@ function remapRowsToCamel(
   return rows.map((row) => remapRowToCamel(row, table));
 }
 
+// ─── Related Table Key Collection ────────────────────────────────────────────
+
+/**
+ * Collect all related table keys from a parsed selection.
+ * This includes tables referenced by relationships and set-returning computed fields,
+ * recursively through nested relationships.
+ *
+ * Used to register subscriptions under related table keys so that changes
+ * to related tables (e.g., inserting an invoice) trigger re-query of the
+ * parent subscription (e.g., a subscription on clients with nested invoices).
+ */
+function collectRelatedTableKeys(parsed: ParsedSelection): string[] {
+  const keys = new Set<string>();
+
+  function walkRelationships(relationships: RelationshipSelection[]): void {
+    for (const rel of relationships) {
+      keys.add(`${rel.remoteTable.schema}.${rel.remoteTable.name}`);
+      if (rel.relationships) {
+        walkRelationships(rel.relationships);
+      }
+    }
+  }
+
+  function walkSetReturning(srcfs: SetReturningComputedFieldParsed[] | undefined): void {
+    if (!srcfs) return;
+    for (const srcf of srcfs) {
+      keys.add(`${srcf.remoteTable.schema}.${srcf.remoteTable.name}`);
+      if (srcf.relationships.length > 0) {
+        walkRelationships(srcf.relationships);
+      }
+      walkSetReturning(srcf.setReturningComputedFields);
+    }
+  }
+
+  if (parsed.relationships.length > 0) {
+    walkRelationships(parsed.relationships);
+  }
+  walkSetReturning(parsed.setReturningComputedFields);
+
+  return keys.size > 0 ? Array.from(keys) : [];
+}
+
 // ─── Subscription Subscribe: Select (list) ──────────────────────────────────
 
 /**
@@ -243,11 +287,11 @@ function remapRowsToCamel(
  */
 export function makeSubscriptionSelectSubscribe(
   table: TableInfo,
-): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext) => AsyncIterableIterator<unknown> {
+): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: GraphQLResolveInfo) => AsyncIterableIterator<unknown> {
   const columnMap = camelToColumnMap(table);
   const tableKeyStr = `${table.schema}.${table.name}`;
 
-  return (_parent, args, context) => {
+  return (_parent, args, context, info) => {
     const { auth, permissionLookup, subscriptionManager } = context;
 
     if (!subscriptionManager) {
@@ -265,7 +309,29 @@ export function makeSubscriptionSelectSubscribe(
       throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
     }
 
-    const columns = getAllowedColumns(table, perm?.columns);
+    // Parse resolve info to extract requested columns, relationships, and computed fields
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
+    const columns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
+
+    // Build computed field selections
+    const computedFields = buildComputedFieldSelections(
+      parsed.computedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+      parsed.computedFieldArgs,
+    );
+
+    // Build set-returning computed field selections
+    const setReturningComputedFields = buildSetReturningComputedFieldSelections(
+      parsed.setReturningComputedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+    );
+
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
     const orderBy = remapOrderBy(args.orderBy as Array<Record<string, string>> | undefined, columnMap);
     const limit = resolveLimit(args.limit as number | undefined, perm?.limit);
@@ -277,6 +343,10 @@ export function makeSubscriptionSelectSubscribe(
       orderBy,
       limit,
       offset: args.offset as number | undefined,
+      relationships: parsed.relationships,
+      computedFields: computedFields.length > 0 ? computedFields : undefined,
+      setReturningComputedFields: setReturningComputedFields.length > 0 ? setReturningComputedFields : undefined,
+      jsonbPaths: parsed.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
         columns: perm.columns,
@@ -285,6 +355,7 @@ export function makeSubscriptionSelectSubscribe(
       session: auth,
     });
 
+    const relatedTableKeys = collectRelatedTableKeys(parsed);
     const queue = createAsyncQueue<unknown>();
     const subscriptionId = randomUUID();
 
@@ -297,6 +368,7 @@ export function makeSubscriptionSelectSubscribe(
           tableKey: tableKeyStr,
           query: { sql: compiled.sql, params: compiled.params },
           session: auth,
+          relatedTableKeys: relatedTableKeys.length > 0 ? relatedTableKeys : undefined,
           push: (data: unknown) => {
             // The manager pushes raw data from the SQL result;
             // we need to remap it to camelCase for the GraphQL layer
@@ -340,11 +412,11 @@ export function makeSubscriptionSelectSubscribe(
  */
 export function makeSubscriptionSelectByPkSubscribe(
   table: TableInfo,
-): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext) => AsyncIterableIterator<unknown> {
+): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: GraphQLResolveInfo) => AsyncIterableIterator<unknown> {
   const columnMap = camelToColumnMap(table);
   const tableKeyStr = `${table.schema}.${table.name}`;
 
-  return (_parent, args, context) => {
+  return (_parent, args, context, info) => {
     const { auth, permissionLookup, subscriptionManager } = context;
 
     if (!subscriptionManager) {
@@ -363,12 +435,38 @@ export function makeSubscriptionSelectByPkSubscribe(
     }
 
     const pkValues = remapKeys(args as Record<string, unknown>, columnMap) ?? {};
-    const columns = getAllowedColumns(table, perm?.columns);
+
+    // Parse resolve info to extract requested columns, relationships, and computed fields
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
+    const columns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
+
+    // Build computed field selections
+    const computedFields = buildComputedFieldSelections(
+      parsed.computedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+      parsed.computedFieldArgs,
+    );
+
+    // Build set-returning computed field selections
+    const setReturningComputedFields = buildSetReturningComputedFieldSelections(
+      parsed.setReturningComputedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+    );
 
     const compiled = compileSelectByPk({
       table,
       pkValues,
       columns,
+      relationships: parsed.relationships,
+      computedFields: computedFields.length > 0 ? computedFields : undefined,
+      setReturningComputedFields: setReturningComputedFields.length > 0 ? setReturningComputedFields : undefined,
+      jsonbPaths: parsed.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
         columns: perm.columns,
@@ -376,6 +474,7 @@ export function makeSubscriptionSelectByPkSubscribe(
       session: auth,
     });
 
+    const relatedTableKeys = collectRelatedTableKeys(parsed);
     const queue = createAsyncQueue<unknown>();
     const subscriptionId = randomUUID();
 
@@ -387,6 +486,7 @@ export function makeSubscriptionSelectByPkSubscribe(
           tableKey: tableKeyStr,
           query: { sql: compiled.sql, params: compiled.params },
           session: auth,
+          relatedTableKeys: relatedTableKeys.length > 0 ? relatedTableKeys : undefined,
           push: (data: unknown) => {
             // Remap single row result to camelCase
             if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -440,11 +540,11 @@ export interface CursorEntry {
  */
 export function makeSubscriptionStreamSubscribe(
   table: TableInfo,
-): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext) => AsyncIterableIterator<unknown> {
+): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: GraphQLResolveInfo) => AsyncIterableIterator<unknown> {
   const columnMap = camelToColumnMap(table);
   const tableKeyStr = `${table.schema}.${table.name}`;
 
-  return (_parent, args, context) => {
+  return (_parent, args, context, info) => {
     const { auth, permissionLookup, subscriptionManager } = context;
 
     if (!subscriptionManager) {
@@ -462,13 +562,36 @@ export function makeSubscriptionStreamSubscribe(
       throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
     }
 
+    // Parse resolve info to extract requested columns, relationships, and computed fields
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
+    const parsedColumns = parsed.columns.length > 0 ? parsed.columns : getAllowedColumns(table, perm?.columns);
+
+    // Build computed field selections
+    const streamComputedFields = buildComputedFieldSelections(
+      parsed.computedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+      parsed.computedFieldArgs,
+    );
+
+    // Build set-returning computed field selections
+    const streamSetReturningComputedFields = buildSetReturningComputedFieldSelections(
+      parsed.setReturningComputedFields,
+      table,
+      context.functions,
+      perm?.computedFields,
+      auth.isAdmin,
+    );
+
     const batchSize = args.batchSize as number;
     const cursorArgs = args.cursor as Array<{
       initialValue: Record<string, unknown>;
       ordering?: string;
     }>;
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
-    const columns = getAllowedColumns(table, perm?.columns);
+    const columns = parsedColumns;
 
     // Parse cursor entries: remap camelCase to snake_case
     const cursors: CursorEntry[] = cursorArgs
@@ -549,6 +672,10 @@ export function makeSubscriptionStreamSubscribe(
         where: combinedWhere,
         orderBy,
         limit: batchSize,
+        relationships: parsed.relationships,
+        computedFields: streamComputedFields.length > 0 ? streamComputedFields : undefined,
+        setReturningComputedFields: streamSetReturningComputedFields.length > 0 ? streamSetReturningComputedFields : undefined,
+        jsonbPaths: parsed.jsonbPaths,
         permission: perm ? {
           filter: perm.filter,
           columns: perm.columns,
@@ -561,6 +688,7 @@ export function makeSubscriptionStreamSubscribe(
     // Mutable cursor state
     const currentCursors = cursors.map((c) => ({ ...c }));
 
+    const relatedTableKeys = collectRelatedTableKeys(parsed);
     const queue = createAsyncQueue<unknown>();
     const subscriptionId = randomUUID();
 
@@ -575,6 +703,7 @@ export function makeSubscriptionStreamSubscribe(
           session: auth,
           recompile: () => compileStreamQueryWithCursor(currentCursors),
           cursors: currentCursors,
+          relatedTableKeys: relatedTableKeys.length > 0 ? relatedTableKeys : undefined,
           push: (data: unknown) => {
             if (Array.isArray(data)) {
               queue.push(remapRowsToCamel(data as Record<string, unknown>[], table));

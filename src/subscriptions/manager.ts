@@ -30,6 +30,8 @@ export interface SubscriptionEntry {
   lastHash: string;
   /** Callback to push new data to the client */
   push: (data: unknown) => void;
+  /** Additional table keys to watch (for relationship/computed field tables) */
+  relatedTableKeys?: string[];
 }
 
 export interface StreamingSubscriptionEntry {
@@ -44,6 +46,8 @@ export interface StreamingSubscriptionEntry {
   cursors: CursorEntry[];
   /** Callback to push new data to the client */
   push: (data: unknown) => void;
+  /** Additional table keys to watch (for relationship/computed field tables) */
+  relatedTableKeys?: string[];
 }
 
 export interface SubscriptionManager {
@@ -238,8 +242,18 @@ export function createSubscriptionManager(
       subscriptions.set(entry.id, fullEntry);
       addToTableIndex(entry.tableKey, entry.id);
 
+      // Also register under related table keys so changes to related tables
+      // (e.g., inserting an invoice) trigger re-query of this subscription
+      if (entry.relatedTableKeys) {
+        for (const relKey of entry.relatedTableKeys) {
+          if (relKey !== entry.tableKey) {
+            addToTableIndex(relKey, entry.id);
+          }
+        }
+      }
+
       logger.debug(
-        { subscriptionId: entry.id, tableKey: entry.tableKey },
+        { subscriptionId: entry.id, tableKey: entry.tableKey, relatedTableKeys: entry.relatedTableKeys },
         'Subscription registered',
       );
 
@@ -253,8 +267,17 @@ export function createSubscriptionManager(
       streamingSubs.set(entry.id, entry);
       addToTableIndex(entry.tableKey, entry.id);
 
+      // Also register under related table keys
+      if (entry.relatedTableKeys) {
+        for (const relKey of entry.relatedTableKeys) {
+          if (relKey !== entry.tableKey) {
+            addToTableIndex(relKey, entry.id);
+          }
+        }
+      }
+
       logger.debug(
-        { subscriptionId: entry.id, tableKey: entry.tableKey },
+        { subscriptionId: entry.id, tableKey: entry.tableKey, relatedTableKeys: entry.relatedTableKeys },
         'Streaming subscription registered',
       );
 
@@ -265,6 +288,13 @@ export function createSubscriptionManager(
       const entry = subscriptions.get(id);
       if (entry) {
         removeFromTableIndex(entry.tableKey, id);
+        if (entry.relatedTableKeys) {
+          for (const relKey of entry.relatedTableKeys) {
+            if (relKey !== entry.tableKey) {
+              removeFromTableIndex(relKey, id);
+            }
+          }
+        }
         subscriptions.delete(id);
         logger.debug({ subscriptionId: id }, 'Subscription unregistered');
       }
@@ -272,6 +302,13 @@ export function createSubscriptionManager(
       const streamEntry = streamingSubs.get(id);
       if (streamEntry) {
         removeFromTableIndex(streamEntry.tableKey, id);
+        if (streamEntry.relatedTableKeys) {
+          for (const relKey of streamEntry.relatedTableKeys) {
+            if (relKey !== streamEntry.tableKey) {
+              removeFromTableIndex(relKey, id);
+            }
+          }
+        }
         streamingSubs.delete(id);
         logger.debug({ subscriptionId: id }, 'Streaming subscription unregistered');
       }

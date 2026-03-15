@@ -530,7 +530,7 @@ function isNumericColumn(column: ColumnInfo): boolean {
 /**
  * Build ComputedFieldSelection[] from parsed computed field names + table config + schema functions.
  */
-function buildComputedFieldSelections(
+export function buildComputedFieldSelections(
   computedFieldNames: string[] | undefined,
   table: TableInfo,
   functions: FunctionInfo[],
@@ -597,7 +597,7 @@ function buildComputedFieldSelections(
 /**
  * Build SetReturningComputedFieldSelection[] from parsed set-returning computed fields.
  */
-function buildSetReturningComputedFieldSelections(
+export function buildSetReturningComputedFieldSelections(
   parsed: SetReturningComputedFieldParsed[] | undefined,
   table: TableInfo,
   functions: FunctionInfo[],
