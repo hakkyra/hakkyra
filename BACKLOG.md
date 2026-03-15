@@ -186,7 +186,7 @@
 ## Phase 2: Real-time & Events — COMPLETE
 
 ### Shared Infrastructure (`src/shared/`)
-- [x] Webhook delivery utility (fetch-based, timeout, header/URL env resolution)
+- [x] Webhook delivery utility (fetch-based, timeout, header/URL env resolution, `{{ENV_VAR}}` template interpolation)
 - [x] pg-boss lifecycle manager (start, graceful stop, `hakkyra_boss` schema)
 - [x] Exponential backoff calculator
 

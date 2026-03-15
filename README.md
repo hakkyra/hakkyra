@@ -13,11 +13,18 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 - **Permissions** — row-level and column-level security per role, compiled to SQL at startup, with inherited role support
 - **Authentication** — JWT (HS256, RS256, ES256, Ed25519), JWKS auto-rotation, webhook auth
 - **Relationships** — object and array relationships resolved in a single SQL query
+- **Actions** — proxy mutations/queries to external webhook handlers with request/response transforms, async support, and action relationships
+- **Tracked functions** — expose PostgreSQL functions as top-level Query/Mutation fields with permission enforcement
+- **Computed fields** — virtual fields backed by PostgreSQL functions
 - **Table-based enums** — `is_enum: true` tables become GraphQL enum types; FK columns auto-typed
 - **Subscriptions** — real-time updates via WebSocket (graphql-ws protocol) with LISTEN/NOTIFY + Redis pub/sub fanout for multi-instance deployments
+- **Streaming subscriptions** — cursor-based streaming with `batchSize` and `cursor` arguments
 - **Event triggers** — capture INSERT/UPDATE/DELETE changes and deliver webhooks with retry
-- **Cron triggers** — scheduled webhook invocations via pg-boss
+- **Cron triggers** — scheduled webhook invocations via pg-boss or BullMQ
 - **Custom queries** — hand-written SQL overrides registered as GraphQL operations
+- **Upsert** — ON CONFLICT support for inserts
+- **Batch operations** — optimized UNNEST-based bulk inserts and updateMany
+- **Distinct queries** — DISTINCT ON support
 - **Read replicas** — automatic read/write routing with round-robin
 - **API docs** — OpenAPI 3.1, GraphQL SDL, and LLM-friendly compact format
 - **Hot reload** — `--dev` mode watches config files and reloads schema without restart
@@ -47,7 +54,7 @@ npm run dev -- --dev --config ./hakkyra.yaml --metadata ./metadata
 
 ```bash
 docker compose up -d   # starts PostgreSQL 17
-npm test               # runs the test suite (250 tests)
+npm test               # runs the full test suite (~900 tests)
 ```
 
 ## Configuration
@@ -273,7 +280,7 @@ event_triggers:
     definition:
       insert:
         columns: "*"
-    webhook: https://api.example.com/hooks/user-created
+    webhook: '{{CORE_SERVER_URL}}hooks/user-created'
     retry_conf:
       num_retries: 5
       retry_interval_seconds: 15
@@ -296,7 +303,7 @@ Schedule recurring webhook invocations:
 ```yaml
 # cron_triggers.yaml
 - name: daily_cleanup
-  webhook: https://api.example.com/cron/cleanup
+  webhook: '{{CORE_SERVER_URL}}cron/cleanup'
   schedule: "0 3 * * *"
   payload:
     action: cleanup
@@ -305,10 +312,35 @@ Schedule recurring webhook invocations:
     retry_interval_seconds: 60
 ```
 
+## Actions
+
+Proxy GraphQL mutations/queries to external HTTP handlers (Hasura-compatible):
+
+```yaml
+# actions.yaml
+actions:
+  - name: updateLimit
+    definition:
+      kind: synchronous
+      handler: '{{CORE_SERVER_INTERNAL_URL}}actions/updateLimit'
+      forward_client_headers: true
+    permissions:
+      - role: player
+```
+
+Action handler URLs support `{{ENV_VAR}}` template interpolation — the same syntax Hasura uses. Actions support:
+
+- **Synchronous** — proxy request and return response inline
+- **Asynchronous** — return immediately, deliver result via webhook later
+- **Request/response transforms** — template-based URL, body, and header rewriting
+- **Action relationships** — map action output fields to database table relationships
+
 ## CLI
 
 ```
-hakkyra [options]
+hakkyra start [options]     # production start (default command)
+hakkyra dev [options]       # dev mode with hot reload
+hakkyra init                # scaffold project with example config
 
 Options:
   --port <number>      Server port (default: 3000)
@@ -357,7 +389,7 @@ All queries — GraphQL and REST — compile to a single parameterized SQL state
 ```bash
 npm install
 docker compose up -d        # start PostgreSQL 17
-npm test                    # run tests (250 tests, 9 suites)
+npm test                    # run tests (~900 tests, 29 suites)
 npm run typecheck           # type-check without emitting
 npm run build               # compile TypeScript
 ```
