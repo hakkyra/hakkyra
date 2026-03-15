@@ -90,24 +90,26 @@ export async function enqueuePendingEvents(
   batchSize: number = 100,
   schemaName: string = 'hakkyra',
 ): Promise<number> {
+  // Atomically claim pending events using FOR UPDATE SKIP LOCKED to prevent
+  // deadlocks when multiple NOTIFY signals trigger concurrent fetches.
   const result = await pool.query<EventLogRow>(
-    `SELECT id, trigger_name, table_schema, table_name, operation,
-            old_data, new_data, session_vars, created_at
-     FROM ${quoteIdent(schemaName)}.event_log
-     WHERE status = 'pending' AND next_retry <= now()
-     ORDER BY created_at ASC
-     LIMIT $1`,
+    `WITH claimed AS (
+       SELECT id FROM ${quoteIdent(schemaName)}.event_log
+       WHERE status = 'pending' AND next_retry <= now()
+       ORDER BY created_at ASC
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED
+     )
+     UPDATE ${quoteIdent(schemaName)}.event_log e
+     SET status = 'processing'
+     FROM claimed c
+     WHERE e.id = c.id
+     RETURNING e.id, e.trigger_name, e.table_schema, e.table_name, e.operation,
+               e.old_data, e.new_data, e.session_vars, e.created_at`,
     [batchSize],
   );
 
   if (result.rows.length === 0) return 0;
-
-  // Mark these events as 'processing' to avoid double-enqueue
-  const ids = result.rows.map((r) => r.id);
-  await pool.query(
-    `UPDATE ${quoteIdent(schemaName)}.event_log SET status = 'processing' WHERE id = ANY($1)`,
-    [ids],
-  );
 
   // Enqueue each event into pg-boss
   for (const event of result.rows) {
