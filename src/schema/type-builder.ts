@@ -347,49 +347,102 @@ export function buildObjectType(
               },
             };
           } else {
-            // Scalar computed field — map PG return type to a GraphQL scalar
-            const mapping = pgTypeToGraphQL(fn.returnType, false, enumNames);
-            const fieldType = resolveScalarType(mapping.name, mapping.isList, enumTypes);
+            // Non-set-returning — check if return type is a tracked table (composite return)
+            const fnSchema = cf.function.schema ?? 'public';
+            let returnTableKey: string | undefined;
 
-            // Check for extra user arguments (beyond the table row and session arg)
-            const cfArgs: GraphQLFieldConfigArgumentMap = {};
-            if (fn.argNames.length > 1) {
-              // Identify which args are user-facing (not table row, not session)
-              const tableArgName = cf.tableArgument;
-              const sessionArgName = cf.sessionArgument;
-              const userArgs: Array<{ name: string; pgType: string }> = [];
-              for (let i = 0; i < fn.argNames.length; i++) {
-                const argName = fn.argNames[i];
-                if (argName === tableArgName) continue;
-                if (sessionArgName && argName === sessionArgName) continue;
-                userArgs.push({ name: argName, pgType: fn.argTypes[i] });
-              }
-              if (userArgs.length > 0) {
-                // Build an args input type like tracked functions do
-                const argsFields: Record<string, { type: GraphQLInputType }> = {};
-                for (const ua of userArgs) {
-                  argsFields[toCamelCase(ua.name)] = {
-                    type: pgArgTypeToGraphQL(ua.pgType),
-                  };
+            const sameSchemaKey = tableKey(fnSchema, fn.returnType);
+            if (typeRegistry.has(sameSchemaKey)) {
+              returnTableKey = sameSchemaKey;
+            } else {
+              for (const key of typeRegistry.keys()) {
+                if (key.endsWith(`.${fn.returnType}`)) {
+                  returnTableKey = key;
+                  break;
                 }
-                const argsInputType = new GraphQLInputObjectType({
-                  name: `${toPascalCase(cf.name)}Args`,
-                  fields: argsFields,
-                });
-                cfArgs['args'] = { type: argsInputType };
               }
             }
 
-            fields[fieldName] = {
-              type: fieldType,
-              description: cf.comment ?? `Computed field from ${cf.function.schema ?? 'public'}.${cf.function.name}`,
-              extensions: {
-                isComputedField: true,
-                computedFieldConfig: cf,
-                functionInfo: fn,
-              },
-              ...(Object.keys(cfArgs).length > 0 ? { args: cfArgs } : {}),
-            };
+            if (returnTableKey) {
+              // Returns a tracked table type — treat like set-returning for schema purposes
+              const returnTableType = typeRegistry.get(returnTableKey)!;
+
+              const args: GraphQLFieldConfigArgumentMap = {};
+
+              const relFilterType = filterTypes?.get(returnTableKey);
+              if (relFilterType) {
+                args['where'] = { type: relFilterType };
+              }
+
+              const relOrderByType = orderByTypes?.get(returnTableKey);
+              if (relOrderByType) {
+                args['orderBy'] = {
+                  type: new GraphQLList(new GraphQLNonNull(relOrderByType)),
+                };
+              }
+
+              args['limit'] = { type: GraphQLInt };
+              args['offset'] = { type: GraphQLInt };
+
+              fields[fieldName] = {
+                type: new GraphQLNonNull(
+                  new GraphQLList(new GraphQLNonNull(returnTableType)),
+                ),
+                args,
+                description: cf.comment ?? `Computed field from ${cf.function.schema ?? 'public'}.${cf.function.name}`,
+                extensions: {
+                  isComputedField: true,
+                  isSetReturning: true,
+                  computedFieldConfig: cf,
+                  functionInfo: fn,
+                  returnTableKey,
+                },
+              };
+            } else {
+              // Scalar computed field — map PG return type to a GraphQL scalar
+              const mapping = pgTypeToGraphQL(fn.returnType, false, enumNames);
+              const fieldType = resolveScalarType(mapping.name, mapping.isList, enumTypes);
+
+              // Check for extra user arguments (beyond the table row and session arg)
+              const cfArgs: GraphQLFieldConfigArgumentMap = {};
+              if (fn.argNames.length > 1) {
+                // Identify which args are user-facing (not table row, not session)
+                const tableArgName = cf.tableArgument;
+                const sessionArgName = cf.sessionArgument;
+                const userArgs: Array<{ name: string; pgType: string }> = [];
+                for (let i = 0; i < fn.argNames.length; i++) {
+                  const argName = fn.argNames[i];
+                  if (argName === tableArgName) continue;
+                  if (sessionArgName && argName === sessionArgName) continue;
+                  userArgs.push({ name: argName, pgType: fn.argTypes[i] });
+                }
+                if (userArgs.length > 0) {
+                  // Build an args input type like tracked functions do
+                  const argsFields: Record<string, { type: GraphQLInputType }> = {};
+                  for (const ua of userArgs) {
+                    argsFields[toCamelCase(ua.name)] = {
+                      type: pgArgTypeToGraphQL(ua.pgType),
+                    };
+                  }
+                  const argsInputType = new GraphQLInputObjectType({
+                    name: `${toPascalCase(cf.name)}Args`,
+                    fields: argsFields,
+                  });
+                  cfArgs['args'] = { type: argsInputType };
+                }
+              }
+
+              fields[fieldName] = {
+                type: fieldType,
+                description: cf.comment ?? `Computed field from ${cf.function.schema ?? 'public'}.${cf.function.name}`,
+                extensions: {
+                  isComputedField: true,
+                  computedFieldConfig: cf,
+                  functionInfo: fn,
+                },
+                ...(Object.keys(cfArgs).length > 0 ? { args: cfArgs } : {}),
+              };
+            }
           }
         }
       }
