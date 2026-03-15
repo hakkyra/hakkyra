@@ -183,6 +183,7 @@ export const RawRelationshipSchema = z
           .object({
             remote_table: TableIdentifierSchema,
             column_mapping: z.record(z.string(), z.string()),
+            insertion_order: z.enum(['before_parent', 'after_parent']).nullable().optional(),
           })
           .strict()
           .optional(),
@@ -292,6 +293,11 @@ export const RawTableYamlSchema = z
       .object({
         custom_root_fields: z.record(z.string(), z.string()).optional(),
         custom_column_names: z.record(z.string(), z.string()).optional(),
+        column_config: z.record(z.string(), z.object({
+          custom_name: z.string().optional(),
+          comment: z.string().optional(),
+        }).strict()).optional(),
+        custom_name: z.string().optional(),
         comment: z.string().optional(),
       })
       .strict()
