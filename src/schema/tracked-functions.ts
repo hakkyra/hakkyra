@@ -886,9 +886,10 @@ function makeTrackedFunctionAggregateResolver(
     for (const aggFn of ['sum', 'avg', 'min', 'max'] as const) {
       const fieldCols = aggSelection[aggFn];
       if (fieldCols && fieldCols.length > 0) {
-        const fnFields = fieldCols.map(
-          (c) => `'${c}', ${aggFn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`,
-        ).join(', ');
+        const fnFields = fieldCols.map((camelName) => {
+          const snakeName = camelName.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase());
+          return `'${camelName}', ${aggFn}(${quoteIdentifier(alias)}.${quoteIdentifier(snakeName)})`;
+        }).join(', ');
         aggFields.push(`'${aggFn}', json_build_object(${fnFields})`);
       }
     }
@@ -937,11 +938,8 @@ function parseAggregateFromInfo(info: import('graphql').GraphQLResolveInfo): Agg
             const cols: string[] = [];
             for (const colField of aggField.selectionSet.selections) {
               if (colField.kind === 'Field') {
-                // Convert camelCase field name to snake_case column name
-                const camelName = colField.name.value;
-                // Simple camelCase to snake_case
-                const snakeName = camelName.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase());
-                cols.push(snakeName);
+                // Store camelCase field name — convert to snake_case at SQL emission time
+                cols.push(colField.name.value);
               }
             }
             (agg as Record<string, unknown>)[name] = cols;

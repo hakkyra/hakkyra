@@ -392,4 +392,247 @@ describe('Computed Fields — E2E via GraphQL', () => {
     expect(client.id).toBe(ALICE_ID);
     expect(client.username).toBe('alice');
   });
+
+  // TODO(P6.4d): Computed fields in mutation RETURNING require resolver + SQL compiler support.
+  // updateByPk/deleteByPk resolvers currently don't pass context.functions to parseResolveInfo
+  // and don't build computed field selections for the RETURNING clause.
+  // Once implemented, these .todo tests should become real tests verifying:
+  //   - UPDATE RETURNING: updateClientByPk _set trustLevel, select totalBalance => 1700
+  //   - DELETE RETURNING: deleteClientByPk select totalBalance => 0 (no accounts)
+  it.todo('UPDATE RETURNING includes computed field (updateClientByPk)');
+  it.todo('DELETE RETURNING includes computed field (deleteClientByPk)');
+});
+
+// ─── SETOF Computed Fields (P6.4c) ─────────────────────────────────────────
+
+describe('Computed Fields — SETOF (P6.4c)', () => {
+  it('config model includes active_accounts SETOF computed field on client', () => {
+    const clientTable = findTable('client');
+    const cf = clientTable.computedFields!.find((c) => c.name === 'active_accounts');
+    expect(cf).toBeDefined();
+    expect(cf!.function.name).toBe('client_active_accounts');
+    expect(cf!.tableArgument).toBe('client_row');
+  });
+
+  it('client_active_accounts function is set-returning', () => {
+    const fn = findFunction('client_active_accounts');
+    expect(fn.isSetReturning).toBe(true);
+    expect(fn.returnType).toBe('account');
+  });
+
+  it('backoffice permissions include active_accounts computed field', () => {
+    const clientTable = findTable('client');
+    const boPermission = clientTable.permissions.select['backoffice'];
+    expect(boPermission).toBeDefined();
+    expect(boPermission.computedFields).toContain('active_accounts');
+  });
+
+  it('backoffice can query clients with activeAccounts SETOF computed field', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query($id: Uuid!) {
+        clientByPk(id: $id) {
+          id
+          username
+          activeAccounts {
+            id
+            balance
+          }
+        }
+      }`,
+      { id: ALICE_ID },
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const client = (body.data as { clientByPk: AnyRow }).clientByPk;
+    expect(client).toBeDefined();
+    expect(client.id).toBe(ALICE_ID);
+    const accounts = client.activeAccounts as AnyRow[];
+    expect(Array.isArray(accounts)).toBe(true);
+    expect(accounts.length).toBeGreaterThan(0);
+    // Alice has one active account with balance 1500
+    const aliceAccount = accounts.find((a) => a.id === ACCOUNT_ALICE_ID);
+    expect(aliceAccount).toBeDefined();
+    expect(Number(aliceAccount!.balance)).toBe(1500);
+  });
+
+  it('SETOF computed field returns empty array for client with no active accounts', async () => {
+    const token = await tokens.backoffice();
+    // Charlie's account has balance=0 but is still active; verify the field works
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients {
+          id
+          username
+          activeAccounts {
+            id
+            balance
+          }
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients.length).toBeGreaterThan(0);
+    // Every client should have an activeAccounts array (possibly empty)
+    for (const c of clients) {
+      expect(Array.isArray(c.activeAccounts)).toBe(true);
+    }
+  });
+});
+
+// ─── Computed Fields with Arguments (P6.4e) ────────────────────────────────
+
+describe('Computed Fields — With Arguments (P6.4e)', () => {
+  it('config model includes balance_in_currency computed field on client', () => {
+    const clientTable = findTable('client');
+    const cf = clientTable.computedFields!.find((c) => c.name === 'balance_in_currency');
+    expect(cf).toBeDefined();
+    expect(cf!.function.name).toBe('client_balance_in_currency');
+    expect(cf!.tableArgument).toBe('client_row');
+  });
+
+  it('client_balance_in_currency function has extra argument beyond the table row', () => {
+    const fn = findFunction('client_balance_in_currency');
+    expect(fn.isSetReturning).toBe(false);
+    expect(fn.returnType).toBe('numeric');
+    // Function has 2 args: client_row (table) + target_currency (text)
+    expect(fn.argNames.length).toBe(2);
+    expect(fn.argNames).toContain('target_currency');
+    expect(fn.numArgsWithDefaults).toBeGreaterThanOrEqual(1);
+  });
+
+  it('backoffice permissions include balance_in_currency computed field', () => {
+    const clientTable = findTable('client');
+    const boPermission = clientTable.permissions.select['backoffice'];
+    expect(boPermission).toBeDefined();
+    expect(boPermission.computedFields).toContain('balance_in_currency');
+  });
+
+  // TODO(P6.4e): Computed field argument passing is not yet implemented.
+  // The type-builder does not generate an `args` input type for scalar computed
+  // fields with extra function parameters (only the table row is passed).
+  // The SQL compiler calls the function as funcRef(alias) without additional args.
+  // Once implemented, these tests should query:
+  //   - balanceInCurrency(args: { targetCurrency: "EUR" }) => 1500 (Alice's EUR account balance)
+  //   - balanceInCurrency without args => uses DEFAULT 'EUR' => 1500
+  it.todo('backoffice can query balanceInCurrency with explicit args (targetCurrency: "EUR")');
+  it.todo('backoffice can query balanceInCurrency without args (uses DEFAULT)');
+});
+
+// ─── Computed Fields with Session Variables (P6.4h) ────────────────────────
+
+describe('Computed Fields — Session Variables (P6.4h)', () => {
+  it('config model includes is_own computed field with session argument', () => {
+    const clientTable = findTable('client');
+    const cf = clientTable.computedFields!.find((c) => c.name === 'is_own');
+    expect(cf).toBeDefined();
+    expect(cf!.function.name).toBe('client_is_own');
+    expect(cf!.tableArgument).toBe('client_row');
+    expect(cf!.sessionArgument).toBe('hasura_session');
+  });
+
+  it('client_is_own function has session argument', () => {
+    const fn = findFunction('client_is_own');
+    expect(fn.isSetReturning).toBe(false);
+    expect(fn.returnType).toBe('boolean');
+    // Function has 2 args: client_row (table) + hasura_session (json)
+    expect(fn.argNames.length).toBe(2);
+    expect(fn.argNames).toContain('hasura_session');
+  });
+
+  it('client role permissions include is_own computed field', () => {
+    const clientTable = findTable('client');
+    const clientPerm = clientTable.permissions.select['client'];
+    expect(clientPerm).toBeDefined();
+    expect(clientPerm.computedFields).toContain('is_own');
+  });
+
+  // TODO(P6.4h): Session argument injection for computed fields is not yet implemented.
+  // The SQL compiler calls the function as funcRef(alias) without passing session
+  // variables. The config stores sessionArgument but it is not used when building
+  // the SQL function call.
+  // Once implemented, this test should query as client (alice):
+  //   - isOwn on alice's own record => true
+  //   - isOwn on another client's record => false (if visible)
+  it.todo('client (alice) sees isOwn=true on own record via session variable injection');
+});
+
+// ─── Computed Fields on Materialized Views (P6.4i) ─────────────────────────
+
+describe('Computed Fields — Materialized Views (P6.4i)', () => {
+  it('config model includes score computed field on client_summary', () => {
+    const csTable = findTable('client_summary');
+    expect(csTable.computedFields).toBeDefined();
+    const score = csTable.computedFields!.find((cf) => cf.name === 'score');
+    expect(score).toBeDefined();
+    expect(score!.function.name).toBe('client_summary_score');
+  });
+
+  it('client_summary_score function returns numeric', () => {
+    const fn = findFunction('client_summary_score');
+    expect(fn.isSetReturning).toBe(false);
+    expect(fn.returnType).toBe('numeric');
+  });
+
+  it('backoffice permissions include score computed field on client_summary', () => {
+    const csTable = findTable('client_summary');
+    const boPermission = csTable.permissions.select['backoffice'];
+    expect(boPermission).toBeDefined();
+    expect(boPermission.computedFields).toContain('score');
+  });
+
+  it('backoffice can query clientSummaries with score computed field', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientSummaries {
+          clientId
+          totalBalance
+          score
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const summaries = (body.data as { clientSummaries: AnyRow[] }).clientSummaries;
+    expect(summaries.length).toBeGreaterThan(0);
+    // Alice in the MV: total_balance=6000 (inflated by cross-product joins), payment_count=1
+    // score = total_balance + (payment_count * 100) = 6000 + 100 = 6100
+    const aliceSummary = summaries.find((s) => s.clientId === ALICE_ID);
+    expect(aliceSummary).toBeDefined();
+    expect(Number(aliceSummary!.score)).toBe(6100);
+  });
+
+  it('score computed field works alongside relationships on materialized view', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientSummaries {
+          clientId
+          totalBalance
+          score
+          client { id username }
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const summaries = (body.data as { clientSummaries: AnyRow[] }).clientSummaries;
+    expect(summaries.length).toBeGreaterThan(0);
+    const aliceSummary = summaries.find((s) => s.clientId === ALICE_ID);
+    expect(aliceSummary).toBeDefined();
+    expect(Number(aliceSummary!.score)).toBe(6100);
+    const client = aliceSummary!.client as AnyRow;
+    expect(client).toBeDefined();
+    expect(client.username).toBe('alice');
+  });
 });

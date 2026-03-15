@@ -1,2 +1,6 @@
 - "!include public_search_clients.yaml"
 - "!include public_deactivate_client.yaml"
+- "!include public_search_clients_by_date.yaml"
+- "!include public_search_clients_by_trust.yaml"
+- "!include public_my_clients.yaml"
+- "!include utils_count_active_clients.yaml"

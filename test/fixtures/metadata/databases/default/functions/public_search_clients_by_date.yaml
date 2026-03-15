@@ -1,0 +1,6 @@
+function:
+  name: search_clients_by_date
+  schema: public
+permissions:
+  - role: backoffice
+  - role: administrator

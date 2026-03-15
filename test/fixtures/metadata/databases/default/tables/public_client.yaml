@@ -52,6 +52,28 @@ computed_fields:
         name: client_total_balance
         schema: public
     comment: "Total balance across all active accounts"
+  - name: active_accounts
+    definition:
+      function:
+        name: client_active_accounts
+        schema: public
+      table_argument: client_row
+    comment: "Active accounts for this client (SETOF)"
+  - name: balance_in_currency
+    definition:
+      function:
+        name: client_balance_in_currency
+        schema: public
+      table_argument: client_row
+    comment: "Balance filtered by target currency (with argument)"
+  - name: is_own
+    definition:
+      function:
+        name: client_is_own
+        schema: public
+      table_argument: client_row
+      session_argument: hasura_session
+    comment: "Whether this client belongs to the requesting user"
 
 array_relationships:
   - name: accounts
@@ -125,6 +147,7 @@ select_permissions:
           _eq: X-Hasura-User-Id
       computed_fields:
         - total_balance
+        - is_own
     comment: "Clients can only see their own profile"
 
   - role: backoffice
@@ -134,6 +157,8 @@ select_permissions:
       allow_aggregations: true
       computed_fields:
         - total_balance
+        - active_accounts
+        - balance_in_currency
     comment: "Backoffice can see all clients with aggregations"
 
   - role: function

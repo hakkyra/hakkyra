@@ -1,0 +1,42 @@
+table:
+  schema: public
+  name: transfer
+
+configuration:
+  custom_root_fields:
+    select: transfers
+    select_by_pk: transferByPk
+    insert: insertTransfers
+    insert_one: insertTransfer
+  custom_column_names:
+    id: id
+    from_account_id: fromAccountId
+    to_account_id: toAccountId
+    amount: amount
+    note: note
+    created_at: createdAt
+
+object_relationships:
+  - name: fromAccount
+    using:
+      foreign_key_constraint_on: from_account_id
+  - name: toAccount
+    using:
+      foreign_key_constraint_on: to_account_id
+
+select_permissions:
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+insert_permissions:
+  - role: administrator
+    permission:
+      columns: "*"
+      check: {}

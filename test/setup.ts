@@ -143,6 +143,15 @@ export const tokens = {
       extra: { 'x-hasura-client-id': clientId },
     });
   },
+  async backofficeAdmin(): Promise<string> {
+    return createJWT({ role: 'backoffice_admin', allowedRoles: ['backoffice_admin', 'backoffice', 'administrator'] });
+  },
+  async support(): Promise<string> {
+    return createJWT({ role: 'support', allowedRoles: ['support', 'backoffice'] });
+  },
+  async auditor(): Promise<string> {
+    return createJWT({ role: 'auditor', allowedRoles: ['auditor', 'backoffice', 'function'] });
+  },
 };
 
 // ─── Clean Metadata Directory ──────────────────────────────────────────────────
