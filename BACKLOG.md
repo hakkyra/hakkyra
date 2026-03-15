@@ -391,6 +391,13 @@ Hasura's table `configuration` block supports `column_config` (per-column settin
 - [ ] Config loader: apply table-level `custom_name` as table alias for type naming and root fields
 - [ ] `column_config.comment`: surface as GraphQL field descriptions
 
+### Request Transform: `template_engine` and `version`
+
+Hasura v2 request transforms support `template_engine` (e.g. `"Kriti"`) and `version` fields. Schema validation accepts these fields; Hakkyra currently uses its own string interpolation engine.
+
+- [x] Accept `template_engine` and `version` in request transform Zod schema
+- [ ] Transform engine: support Kriti template syntax (Hasura's default template engine)
+
 ### Nested Insert Ordering (`insertion_order`)
 
 Hasura supports `insertion_order` in object relationship `manual_configuration` to control whether the related row is inserted before or after the parent row in nested inserts. Values: `before_parent` (default) or `after_parent`. Schema validation accepts the field (Zod schema updated); runtime implementation pending.
