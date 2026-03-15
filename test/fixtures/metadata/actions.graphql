@@ -103,3 +103,16 @@ type ProcessServiceResult {
   newStatus: String!
   amountApplied: Float
 }
+
+# ── Action: updateLimit (inline args, no input wrapper) ───────────────────────
+extend type Mutation {
+  updateLimit(
+    type: String!
+    amount: Float
+    endTime: String
+  ): UpdateLimitResult
+}
+
+type UpdateLimitResult {
+  ok: Boolean!
+}

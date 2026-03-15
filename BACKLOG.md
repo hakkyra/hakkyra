@@ -243,7 +243,8 @@
 - [x] Async actions (return immediately, deliver result later, 18 tests)
 - [x] Action permissions per role
 - [x] Action relationship mapping — object/array relationships to DB tables (13 tests)
-- [x] Integration tests (16 tests)
+- [x] Inline arguments support — actions with direct args (Hasura default) in addition to wrapped input types
+- [x] Integration tests (19 tests)
 
 ### P3.1.5 — Job Queue Abstraction (`src/shared/job-queue/`)
 - [x] `JobQueue` interface abstracting pg-boss
@@ -568,7 +569,7 @@ Hasura supports marking a table as `is_enum: true` in metadata, turning its prim
 | Crons | 14 | Pass |
 | Subscriptions | 15 | Pass |
 | Streaming subscriptions | 13 | Pass |
-| Actions | 16 | Pass |
+| Actions | 19 | Pass |
 | Async actions | 18 | Pass |
 | Computed fields | 17 | Pass |
 | Upsert | 22 | Pass |
@@ -585,4 +586,4 @@ Hasura supports marking a table as `is_enum: true` in metadata, turning its prim
 | Tracked functions | 20 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
-| **Total** | **~893** | **29 suites, all passing** |
+| **Total** | **~896** | **29 suites, all passing** |

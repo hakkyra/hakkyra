@@ -94,6 +94,16 @@ actions:
       - role: administrator
     comment: "Process a service item - mark as delivered to client"
 
+  # Sync mutation with inline args (no input wrapper) — matches Hasura default pattern
+  - name: updateLimit
+    definition:
+      kind: synchronous
+      handler: "{{TEST_SERVER_URL}}/actions/update-limit"
+      forward_client_headers: true
+      timeout: 15
+    permissions:
+      - role: client
+
 custom_types:
   input_objects:
     - name: CreatePaymentInput

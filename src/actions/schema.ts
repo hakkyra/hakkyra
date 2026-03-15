@@ -137,6 +137,8 @@ interface ParsedAction {
   rootType: 'Query' | 'Mutation';
   inputTypeName: string;
   returnTypeNode: TypeNode;
+  /** Inline argument definitions (when the action doesn't use a wrapped input type) */
+  inlineArgs: InputValueDefinitionNode[];
 }
 
 /**
@@ -171,13 +173,18 @@ function parseActionsSDL(sdl: string) {
         for (const field of def.fields ?? []) {
           const inputArg = field.arguments?.find((a) => a.name.value === 'input');
           let inputTypeName = '';
+          let inlineArgs: InputValueDefinitionNode[] = [];
+
           if (inputArg) {
-            // Unwrap NonNull to get the named type
+            // Wrapped input type pattern: action(input: SomeInput!)
             let typeNode = inputArg.type;
             while (typeNode.kind === 'NonNullType' || typeNode.kind === 'ListType') {
               typeNode = typeNode.type;
             }
             inputTypeName = typeNode.name.value;
+          } else if (field.arguments && field.arguments.length > 0) {
+            // Inline arguments pattern: action(arg1: Type!, arg2: Type)
+            inlineArgs = [...field.arguments];
           }
 
           actions.push({
@@ -185,6 +192,7 @@ function parseActionsSDL(sdl: string) {
             rootType: typeName,
             inputTypeName,
             returnTypeNode: field.type,
+            inlineArgs,
           });
         }
       } else {
@@ -504,6 +512,19 @@ export function buildActionFields(
     const isAsync = actionConfig.definition.kind === 'asynchronous';
     const returnType = resolveOutputType(parsed.returnTypeNode, outputTypes);
     const inputType = inputTypes.get(parsed.inputTypeName);
+    const hasInlineArgs = parsed.inlineArgs.length > 0;
+
+    // Build args config: either wrapped input type or inline arguments
+    let argsConfig: Record<string, { type: GraphQLInputType }> = {};
+    if (inputType) {
+      argsConfig = { input: { type: new GraphQLNonNull(inputType) } };
+    } else if (hasInlineArgs) {
+      for (const argDef of parsed.inlineArgs) {
+        argsConfig[argDef.name.value] = {
+          type: resolveInputType(argDef.type, inputTypes),
+        };
+      }
+    }
 
     if (isAsync) {
       hasAsyncActions = true;
@@ -511,13 +532,11 @@ export function buildActionFields(
       // ── Async action: mutation returns { actionId: Uuid! } ────────────
       const mutationFieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
         type: new GraphQLNonNull(AsyncActionIdType),
-        args: inputType
-          ? { input: { type: new GraphQLNonNull(inputType) } }
-          : {},
+        args: argsConfig,
         description: actionConfig.comment
           ? `${actionConfig.comment} (async — returns action ID)`
           : `Async action: ${actionConfig.name}`,
-        resolve: makeAsyncActionResolver(actionConfig),
+        resolve: makeAsyncActionResolver(actionConfig, hasInlineArgs),
       };
       mutationFields[parsed.name] = mutationFieldConfig;
 
@@ -550,11 +569,9 @@ export function buildActionFields(
       // ── Sync action: standard resolver ────────────────────────────────
       const fieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
         type: returnType,
-        args: inputType
-          ? { input: { type: new GraphQLNonNull(inputType) } }
-          : {},
+        args: argsConfig,
         description: actionConfig.comment ?? undefined,
-        resolve: makeActionResolver(actionConfig),
+        resolve: makeActionResolver(actionConfig, hasInlineArgs),
       };
 
       if (parsed.rootType === 'Query') {
@@ -583,6 +600,7 @@ export function buildActionFields(
 
 function makeActionResolver(
   action: ActionConfig,
+  inlineArgs = false,
 ) {
   return async (
     _parent: unknown,
@@ -598,9 +616,10 @@ function makeActionResolver(
     }
 
     // Execute the action via webhook proxy
+    const input = inlineArgs ? args : ((args.input as Record<string, unknown>) ?? {});
     const result = await executeAction({
       action,
-      input: (args.input as Record<string, unknown>) ?? {},
+      input,
       session: context.auth,
     });
 
@@ -623,6 +642,7 @@ function makeActionResolver(
  */
 function makeAsyncActionResolver(
   action: ActionConfig,
+  inlineArgs = false,
 ) {
   return async (
     _parent: unknown,
@@ -646,11 +666,12 @@ function makeAsyncActionResolver(
     }
 
     // Enqueue the action and return the ID immediately
+    const input = inlineArgs ? args : ((args.input as Record<string, unknown>) ?? {});
     const actionId = await enqueueAsyncAction(
       context.jobQueue,
       context.pool,
       action,
-      (args.input as Record<string, unknown>) ?? {},
+      input,
       context.auth,
     );
 

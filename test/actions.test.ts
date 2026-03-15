@@ -430,6 +430,58 @@ describe('Actions', () => {
     });
   });
 
+  describe('inline arguments (no input wrapper)', () => {
+    it('registers inline-arg mutations in the schema', async () => {
+      const res = await fetch(`${serverAddress}/sdl`);
+      const sdl = await res.text();
+      expect(sdl).toContain('updateLimit(type: String!, amount: Float, endTime: String): UpdateLimitResult');
+    });
+
+    it('executes a mutation with inline args', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/update-limit', () => ({
+        code: 200,
+        body: { ok: true },
+      }));
+
+      const { body } = await gql(
+        `mutation {
+          updateLimit(type: "loss", amount: 3000) {
+            ok
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(body.errors).toBeUndefined();
+      expect((body.data as any).updateLimit).toEqual({ ok: true });
+    });
+
+    it('sends inline args as webhook input payload', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/update-limit', () => ({
+        code: 200,
+        body: { ok: true },
+      }));
+
+      await gql(
+        `mutation {
+          updateLimit(type: "loss", amount: 3000) { ok }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      const [req] = webhook.requests;
+      const payload = req.body as any;
+      expect(payload.action).toEqual({ name: 'updateLimit' });
+      expect(payload.input).toEqual({ type: 'loss', amount: 3000 });
+    });
+  });
+
   describe('session variables', () => {
     it('forwards session variables to webhook handler', async () => {
       const token = await createJWT({
