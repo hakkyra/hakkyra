@@ -621,6 +621,7 @@ function makeActionResolver(
       action,
       input,
       session: context.auth,
+      clientHeaders: context.clientHeaders,
     });
 
     if (!result.success) {

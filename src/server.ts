@@ -335,6 +335,7 @@ export async function createServer(
         subscriptionManager: subscriptionRef.manager,
         jobQueue: asyncActionRef.jobQueue,
         pool: asyncActionRef.pool,
+        clientHeaders: request.headers as Record<string, string>,
       };
     },
     subscription: {

@@ -72,6 +72,9 @@ export interface ResolverContext {
 
   /** Primary database pool for async action storage (available when database is connected). */
   pool?: Pool;
+
+  /** Original client HTTP headers (for forwarding to action handlers). */
+  clientHeaders?: Record<string, string>;
 }
 
 /**
