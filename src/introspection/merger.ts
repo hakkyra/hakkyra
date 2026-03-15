@@ -16,6 +16,7 @@ import type {
 } from '../types.js';
 import type { IntrospectedTable, IntrospectionResult } from './introspector.js';
 import { quoteIdentifier } from '../sql/utils.js';
+import { toCamelCase } from '../schema/type-builder.js';
 
 // ─── Warnings ────────────────────────────────────────────────────────────────
 
@@ -304,17 +305,18 @@ function mergeRelationships(
   autoRels: RelationshipConfig[],
   configRels: RelationshipConfig[],
 ): RelationshipConfig[] {
-  const autoRelMap = new Map(autoRels.map((r) => [r.name, r]));
-  const configRelNames = new Set(configRels.map((r) => r.name));
+  // Match by camelCase-normalized name so "limit_type" matches "limitType"
+  const autoRelMap = new Map(autoRels.map((r) => [toCamelCase(r.name), r]));
+  const configRelNames = new Set(configRels.map((r) => toCamelCase(r.name)));
 
   // Start with auto-detected rels that aren't overridden by config
   const merged: RelationshipConfig[] = autoRels.filter(
-    (r) => !configRelNames.has(r.name),
+    (r) => !configRelNames.has(toCamelCase(r.name)),
   );
 
   // Add config-defined rels, filling in missing fields from auto-detected
   for (const configRel of configRels) {
-    const autoRel = autoRelMap.get(configRel.name);
+    const autoRel = autoRelMap.get(toCamelCase(configRel.name));
     if (autoRel) {
       // Merge: config takes precedence, but fill gaps from auto-detected
       merged.push({
