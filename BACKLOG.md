@@ -552,6 +552,252 @@ Hasura supports marking a table as `is_enum: true` in metadata, turning its prim
 - [x] Hot-reload support (resolveTableEnums called on config change)
 - [x] 3 E2E tests (enum value uppercasing, enum filtering, enum table not queryable)
 
+### P5.14 — Query Collections & Hasura REST Endpoints (High) ✅
+
+Hasura REST endpoints reference named queries stored in query collections. The neofix metadata has 57 queries in the `allowed-queries` collection and 50+ REST endpoints mapping URL paths to those queries.
+
+#### Config Loader
+
+- [x] Load `query_collections.yaml` — array of `{ name, definition: { queries: [{ name, query }] } }`
+- [x] Store query collections in `HakkyraConfig` as `Map<collectionName, Map<queryName, queryString>>`
+- [x] Load `rest_endpoints.yaml` — array of `{ name, url, methods, definition: { query: { collection_name, query_name } }, comment? }`
+- [x] Validate that every REST endpoint references an existing collection + query
+- [x] Remove `query_collections` and `rest_endpoints` from `UNSUPPORTED_METADATA_FILES`
+- [x] Zod schemas for raw YAML + internal types
+
+#### REST Endpoint Execution
+
+- [x] Register Fastify routes from `rest_endpoints.yaml` definitions
+- [x] Route pattern: `/{url}` with configurable base path (default `/api/rest`)
+- [x] Support multiple HTTP methods per endpoint (`methods: [GET, POST]`)
+- [x] Parse GraphQL query string from the referenced collection entry
+- [x] Execute as a standard GraphQL query through the existing schema/resolver pipeline
+- [x] Pass request body as GraphQL variables (POST), URL query params as variables (GET)
+- [x] Apply same auth/permission enforcement as `/graphql` endpoint
+- [x] Return GraphQL response (data/errors) as JSON
+
+#### Tests
+
+- [x] Config loader: load query collections and REST endpoints from neofix-style fixtures
+- [x] Validation: error on REST endpoint referencing non-existent query
+- [x] E2E: POST to REST endpoint executes referenced mutation
+- [x] E2E: GET to REST endpoint executes referenced query with query params as variables
+- [ ] E2E: permission enforcement on REST endpoints (admin, role-based, unauthorized)
+
+### P5.15 — GraphQL Introspection Control (Medium)
+
+Hasura supports `disabled_for_roles` to block schema introspection for specific roles. The neofix metadata has `disabled_for_roles: []` (allow all).
+
+- [ ] Load `graphql_schema_introspection.yaml` — `{ disabled_for_roles: string[] }`
+- [ ] Remove `graphql_schema_introspection` from `UNSUPPORTED_METADATA_FILES`
+- [ ] Store in `HakkyraConfig.introspection.disabledForRoles`
+- [ ] Intercept introspection queries (`__schema`, `__type`) in the GraphQL resolver
+- [ ] Return error for roles listed in `disabledForRoles`
+- [ ] Empty array = introspection allowed for all roles (default behavior)
+- [ ] Tests: introspection blocked for listed role, allowed for unlisted role, empty array allows all
+
+### P5.16 — Native Queries & Logical Models (High)
+
+Hasura v2.28+ supports native queries (raw SQL exposed as GraphQL fields) with logical models (custom return types). The neofix metadata has 3 native queries with 3 logical models.
+
+#### Config Loader
+
+- [ ] Load `native_queries` from database entries in `databases.yaml`
+- [ ] Load `logical_models` from database entries in `databases.yaml`
+- [ ] Remove `native_queries` and `logical_models` from `UNSUPPORTED_DATABASE_FIELDS`
+- [ ] Parse native query structure: `{ root_field_name, arguments: { name: { type, nullable? } }, code (SQL), returns (logical model name) }`
+- [ ] Parse logical model structure: `{ name, fields: [{ name, type, nullable? }], select_permissions: [{ role, permission: { columns, filter } }] }`
+- [ ] Zod schemas for raw YAML + internal types
+- [ ] Store in `HakkyraConfig.nativeQueries` and `HakkyraConfig.logicalModels`
+
+#### Schema Generation
+
+- [ ] Generate GraphQL object type per logical model (field names, scalar types)
+- [ ] Generate GraphQL input type per native query for arguments
+- [ ] Register native queries as Query root fields (`root_field_name`)
+- [ ] SQL execution: interpolate `{{paramName}}` placeholders as parameterized values ($1, $2...)
+- [ ] Permission enforcement per logical model (role-based, with row-level filter using session variables)
+
+#### Tests
+
+- [ ] Config loader: parse native queries and logical models from databases.yaml
+- [ ] Schema: logical model types appear in SDL
+- [ ] Schema: native query root fields appear with correct argument types
+- [ ] E2E: execute native query with arguments, verify result shape
+- [ ] E2E: permission enforcement — role with access vs role without
+- [ ] E2E: session variable filter in logical model permissions
+
+### P5.17 — Granular Root Field Visibility (Medium)
+
+Hasura supports `query_root_fields` and `subscription_root_fields` in select permissions to control which root fields a role can access. In neofix, the `player` role uses empty arrays `[]` on bonus/bonus_currency/campaign tables to hide them from direct querying while still allowing access through relationships.
+
+- [ ] Parse `query_root_fields` from select permissions in table YAML (array of field names or empty array)
+- [ ] Parse `subscription_root_fields` from select permissions in table YAML
+- [ ] Remove `query_root_fields` and `subscription_root_fields` from `UNSUPPORTED_PERMISSION_FIELDS`
+- [ ] Store in `SelectPermission` type: `queryRootFields?: string[]`, `subscriptionRootFields?: string[]`
+- [ ] Schema generator: when `queryRootFields` is `[]`, skip generating query root fields (select, selectByPk, selectAggregate) for that role
+- [ ] Schema generator: when `subscriptionRootFields` is `[]`, skip generating subscription root fields for that role
+- [ ] When field is undefined/absent, expose all root fields (default Hasura behavior)
+- [ ] When field is a non-empty array (e.g., `["select", "select_by_pk"]`), only expose listed root fields
+- [ ] Tables remain accessible through relationships even when root fields are hidden
+- [ ] Tests: role with `[]` cannot query table directly but can access through parent relationship
+- [ ] Tests: role with specific fields only sees those root fields
+- [ ] Tests: role without the field sees all root fields (backwards compatible)
+
+### P5.18 — Role-Aware Documentation Endpoints (Medium)
+
+Currently `/sdl`, `/openapi.json`, and `/llm-api.json` return the full schema regardless of the requester's role. They should reflect only what's available to the authenticated role — a `player` role should not see admin-only tables, columns, or mutations.
+
+**Current state**: All three endpoints are public/unauthenticated. SDL is a static string captured at startup. OpenAPI and LLM doc generators receive the full `tables: TableInfo[]` array with no filtering.
+
+#### Auth on doc endpoints
+
+- [ ] Apply auth preHandler to `/sdl`, `/openapi.json`, `/llm-api.json` (extract role from JWT/admin-secret/webhook, fall back to `unauthorizedRole`)
+- [ ] Admin secret bypasses filtering (returns full schema)
+
+#### `/openapi.json` — role-filtered OpenAPI spec
+
+- [ ] Filter `tables` array to only tables the role has at least one permission on
+- [ ] Filter columns per table to only those in the role's select permission
+- [ ] Filter CRUD operations: only include GET if select permission exists, POST if insert, PATCH if update, DELETE if delete
+- [ ] Exclude tables hidden by `query_root_fields: []` for the role
+- [ ] Pass filtered tables + permission context to `generateOpenAPISpec()`
+
+#### `/llm-api.json` — role-filtered LLM doc
+
+- [ ] Same filtering as OpenAPI: tables, columns, operations, relationships visible to the role
+- [ ] Pass filtered tables + permission context to `generateLLMDoc()`
+
+#### `/sdl` — role-filtered GraphQL SDL
+
+- [ ] Generate a filtered GraphQL schema per role (or filter the full schema)
+- [ ] Remove types/fields/root fields the role cannot access
+- [ ] Options: (a) build a pruned schema using graphql-js utilities, (b) regenerate schema with only permitted tables/columns, (c) use schema transforms
+- [ ] Cache filtered SDL per role to avoid regenerating on every request
+
+#### Tests
+
+- [ ] Admin gets full SDL/OpenAPI/LLM doc
+- [ ] Role with limited permissions sees only permitted tables and columns
+- [ ] Role with no permissions on a table does not see it in any doc endpoint
+- [ ] Tables hidden by `query_root_fields: []` are excluded from docs for that role
+- [ ] Unauthorized role (no auth) sees only tables with anonymous/unauthorized permissions
+
+---
+
+## Unsupported Hasura Feature Validation — COMPLETE
+
+The config loader rejects Hasura metadata features that Hakkyra does not implement. Unsupported files, table fields, database fields, and permission fields produce clear errors during `loadConfig()`. Empty/whitespace-only files are ignored (Hasura CLI creates placeholders).
+
+### Unsupported Top-Level Metadata Files
+
+- [x] `remote_schemas.yaml` / `.yml` — Remote GraphQL schema stitching
+- [x] `allowlist.yaml` / `.yml` — GraphQL query allowlisting
+- [x] `api_limits.yaml` / `.yml` — Rate limiting, depth limiting, node limiting
+- [x] `opentelemetry.yaml` / `.yml` — OpenTelemetry export configuration
+- [x] `network.yaml` / `.yml` — TLS certificates, host allowlists
+- [x] `backend_configs.yaml` / `.yml` — Backend-specific configuration
+
+### Unsupported Table-Level Fields (By Design)
+
+- [x] `remote_relationships` — Remote joins to external GraphQL/REST sources (by design: single-database architecture)
+- [x] `apollo_federation_config` — Apollo Federation entity keys and configuration (by design: standalone API, not a federated subgraph)
+
+### Unsupported Database-Level Fields
+
+- [x] `stored_procedures` — Database stored procedure tracking
+- [x] `backend_configs` — Backend-specific configuration overrides
+- [x] `customization` — Table name prefix/suffix, root field namespace
+
+### Ignored Permission Fields (warned, not rejected)
+
+- [x] `update_permissions[].permission.validate_input` — Input validation webhook (logged as warning, ignored)
+
+### Tests (34 tests in `test/config-unsupported.test.ts`)
+
+- [x] Each unsupported metadata file triggers a clear error naming the file and unsupported feature
+- [x] Each unsupported table field triggers an error naming the table and field
+- [x] Each unsupported database field triggers an error naming the database and field
+- [x] Each unsupported permission field triggers an error naming the table, role, and field
+- [x] Empty/whitespace-only unsupported files do NOT error (Hasura CLI creates empty placeholders)
+- [x] Multiple unsupported features in a single load are all reported (not just the first)
+- [x] Existing test fixtures with `query_collections.yaml` and `rest_endpoints.yaml` used to verify detection
+
+---
+
+## Phase 6: Test Coverage & Security Hardening
+
+Findings from comprehensive code review of permissions, relationships, computed fields, tracked functions, and security.
+
+### P6.1 — Security Hardening (Critical/High)
+
+- [ ] **GraphQL query depth/complexity limits** — No configured limits in Mercurius; deeply nested relationship queries can cause DoS
+- [ ] **Webhook SSRF prevention** — `deliverWebhook()` accepts any URL including localhost/private IPs; block RFC 1918, loopback, link-local addresses
+- [ ] **Server-side pagination max limit** — No max `limit` enforcement; client can request `limit: 1000000` on both GraphQL and REST
+- [ ] **Webhook response size limits** — `response.text()` reads entire response without size cap; malicious webhook can exhaust memory
+- [ ] **JWT without `exp` claim** — jose accepts JWTs missing `exp`; tokens without expiration authenticate indefinitely
+- [ ] **Request body size limit** — Fastify default 256KB may be insufficient/undocumented; configure explicit `bodyLimit`
+
+### P6.2 — Permission Test Gaps (High)
+
+- [ ] **Untested comparison operators** — `_neq`, `_nlike`, `_nilike`, `_similar`, `_nsimilar`, `_regex`, `_nregex`, `_iregex`, `_niregex` have 0 unit tests
+- [ ] **Untested JSONB operators** — `_containedIn`, `_hasKeysAny`, `_hasKeysAll` have 0 unit tests
+- [ ] **Inherited roles** — No test configuration or tests exist; need SELECT/INSERT/UPDATE/DELETE permission merging tests (union columns, OR filters, aggregation flag)
+- [ ] **Row limit enforcement** — `limit` field on SELECT permissions is compiled but never tested at query execution level
+- [ ] **Mutation permission checks** — INSERT pre-check (CTE validation), UPDATE post-check (updated rows must pass check filter), batch mutations with mixed permission results
+- [ ] **Subscription permissions** — Only basic select permission tested; no row-level filter, column restriction, or aggregation restriction tests
+- [ ] **REST permission enforcement** — Column filtering on SELECT/INSERT/UPDATE, insert check filter, update post-check, aggregate with `allowAggregations: false`
+- [ ] **Negative/denial tests** — Few tests verify proper error messages for permission denied, column access denied, row filter denial; 401 vs 403 semantics
+- [ ] **Session variable edge cases** — Null session variables, array session variables in `_in` operator, session variables in JSONB operators
+- [ ] **Nested logical operators** — `_and` containing `_or` containing `_not`, empty logical operators (`_and: []`), `_not` with relationship filters
+
+### P6.3 — Relationship Test Gaps (High)
+
+- [ ] **Self-referential relationships** — No test fixtures or tests for tables with self-referencing FKs (parent/child hierarchies)
+- [ ] **Composite foreign keys** — No tests for multi-column FK relationships
+- [ ] **Relationships in subscriptions** — No tests for nested relationships in subscription results or live updates when related records change
+- [ ] **Relationships in REST responses** — No tests for nested object/array relationships in REST JSON responses
+- [ ] **WHERE filters on array relationships** — e.g., `client { invoices(where: { state: { _eq: PAID } }) { ... } }` — filtering child records
+- [ ] **Relationship limit/offset** — `client { accounts(limit: 5, offset: 10) }` on array relationships
+- [ ] **Permission enforcement across relationship chains** — Verify filters applied at each nesting level; parent visible but child hidden
+- [ ] **Multiple FKs to same table** — Disambiguation when two FKs point to the same target table
+- [ ] **Null handling in deep chains** — Intermediate null relationships in multi-level chains
+- [ ] **Circular relationship references** — A → B → A at multiple nesting levels
+
+### P6.4 — Computed Field Test Gaps (High)
+
+- [ ] **Computed fields in WHERE clauses** — Filtering by computed field value (`where: { totalBalance: { _gt: 1000 } }`)
+- [ ] **Computed fields in ORDER BY** — Ordering by computed field value, NULL ordering
+- [ ] **SETOF computed fields** — Functions returning SETOF table type with filtering, ordering, pagination
+- [ ] **Computed fields in UPDATE/DELETE RETURNING** — Only INSERT RETURNING is tested
+- [ ] **Computed fields with arguments** — Scalar/composite type arguments, optional vs required
+- [ ] **Computed fields in subscriptions** — Including computed fields in subscription results
+- [ ] **Computed fields in aggregations** — COUNT/SUM/AVG on result sets, GROUP BY with computed fields
+- [ ] **Computed fields with session variables** — Functions accessing `x-hasura-*` claims
+- [ ] **Computed fields on views/materialized views** — Not tested
+
+### P6.5 — Tracked Function Test Gaps (Medium)
+
+- [ ] **Diverse argument types** — UUID, timestamp, numeric, JSON parameters (only `text` tested)
+- [ ] **Default parameter values** — Functions with partial arguments relying on PG DEFAULT
+- [ ] **Aggregate variants** — Only COUNT tested; SUM/AVG/MIN/MAX on SETOF function results
+- [ ] **Session variable injection** — `sessionArgument` config for passing session claims to functions
+- [ ] **Custom root field names** — `customRootFields.function` / `customRootFields.functionAggregate`
+- [ ] **Inherited role permissions** — Constituent role permission checks on tracked functions
+- [ ] **Empty/null results** — SETOF function returning empty set, single-row function returning NULL
+- [ ] **Mutation functions with relationships in RETURNING** — Nested relationship fields after mutation function execution
+- [ ] **Functions in non-public schemas** — Only `public` schema functions tested
+
+### P6.6 — Security Tests (Medium)
+
+- [ ] **SQL injection via WHERE/ORDER BY** — Explicit security tests for malicious input through GraphQL where args, order_by fields, JSONB path argument
+- [ ] **JWT algorithm confusion** — Test that `"alg": "none"` is rejected
+- [ ] **Webhook header injection** — Newline characters in webhook header values
+- [ ] **REST ORDER BY column validation** — Invalid column names should fail fast, not reach PostgreSQL
+- [ ] **Computed field argument parameterization** — Explicit tests confirming function args are parameterized
+- [ ] **WebSocket auth edge cases** — Empty admin secret, invalid JWT on upgrade, per-message auth validation
+- [ ] **Large array inputs** — `_in` operator with massive arrays; resource exhaustion prevention
+
 ---
 
 ## Test Summary
