@@ -10,7 +10,7 @@ export const RawVersionYamlSchema = z
   .object({
     version: z.number(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Database configuration ─────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ const PoolSettingsSchema = z
     connection_lifetime: z.number().optional(),
     retries: z.number().optional(),
   })
-  .passthrough();
+  .strict();
 
 const ReadReplicaPoolSettingsSchema = z
   .object({
@@ -35,7 +35,7 @@ const ReadReplicaPoolSettingsSchema = z
     connection_lifetime: z.number().optional(),
     retries: z.number().optional(),
   })
-  .passthrough();
+  .strict();
 
 const ConnectionInfoSchema = z
   .object({
@@ -44,14 +44,14 @@ const ConnectionInfoSchema = z
     isolation_level: z.string().optional(),
     use_prepared_statements: z.boolean().optional(),
   })
-  .passthrough();
+  .strict();
 
 const ReadReplicaSchema = z
   .object({
     database_url: DatabaseUrlSchema.optional(),
     pool_settings: ReadReplicaPoolSettingsSchema.optional(),
   })
-  .passthrough();
+  .strict();
 
 const TableIdentifierSchema = z.object({
   schema: z.string(),
@@ -62,7 +62,7 @@ export const RawTableReferenceSchema = z
   .object({
     table: TableIdentifierSchema,
   })
-  .passthrough();
+  .strict();
 
 // ─── Logical Models & Native Queries (Hasura v2.28+) ────────────────────────
 
@@ -71,14 +71,14 @@ const RawLogicalModelFieldTypeSchema = z
     nullable: z.boolean().optional(),
     scalar: z.string(),
   })
-  .passthrough();
+  .strict();
 
 const RawLogicalModelFieldSchema = z
   .object({
     name: z.string(),
     type: RawLogicalModelFieldTypeSchema,
   })
-  .passthrough();
+  .strict();
 
 const RawLogicalModelPermissionSchema = z
   .object({
@@ -87,10 +87,10 @@ const RawLogicalModelPermissionSchema = z
         columns: z.array(z.string()),
         filter: z.record(z.string(), z.unknown()),
       })
-      .passthrough(),
+      .strict(),
     role: z.string(),
   })
-  .passthrough();
+  .strict();
 
 export const RawLogicalModelSchema = z
   .object({
@@ -98,14 +98,14 @@ export const RawLogicalModelSchema = z
     fields: z.array(RawLogicalModelFieldSchema),
     select_permissions: z.array(RawLogicalModelPermissionSchema).optional(),
   })
-  .passthrough();
+  .strict();
 
 const RawNativeQueryArgumentSchema = z
   .object({
     nullable: z.boolean().optional(),
     type: z.string(),
   })
-  .passthrough();
+  .strict();
 
 export const RawNativeQuerySchema = z
   .object({
@@ -114,7 +114,7 @@ export const RawNativeQuerySchema = z
     returns: z.string(),
     root_field_name: z.string(),
   })
-  .passthrough();
+  .strict();
 
 export const RawDatabaseEntrySchema = z
   .object({
@@ -125,18 +125,18 @@ export const RawDatabaseEntrySchema = z
         connection_info: ConnectionInfoSchema,
         read_replicas: z.array(ReadReplicaSchema).optional(),
       })
-      .passthrough(),
+      .strict(),
     tables: z.unknown(),  // may be IncludeRef, string, or array — resolved downstream
     native_queries: z.array(RawNativeQuerySchema).optional(),
     logical_models: z.array(RawLogicalModelSchema).optional(),
   })
-  .passthrough();
+  .strict();
 
 export const RawDatabasesYamlSchema = z
   .object({
     databases: z.array(RawDatabaseEntrySchema).optional(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Table configuration ────────────────────────────────────────────────────
 
@@ -156,10 +156,10 @@ export const RawComputedFieldSchema = z
         table_argument: z.string().optional(),
         session_argument: z.string().optional(),
       })
-      .passthrough(),
+      .strict(),
     comment: z.string().optional(),
   })
-  .passthrough();
+  .strict();
 
 export const RawRelationshipSchema = z
   .object({
@@ -174,7 +174,7 @@ export const RawRelationshipSchema = z
               column: z.string().optional(),
               columns: z.array(z.string()).optional(),
               table: z.union([TableIdentifierSchema, z.string()]).optional(),
-            }).passthrough(),
+            }).strict(),
           ])
           .optional(),
         manual_configuration: z
@@ -182,12 +182,12 @@ export const RawRelationshipSchema = z
             remote_table: TableIdentifierSchema,
             column_mapping: z.record(z.string(), z.string()),
           })
-          .passthrough()
+          .strict()
           .optional(),
       })
-      .passthrough(),
+      .strict(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Permissions ────────────────────────────────────────────────────────────
 
@@ -201,7 +201,7 @@ export const RawSelectPermissionSchema = z
     query_root_fields: z.array(z.string()).optional(),
     subscription_root_fields: z.array(z.string()).optional(),
   })
-  .passthrough();
+  .strict();
 
 export const RawInsertPermissionSchema = z
   .object({
@@ -210,7 +210,7 @@ export const RawInsertPermissionSchema = z
     set: z.record(z.string(), z.string()).optional(),
     backend_only: z.boolean().optional(),
   })
-  .passthrough();
+  .strict();
 
 export const RawUpdatePermissionSchema = z
   .object({
@@ -219,13 +219,13 @@ export const RawUpdatePermissionSchema = z
     check: BoolExpSchema.nullable().optional(),
     set: z.record(z.string(), z.string()).optional(),
   })
-  .passthrough();
+  .strict();
 
 export const RawDeletePermissionSchema = z
   .object({
     filter: BoolExpSchema,
   })
-  .passthrough();
+  .strict();
 
 function permissionEntrySchema<T extends z.ZodTypeAny>(permSchema: T) {
   return z
@@ -233,8 +233,9 @@ function permissionEntrySchema<T extends z.ZodTypeAny>(permSchema: T) {
       role: z.string(),
       permission: permSchema,
       comment: z.string().optional(),
+      backend_only: z.boolean().optional(),
     })
-    .passthrough();
+    .strict();
 }
 
 export const RawSelectPermissionEntrySchema = permissionEntrySchema(RawSelectPermissionSchema);
@@ -250,7 +251,7 @@ export const RawHeaderSchema = z
     value: z.string().optional(),
     value_from_env: z.string().optional(),
   })
-  .passthrough();
+  .strict();
 
 const EventTriggerColumnSpecSchema = z.object({
   columns: ColumnsSchema,
@@ -266,19 +267,19 @@ export const RawEventTriggerSchema = z
         update: EventTriggerColumnSpecSchema.optional(),
         delete: EventTriggerColumnSpecSchema.optional(),
       })
-      .passthrough(),
+      .strict(),
     retry_conf: z
       .object({
         interval_sec: z.number().optional(),
         num_retries: z.number().optional(),
         timeout_sec: z.number().optional(),
       })
-      .passthrough(),
+      .strict(),
     webhook: z.string().optional(),
     webhook_from_env: z.string().optional(),
     headers: z.array(RawHeaderSchema).optional(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Table YAML (full) ─────────────────────────────────────────────────────
 
@@ -291,7 +292,7 @@ export const RawTableYamlSchema = z
         custom_column_names: z.record(z.string(), z.string()).optional(),
         comment: z.string().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     object_relationships: z.array(RawRelationshipSchema).optional(),
     array_relationships: z.array(RawRelationshipSchema).optional(),
@@ -303,7 +304,7 @@ export const RawTableYamlSchema = z
     event_triggers: z.array(RawEventTriggerSchema).optional(),
     is_enum: z.boolean().optional(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
@@ -316,13 +317,13 @@ const RequestTransformSchema = z
     query_params: z.record(z.string(), z.string()).optional(),
     headers: z.record(z.string(), z.string()).optional(),
   })
-  .passthrough();
+  .strict();
 
 const ResponseTransformSchema = z
   .object({
     body: z.union([z.string(), z.record(z.string(), z.unknown())]).optional(),
   })
-  .passthrough();
+  .strict();
 
 const ActionRelationshipSchema = z
   .object({
@@ -331,7 +332,7 @@ const ActionRelationshipSchema = z
     remote_table: z.union([TableIdentifierSchema, z.string()]),
     field_mapping: z.record(z.string(), z.string()),
   })
-  .passthrough();
+  .strict();
 
 export const RawActionSchema = z
   .object({
@@ -350,19 +351,19 @@ export const RawActionSchema = z
         request_transform: RequestTransformSchema.optional(),
         response_transform: ResponseTransformSchema.optional(),
       })
-      .passthrough(),
-    permissions: z.array(z.object({ role: z.string() }).passthrough()).optional(),
+      .strict(),
+    permissions: z.array(z.object({ role: z.string() }).strict()).optional(),
     relationships: z.array(ActionRelationshipSchema).optional(),
     comment: z.string().optional(),
   })
-  .passthrough();
+  .strict();
 
 export const RawActionsYamlSchema = z
   .object({
     actions: z.array(RawActionSchema).optional(),
     custom_types: z.unknown().optional(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Cron triggers ──────────────────────────────────────────────────────────
 
@@ -380,13 +381,13 @@ export const RawCronTriggerSchema = z
         timeout_seconds: z.number().optional(),
         tolerance_seconds: z.number().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     headers: z.array(RawHeaderSchema).optional(),
     include_in_metadata: z.boolean().optional(),
     comment: z.string().optional(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Hakkyra extension: api_config.yaml ─────────────────────────────────────
 
@@ -397,7 +398,7 @@ export const RawRESTOverrideSchema = z
     operation: z.string(),
     default_order: z.string().optional(),
   })
-  .passthrough();
+  .strict();
 
 export const RawCustomQuerySchema = z
   .object({
@@ -420,11 +421,11 @@ export const RawCustomQuerySchema = z
             role: z.string(),
             filter: BoolExpSchema.optional(),
           })
-          .passthrough(),
+          .strict(),
       )
       .optional(),
   })
-  .passthrough();
+  .strict();
 
 export const RawApiConfigSchema = z
   .object({
@@ -439,11 +440,11 @@ export const RawApiConfigSchema = z
             default_limit: z.number().optional(),
             max_limit: z.number().optional(),
           })
-          .passthrough()
+          .strict()
           .optional(),
         overrides: z.record(z.string(), z.array(RawRESTOverrideSchema)).optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     docs: z
       .object({
@@ -452,10 +453,10 @@ export const RawApiConfigSchema = z
         llm_format: z.boolean().optional(),
         include_examples: z.boolean().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Query Collections ──────────────────────────────────────────────────
 
@@ -464,7 +465,7 @@ export const RawQueryCollectionQuerySchema = z
     name: z.string(),
     query: z.string(),
   })
-  .passthrough();
+  .strict();
 
 export const RawQueryCollectionSchema = z
   .object({
@@ -473,9 +474,9 @@ export const RawQueryCollectionSchema = z
       .object({
         queries: z.array(RawQueryCollectionQuerySchema),
       })
-      .passthrough(),
+      .strict(),
   })
-  .passthrough();
+  .strict();
 
 // ─── REST Endpoints (Hasura-style) ──────────────────────────────────────
 
@@ -491,10 +492,10 @@ export const RawHasuraRestEndpointSchema = z
           query_name: z.string(),
         }),
       })
-      .passthrough(),
+      .strict(),
     comment: z.string().optional(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Introspection Control ──────────────────────────────────────────────
 
@@ -502,7 +503,7 @@ export const RawIntrospectionConfigSchema = z
   .object({
     disabled_for_roles: z.array(z.string()).optional(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Tracked Functions ──────────────────────────────────────────────────
 
@@ -520,17 +521,17 @@ export const RawTrackedFunctionSchema = z
             function: z.string().optional(),
             function_aggregate: z.string().optional(),
           })
-          .passthrough()
+          .strict()
           .optional(),
         session_argument: z.string().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     permissions: z
-      .array(z.object({ role: z.string() }).passthrough())
+      .array(z.object({ role: z.string() }).strict())
       .optional(),
   })
-  .passthrough();
+  .strict();
 
 // ─── Server config (standalone) ─────────────────────────────────────────────
 
@@ -542,14 +543,14 @@ const DbPoolSchema = z
     max_lifetime: z.number().optional(),
     allow_exit_on_idle: z.boolean().optional(),
   })
-  .passthrough();
+  .strict();
 
 const DbConnectionSchema = z
   .object({
     url_from_env: z.string().optional(),
     pool: DbPoolSchema.optional(),
   })
-  .passthrough();
+  .strict();
 
 export const RawServerConfigSchema = z
   .object({
@@ -563,7 +564,7 @@ export const RawServerConfigSchema = z
         body_limit: z.number().optional(),
         schema_name: z.string().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     job_queue: z
       .object({
@@ -576,16 +577,16 @@ export const RawServerConfigSchema = z
             port: z.number().optional(),
             password: z.string().optional(),
           })
-          .passthrough()
+          .strict()
           .optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     event_log: z
       .object({
         retention_days: z.number().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     auth: z
       .object({
@@ -604,7 +605,7 @@ export const RawServerConfigSchema = z
                     path: z.string(),
                     default: z.string().optional(),
                   })
-                  .passthrough(),
+                  .strict(),
               )
               .optional(),
             audience: z.string().optional(),
@@ -612,7 +613,7 @@ export const RawServerConfigSchema = z
             require_exp: z.boolean().optional(),
             admin_role_is_admin: z.boolean().optional(),
           })
-          .passthrough()
+          .strict()
           .optional(),
         admin_secret_from_env: z.string().optional(),
         unauthorized_role: z.string().optional(),
@@ -623,10 +624,10 @@ export const RawServerConfigSchema = z
             mode: z.enum(['GET', 'POST']).optional(),
             forward_headers: z.boolean().optional(),
           })
-          .passthrough()
+          .strict()
           .optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     databases: z
       .object({
@@ -636,25 +637,25 @@ export const RawServerConfigSchema = z
           .object({
             url_from_env: z.string().optional(),
           })
-          .passthrough()
+          .strict()
           .optional(),
         read_your_writes: z
           .object({
             enabled: z.boolean().optional(),
             window_seconds: z.number().optional(),
           })
-          .passthrough()
+          .strict()
           .optional(),
         prepared_statements: z
           .object({
             enabled: z.boolean().optional(),
             max_cached: z.number().optional(),
           })
-          .passthrough()
+          .strict()
           .optional(),
         subscription_query_routing: z.enum(['primary', 'replica']).optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     redis: z
       .object({
@@ -663,32 +664,32 @@ export const RawServerConfigSchema = z
         port: z.number().optional(),
         password: z.string().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     query_cache: z
       .object({
         max_size: z.number().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     subscriptions: z
       .object({
         debounce_ms: z.number().optional(),
         keep_alive_ms: z.number().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     event_delivery: z
       .object({
         batch_size: z.number().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     event_cleanup: z
       .object({
         schedule: z.string().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     webhook: z
       .object({
@@ -697,7 +698,7 @@ export const RawServerConfigSchema = z
         allow_private_urls: z.boolean().optional(),
         max_response_bytes: z.number().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     action_defaults: z
       .object({
@@ -706,14 +707,14 @@ export const RawServerConfigSchema = z
         async_retry_delay_seconds: z.number().optional(),
         async_timeout_seconds: z.number().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     graphql: z
       .object({
         query_depth: z.number().optional(),
         max_limit: z.number().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
     sql: z
       .object({
@@ -721,7 +722,7 @@ export const RawServerConfigSchema = z
         unnest_threshold: z.number().optional(),
         batch_chunk_size: z.number().optional(),
       })
-      .passthrough()
+      .strict()
       .optional(),
   })
-  .passthrough();
+  .strict();

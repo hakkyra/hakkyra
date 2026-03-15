@@ -168,6 +168,15 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> |
   return hasValue ? (result as Partial<T>) : undefined;
 }
 
+/** Remove known keys from a raw object so that .strict() Zod parsing doesn't reject them. */
+function omitKeys<T extends Record<string, unknown>>(obj: T, keys: string[]): T {
+  const result = { ...obj };
+  for (const key of keys) {
+    delete (result as Record<string, unknown>)[key];
+  }
+  return result;
+}
+
 // ─── Unsupported Hasura feature detection ───────────────────────────────────
 
 const UNSUPPORTED_METADATA_FILES: Record<string, string> = {
@@ -426,7 +435,11 @@ async function loadDatabases(
       const rawEntry = entry as Record<string, unknown>;
       unsupported.push(...checkUnsupportedDatabaseFields(rawEntry, (rawEntry.name as string) ?? 'unknown'));
     }
-    const dbEntry = RawDatabaseEntrySchema.parse(entry);
+    // Strip known-unsupported fields before strict Zod parsing
+    const cleanedEntry = entry && typeof entry === 'object'
+      ? omitKeys(entry as Record<string, unknown>, Object.keys(UNSUPPORTED_DATABASE_FIELDS))
+      : entry;
+    const dbEntry = RawDatabaseEntrySchema.parse(cleanedEntry);
     databases.push(dbEntry);
 
     // Extract native queries and logical models from the database entry
@@ -605,7 +618,21 @@ async function loadAllTables(
       const tableId = rawObj.table as { schema?: string; name?: string } | undefined;
       const tableName = tableId ? `${tableId.schema ?? 'public'}.${tableId.name ?? 'unknown'}` : 'unknown';
       unsupported.push(...checkUnsupportedTableFields(rawObj, tableName));
-      const tableConfig = RawTableYamlSchema.parse(rawTable);
+      // Strip known-unsupported table fields before strict Zod parsing
+      const cleanedTable = omitKeys(rawObj, Object.keys(UNSUPPORTED_TABLE_FIELDS));
+      // Strip ignored permission fields (e.g. validate_input) from all permission types
+      for (const permType of ['select_permissions', 'insert_permissions', 'update_permissions', 'delete_permissions'] as const) {
+        const perms = (cleanedTable as Record<string, unknown>)[permType];
+        if (Array.isArray(perms)) {
+          (cleanedTable as Record<string, unknown>)[permType] = perms.map((entry: unknown) => {
+            if (!entry || typeof entry !== 'object') return entry;
+            const e = entry as Record<string, unknown>;
+            if (!e.permission || typeof e.permission !== 'object') return entry;
+            return { ...e, permission: omitKeys(e.permission as Record<string, unknown>, Object.keys(IGNORED_PERMISSION_FIELDS)) };
+          });
+        }
+      }
+      const tableConfig = RawTableYamlSchema.parse(cleanedTable);
       if (!tableConfig.table) continue;
       tables.push(transformTable(tableConfig));
     }
@@ -803,7 +830,7 @@ function transformPermissions(raw: RawTableYaml): TablePermissions {
         columns: entry.permission.columns,
         check: entry.permission.check as BoolExp,
         set: entry.permission.set,
-        backendOnly: entry.permission.backend_only,
+        backendOnly: entry.backend_only ?? entry.permission.backend_only,
       };
     }
   }
@@ -1091,22 +1118,8 @@ async function loadApiConfig(metadataDir: string): Promise<RawApiConfig | null> 
   }
   if (!raw || typeof raw !== 'object') return null;
 
+  // .strict() on RawApiConfigSchema now rejects unknown fields automatically
   const config = RawApiConfigSchema.parse(raw);
-  const knownFields = new Set([
-    'table_aliases',
-    'custom_queries',
-    'rest',
-    'docs',
-    'tableAliases',
-    'customQueries',
-    'apiDocs',
-  ]);
-  for (const key of Object.keys(config)) {
-    if (!knownFields.has(key)) {
-      log.warn({ field: key }, 'Unrecognized field in api_config.yaml');
-    }
-  }
-
   return config;
 }
 

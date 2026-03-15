@@ -391,6 +391,13 @@ Move all hardcoded default values to Zod `.default()` in `src/config/schemas-int
 ### Configurable Internal Schema Name — COMPLETE
 - [x] Allow configuring the PostgreSQL schema name used for Hakkyra's internal objects via `server.schema_name` in `hakkyra.yaml` (default: `hakkyra`). Threaded through 18 files: event schema/triggers/delivery/cleanup/manager, subscription triggers/listener, trigger reconciler, pg-boss manager, job queue, connection manager, server. 5 new Zod schema tests.
 
+### Strict YAML Validation — COMPLETE
+- [x] All raw YAML Zod schemas (`src/config/schemas.ts`) changed from `.passthrough()` to `.strict()` — unknown/unrecognized fields in any YAML config now produce a clear error instead of being silently ignored.
+- [x] Known-unsupported Hasura fields (`remote_relationships`, `apollo_federation_config`, `stored_procedures`, `backend_configs`, `customization`) and ignored fields (`validate_input`) are stripped from raw objects before strict parsing so that existing descriptive error messages are preserved.
+- [x] Removed manual unknown-field warning in `loadApiConfig()` — `.strict()` handles this automatically.
+- [x] Fixed latent bug: `backend_only` field on permission entries was accepted by `.passthrough()` but never declared in the schema; now explicitly defined.
+- [x] 3 new E2E tests (unknown field in table YAML, database YAML, hakkyra.yaml); 2 updated Zod schema tests (verify strict rejection).
+
 ---
 
 ## Phase 5: Hasura Schema Compatibility — COMPLETE
@@ -841,7 +848,7 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Batch operations | 26 | Pass |
 | Action relationships | 13 | Pass |
 | Statistical aggregates | 15 | Pass |
-| Zod schemas | 242 | Pass |
+| Zod schemas | 243 | Pass |
 | Tracked functions | 43 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
@@ -850,7 +857,7 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Relationship gaps | 68 | Pass |
 | Security tests | 28 | Pass |
 | Hasura REST endpoints | 5 | Pass |
-| Config unsupported | 34 | Pass |
+| Config unsupported | 37 | Pass |
 | REST permissions | 26 | Pass |
 | JWT admin role | 9 | Pass |
-| **Total** | **1191** | **36 suites, 1191 passing** |
+| **Total** | **1194** | **36 suites, 1194 passing** |
