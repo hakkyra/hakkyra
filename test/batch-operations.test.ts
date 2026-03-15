@@ -471,7 +471,7 @@ describe('UPDATE MANY: batch updates with different values', () => {
     expect(queries).toHaveLength(1);
     expect(queries[0].sql).toContain('json_build_object');
     expect(queries[0].sql).toContain("'id'");
-    expect(queries[0].sql).toContain("'trust_level'");
+    expect(queries[0].sql).toContain("'trustLevel'");
     expect(queries[0].sql).toContain("'username'");
   });
 });
@@ -593,7 +593,7 @@ describe('Backward compatibility: existing mutations work unchanged', () => {
     const data = (result.rows[0] as Record<string, unknown>)?.data;
     if (Array.isArray(data)) {
       expect(data.length).toBe(1);
-      expect(data[0].trust_level).toBe(42);
+      expect(data[0].trustLevel).toBe(42);
     } else {
       // Non-CTE path
       expect(result.rows).toHaveLength(1);

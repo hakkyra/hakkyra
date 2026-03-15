@@ -544,7 +544,7 @@ describe('SQL UPDATE Compiler', () => {
     const result = await pool.query(query.sql, query.params);
     expect(result.rows).toHaveLength(1);
     const data = result.rows[0].data;
-    expect(data.trust_level).toBe(99);
+    expect(data.trustLevel).toBe(99);
 
     // Reset
     await pool.query('UPDATE client SET trust_level = 2 WHERE id = $1', [ALICE_ID]);
@@ -570,7 +570,7 @@ describe('SQL UPDATE Compiler', () => {
     const result = await pool.query(query.sql, query.params);
     expect(result.rows).toHaveLength(1);
     const data = result.rows[0].data;
-    expect(data.language_id).toBe('fi');
+    expect(data.languageId).toBe('fi');
 
     // Reset
     await pool.query("UPDATE client SET language_id = 'en' WHERE id = $1", [ALICE_ID]);

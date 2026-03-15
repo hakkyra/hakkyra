@@ -21,6 +21,7 @@ import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
 import type { RelationshipSelection } from './select.js';
+import { toCamelCase } from '../schema/type-builder.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -301,7 +302,7 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
-    (c) => `'${c}', ${quoteIdentifier(c)}`,
+    (c) => `'${toCamelCase(c)}', ${quoteIdentifier(c)}`,
   ).join(', ');
   const returningClause = validReturning.length > 0
     ? `\nRETURNING json_build_object(${simpleReturningFields}) AS "data"`
@@ -441,7 +442,7 @@ function compileInsertUnnest(
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
-    (c) => `'${c}', ${quoteIdentifier(c)}`,
+    (c) => `'${toCamelCase(c)}', ${quoteIdentifier(c)}`,
   ).join(', ');
 
   const returningClause = validReturning.length > 0
@@ -534,7 +535,7 @@ function compileInsertChunk(
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
-    (c) => `'${c}', ${quoteIdentifier(c)}`,
+    (c) => `'${toCamelCase(c)}', ${quoteIdentifier(c)}`,
   ).join(', ');
 
   const returningClause = validReturning.length > 0

@@ -370,7 +370,7 @@ HTTP/WS ─► Fastify ─► Auth Hook ─► Permission Compiler
              Primary    Replica    Replica
 ```
 
-All queries — GraphQL and REST — compile to a single parameterized SQL statement using `json_build_object` for response shaping. Relationships are resolved via correlated subqueries, not N+1 queries.
+All queries — GraphQL and REST — compile to a single parameterized SQL statement using `json_build_object` with camelCase keys for response shaping. Relationships are resolved via correlated subqueries, not N+1 queries.
 
 ## Tech Stack
 
@@ -391,7 +391,7 @@ All queries — GraphQL and REST — compile to a single parameterized SQL state
 ```bash
 npm install
 docker compose up -d        # start PostgreSQL 17
-npm test                    # run tests (~900 tests, 29 suites)
+npm test                    # run tests (~883 tests, 28 suites)
 npm run typecheck           # type-check without emitting
 npm run build               # compile TypeScript
 ```

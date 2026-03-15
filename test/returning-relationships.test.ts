@@ -216,7 +216,7 @@ describe('UPDATE with returning relationships (SQL)', () => {
     expect(result.rows).toHaveLength(1);
     const data = result.rows[0].data;
     expect(data.id).toBe(ALICE_ID);
-    expect(data.trust_level).toBe(99);
+    expect(data.trustLevel).toBe(99);
     expect(data.branch).toBeDefined();
     expect(data.branch.name).toBe('TestBranch');
 

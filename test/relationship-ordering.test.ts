@@ -217,10 +217,10 @@ describe('SQL: object relationship ordering', () => {
 
     // Verify ordering by currency name: British Pound < Euro < US Dollar
     // diana (GBP/British Pound), alice (EUR/Euro), charlie (EUR/Euro), bob (USD/US Dollar)
-    expect(data[0].currency_id).toBe('GBP');
+    expect(data[0].currencyId).toBe('GBP');
     // alice and charlie both have EUR, order between them is non-deterministic
-    expect([data[1].currency_id, data[2].currency_id]).toEqual(['EUR', 'EUR']);
-    expect(data[3].currency_id).toBe('USD');
+    expect([data[1].currencyId, data[2].currencyId]).toEqual(['EUR', 'EUR']);
+    expect(data[3].currencyId).toBe('USD');
   });
 
   it('should handle mixed column and relationship ordering', async () => {

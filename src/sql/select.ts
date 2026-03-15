@@ -20,6 +20,7 @@ import type {
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { shouldCastToText } from '../introspection/type-map.js';
+import { toCamelCase } from '../schema/type-builder.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -452,19 +453,21 @@ export function buildJsonFields(
   for (const col of columns) {
     const colRef = `${quoteIdentifier(alias)}.${quoteIdentifier(col.name)}`;
 
+    const jsonKey = toCamelCase(col.name);
+
     // JSONB path extraction: column #> $N::text[]
     const pathStr = jsonbPaths?.get(col.name);
     if (pathStr) {
       const segments = pathStr.split('.');
       const placeholder = params.add(segments);
-      fields.push(`'${col.name}', ${colRef} #> ${placeholder}::text[]`);
+      fields.push(`'${jsonKey}', ${colRef} #> ${placeholder}::text[]`);
       continue;
     }
 
     // When stringify_numeric_types is enabled, cast numeric columns to text
     // so json_build_object emits a JSON string, preserving precision and trailing zeros.
     const expr = shouldCastToText(col.udtName) ? `(${colRef})::text` : colRef;
-    fields.push(`'${col.name}', ${expr}`);
+    fields.push(`'${jsonKey}', ${expr}`);
   }
 
   // Computed fields — call PG function with table row as argument
@@ -477,7 +480,7 @@ export function buildJsonFields(
       const expr = shouldCastToText(cf.functionInfo.returnType)
         ? `(${funcCall})::text`
         : funcCall;
-      fields.push(`'${cf.config.name}', ${expr}`);
+      fields.push(`'${toCamelCase(cf.config.name)}', ${expr}`);
     }
   }
 
@@ -491,7 +494,7 @@ export function buildJsonFields(
         session,
         aliasCounter,
       );
-      fields.push(`'${srcf.config.name}', (${subquery})`);
+      fields.push(`'${toCamelCase(srcf.config.name)}', (${subquery})`);
     }
   }
 

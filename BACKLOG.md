@@ -122,7 +122,7 @@
   - [x] UPDATE, UPDATE_BY_PK resolvers
   - [x] DELETE, DELETE_BY_PK resolvers
   - [x] camelCase ↔ snake_case BoolExp remapping
-  - [x] camelCase response key remapping
+  - [x] camelCase response keys emitted directly in SQL json_build_object (no post-processing needed)
 - [x] Custom scalar types (UUID, DateTime, JSON, JSONB, BigInt, BigDecimal, etc.)
 - [x] graphql-default naming convention
   - [x] PascalCase type names
@@ -586,4 +586,4 @@ Hasura supports marking a table as `is_enum: true` in metadata, turning its prim
 | Tracked functions | 20 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
-| **Total** | **~896** | **29 suites, all passing** |
+| **Total** | **883** | **28 suites, all passing** |

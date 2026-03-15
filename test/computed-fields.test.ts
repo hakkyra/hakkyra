@@ -115,7 +115,7 @@ describe('Computed Fields — SQL Compiler', () => {
     });
 
     expect(query.sql).toContain('"public"."client_total_balance"');
-    expect(query.sql).toContain("'total_balance'");
+    expect(query.sql).toContain("'totalBalance'");
   });
 
   it('should generate SQL with computed field in SELECT by PK', () => {
@@ -131,7 +131,7 @@ describe('Computed Fields — SQL Compiler', () => {
     });
 
     expect(query.sql).toContain('"public"."client_total_balance"');
-    expect(query.sql).toContain("'total_balance'");
+    expect(query.sql).toContain("'totalBalance'");
   });
 
   it('should execute SELECT with computed field and return data', async () => {
@@ -153,7 +153,7 @@ describe('Computed Fields — SQL Compiler', () => {
     expect(data.length).toBe(1);
     expect(data[0].id).toBe(ALICE_ID);
     // Alice has account with balance=1500 + credit_balance=200 => total_balance = 1700
-    expect(Number(data[0].total_balance)).toBe(1700);
+    expect(Number(data[0].totalBalance)).toBe(1700);
   });
 
   it('should execute SELECT by PK with computed field', async () => {
@@ -173,7 +173,7 @@ describe('Computed Fields — SQL Compiler', () => {
     expect(result.rows.length).toBe(1);
     const data = result.rows[0].data;
     expect(data.id).toBe(ALICE_ID);
-    expect(Number(data.total_balance)).toBe(1700);
+    expect(Number(data.totalBalance)).toBe(1700);
   });
 
   it('should execute account_total computed field', async () => {

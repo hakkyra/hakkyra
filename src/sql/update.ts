@@ -19,6 +19,7 @@ import type {
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
+import { toCamelCase } from '../schema/type-builder.js';
 import type { RelationshipSelection } from './select.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -258,7 +259,7 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
-    (c) => `'${c}', ${quoteIdentifier(c)}`,
+    (c) => `'${toCamelCase(c)}', ${quoteIdentifier(c)}`,
   ).join(', ');
 
   const returningClause = validReturning.length > 0
@@ -365,7 +366,7 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
   const tableColumnNames = new Set(opts.table.columns.map((c) => c.name));
   const validReturning = opts.returningColumns.filter((c) => tableColumnNames.has(c));
   const simpleReturningFields = validReturning.map(
-    (c) => `'${c}', ${quoteIdentifier(c)}`,
+    (c) => `'${toCamelCase(c)}', ${quoteIdentifier(c)}`,
   ).join(', ');
 
   const returningClause = validReturning.length > 0
