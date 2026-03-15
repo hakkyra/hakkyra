@@ -20,7 +20,7 @@ import type {
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
-import type { RelationshipSelection } from './select.js';
+import type { RelationshipSelection, ComputedFieldSelection, SetReturningComputedFieldSelection } from './select.js';
 import { toCamelCase } from '../schema/type-builder.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -44,6 +44,10 @@ export interface InsertOneOptions {
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
   returningRelationships?: RelationshipSelection[];
+  /** Computed fields to include in the RETURNING clause */
+  returningComputedFields?: ComputedFieldSelection[];
+  /** Set-returning computed fields to include in the RETURNING clause */
+  returningSetReturningComputedFields?: SetReturningComputedFieldSelection[];
   /** JSONB path arguments for RETURNING fields */
   returningJsonbPaths?: Map<string, string>;
   /** Conflict handling */
@@ -64,6 +68,10 @@ export interface InsertOptions {
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
   returningRelationships?: RelationshipSelection[];
+  /** Computed fields to include in the RETURNING clause */
+  returningComputedFields?: ComputedFieldSelection[];
+  /** Set-returning computed fields to include in the RETURNING clause */
+  returningSetReturningComputedFields?: SetReturningComputedFieldSelection[];
   /** JSONB path arguments for RETURNING fields */
   returningJsonbPaths?: Map<string, string>;
   /** Conflict handling */
@@ -204,16 +212,23 @@ function buildReturningFields(
   session: SessionVariables,
   relationships?: RelationshipSelection[],
   jsonbPaths?: Map<string, string>,
+  computedFields?: ComputedFieldSelection[],
+  setReturningComputedFields?: SetReturningComputedFieldSelection[],
 ): string {
   const tableColumnNames = new Set(table.columns.map((c) => c.name));
   const validReturning = returningColumns.filter((c) => tableColumnNames.has(c));
 
-  if ((relationships && relationships.length > 0) || (jsonbPaths && jsonbPaths.size > 0)) {
-    // Use buildJsonFields from SELECT compiler — it handles both scalar columns,
-    // relationship subqueries, and JSONB path extraction in one pass
+  const hasRelationships = relationships && relationships.length > 0;
+  const hasJsonbPaths = jsonbPaths && jsonbPaths.size > 0;
+  const hasComputedFields = computedFields && computedFields.length > 0;
+  const hasSetReturningComputedFields = setReturningComputedFields && setReturningComputedFields.length > 0;
+
+  if (hasRelationships || hasJsonbPaths || hasComputedFields || hasSetReturningComputedFields) {
+    // Use buildJsonFields from SELECT compiler — it handles scalar columns,
+    // relationship subqueries, computed fields, and JSONB path extraction in one pass
     const columns = filterColumns(validReturning, table);
     const aliasCounter = new AliasCounter();
-    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, undefined, undefined, jsonbPaths);
+    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, computedFields, setReturningComputedFields, jsonbPaths);
   }
 
   // No relationships or jsonb paths — simple column list
@@ -256,10 +271,12 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
 
   const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
   const hasJsonbPaths = opts.returningJsonbPaths && opts.returningJsonbPaths.size > 0;
+  const hasComputedFields = opts.returningComputedFields && opts.returningComputedFields.length > 0;
+  const hasSetReturningComputedFields = opts.returningSetReturningComputedFields && opts.returningSetReturningComputedFields.length > 0;
 
-  // Check if we need a CTE (permission check OR relationships/jsonbPaths in RETURNING)
-  if (opts.permission?.check || hasRelationships || hasJsonbPaths) {
-    // Build RETURNING fields with potential relationship subqueries and JSONB path extraction
+  // Check if we need a CTE (permission check OR relationships/computedFields/jsonbPaths in RETURNING)
+  if (opts.permission?.check || hasRelationships || hasJsonbPaths || hasComputedFields || hasSetReturningComputedFields) {
+    // Build RETURNING fields with potential relationship subqueries, computed fields, and JSONB path extraction
     const returningFields = buildReturningFields(
       opts.table,
       opts.returningColumns,
@@ -268,6 +285,8 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
       opts.session,
       opts.returningRelationships,
       opts.returningJsonbPaths,
+      opts.returningComputedFields,
+      opts.returningSetReturningComputedFields,
     );
 
     let checkWhere = '';
@@ -399,8 +418,10 @@ function compileInsertUnnest(
 
   const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
   const hasJsonbPaths = opts.returningJsonbPaths && opts.returningJsonbPaths.size > 0;
+  const hasComputedFields = opts.returningComputedFields && opts.returningComputedFields.length > 0;
+  const hasSetReturningComputedFields = opts.returningSetReturningComputedFields && opts.returningSetReturningComputedFields.length > 0;
 
-  if (opts.permission?.check || hasRelationships || hasJsonbPaths) {
+  if (opts.permission?.check || hasRelationships || hasJsonbPaths || hasComputedFields || hasSetReturningComputedFields) {
     const returningFields = buildReturningFields(
       opts.table,
       opts.returningColumns,
@@ -409,6 +430,8 @@ function compileInsertUnnest(
       opts.session,
       opts.returningRelationships,
       opts.returningJsonbPaths,
+      opts.returningComputedFields,
+      opts.returningSetReturningComputedFields,
     );
 
     let checkWhere = '';
@@ -491,9 +514,11 @@ function compileInsertChunk(
 
   const hasRelationships = opts.returningRelationships && opts.returningRelationships.length > 0;
   const hasJsonbPaths = opts.returningJsonbPaths && opts.returningJsonbPaths.size > 0;
+  const hasComputedFields = opts.returningComputedFields && opts.returningComputedFields.length > 0;
+  const hasSetReturningComputedFields = opts.returningSetReturningComputedFields && opts.returningSetReturningComputedFields.length > 0;
 
-  // Check if we need a CTE (permission check OR relationships/jsonbPaths in RETURNING)
-  if (opts.permission?.check || hasRelationships || hasJsonbPaths) {
+  // Check if we need a CTE (permission check OR relationships/computedFields/jsonbPaths in RETURNING)
+  if (opts.permission?.check || hasRelationships || hasJsonbPaths || hasComputedFields || hasSetReturningComputedFields) {
     const returningFields = buildReturningFields(
       opts.table,
       opts.returningColumns,
@@ -502,6 +527,8 @@ function compileInsertChunk(
       opts.session,
       opts.returningRelationships,
       opts.returningJsonbPaths,
+      opts.returningComputedFields,
+      opts.returningSetReturningComputedFields,
     );
 
     let checkWhere = '';

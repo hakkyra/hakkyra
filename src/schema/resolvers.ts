@@ -955,11 +955,30 @@ export function makeInsertResolver(
 
     const returningColumns = getReturningColumns(table);
 
-    // Parse returning selection set for relationships
-    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth);
+    // Parse returning selection set for relationships and computed fields
+    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const returningRelationships = returningParsed?.relationships && returningParsed.relationships.length > 0
       ? returningParsed.relationships
       : undefined;
+
+    // Build computed field selections (use select permission for returning clause access)
+    const selectPerm = permissionLookup.getSelect(table.schema, table.name, auth.role);
+    const returningComputedFields = buildComputedFieldSelections(
+      returningParsed?.computedFields,
+      table,
+      context.functions,
+      selectPerm?.computedFields,
+      auth.isAdmin,
+    );
+
+    // Build set-returning computed field selections
+    const returningSetReturningComputedFields = buildSetReturningComputedFieldSelections(
+      returningParsed?.setReturningComputedFields,
+      table,
+      context.functions,
+      selectPerm?.computedFields,
+      auth.isAdmin,
+    );
 
     // Parse onConflict if provided
     let onConflict: { constraint: string; updateColumns: string[]; where?: BoolExp } | undefined;
@@ -980,6 +999,8 @@ export function makeInsertResolver(
       objects,
       returningColumns,
       returningRelationships,
+      returningComputedFields: returningComputedFields.length > 0 ? returningComputedFields : undefined,
+      returningSetReturningComputedFields: returningSetReturningComputedFields.length > 0 ? returningSetReturningComputedFields : undefined,
       returningJsonbPaths: returningParsed?.jsonbPaths,
       onConflict,
       permission: perm ? {
@@ -992,9 +1013,10 @@ export function makeInsertResolver(
 
     const result = await queryWithSession(compiled.sql, compiled.params, auth, 'write');
 
-    // CTE pattern (check OR relationships or jsonbPaths): single row with "data" as JSON array
+    // CTE pattern (check OR relationships/computedFields/jsonbPaths): single row with "data" as JSON array
     // Simple pattern: RETURNING json_build_object → "data" column per row
-    const usesCTE = !!(perm?.check || returningRelationships || returningParsed?.jsonbPaths?.size);
+    const usesCTE = !!(perm?.check || returningRelationships || returningParsed?.jsonbPaths?.size
+      || returningComputedFields.length > 0 || returningSetReturningComputedFields.length > 0);
     const firstRow = result.rows[0] as Record<string, unknown> | undefined;
 
     if (usesCTE) {
@@ -1053,11 +1075,30 @@ export function makeInsertOneResolver(
     const obj = remapKeys(args.object as Record<string, unknown>, columnMap) ?? {};
     const returningColumns = getReturningColumns(table);
 
-    // Parse resolve info for relationships (insertOne returns the type directly)
-    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth);
+    // Parse resolve info for relationships and computed fields (insertOne returns the type directly)
+    const parsed = parseResolveInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const returningRelationships = parsed.relationships.length > 0
       ? parsed.relationships
       : undefined;
+
+    // Build computed field selections (use select permission for returning clause access)
+    const selectPerm = permissionLookup.getSelect(table.schema, table.name, auth.role);
+    const returningComputedFields = buildComputedFieldSelections(
+      parsed.computedFields,
+      table,
+      context.functions,
+      selectPerm?.computedFields,
+      auth.isAdmin,
+    );
+
+    // Build set-returning computed field selections
+    const returningSetReturningComputedFields = buildSetReturningComputedFieldSelections(
+      parsed.setReturningComputedFields,
+      table,
+      context.functions,
+      selectPerm?.computedFields,
+      auth.isAdmin,
+    );
 
     // Parse onConflict if provided
     let onConflict: { constraint: string; updateColumns: string[]; where?: BoolExp } | undefined;
@@ -1078,6 +1119,8 @@ export function makeInsertOneResolver(
       object: obj,
       returningColumns,
       returningRelationships,
+      returningComputedFields: returningComputedFields.length > 0 ? returningComputedFields : undefined,
+      returningSetReturningComputedFields: returningSetReturningComputedFields.length > 0 ? returningSetReturningComputedFields : undefined,
       returningJsonbPaths: parsed.jsonbPaths,
       onConflict,
       permission: perm ? {

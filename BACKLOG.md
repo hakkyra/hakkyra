@@ -256,7 +256,7 @@
 - [x] Computed fields (from PG functions, 17 tests)
 - [x] ON CONFLICT (upsert) for inserts (22 tests)
 - [x] Distinct queries — DISTINCT ON (22 tests)
-- [x] Returning nested relationships after mutations (16 tests)
+- [x] Returning nested relationships and computed fields after mutations (16 tests)
 - [x] GROUP BY support in aggregations (18 tests)
 - [x] Batch operations optimization — UNNEST for large inserts, updateMany (26 tests)
 - [x] Prepared statement caching — LRU-based, config-driven (13 tests)
