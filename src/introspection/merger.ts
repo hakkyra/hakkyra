@@ -359,9 +359,25 @@ function mergeRelationships(
     (r) => !configRelNames.has(toCamelCase(r.name)),
   );
 
+  // Build a lookup from localColumns key to auto-detected rels for FK resolution
+  const autoRelByColumns = new Map<string, RelationshipConfig>();
+  for (const r of autoRels) {
+    if (r.localColumns?.length) {
+      autoRelByColumns.set(r.localColumns.join(','), r);
+    }
+  }
+
   // Add config-defined rels, filling in missing fields from auto-detected
   for (const configRel of configRels) {
-    const autoRel = autoRelMap.get(toCamelCase(configRel.name));
+    // Match by name first
+    let autoRel = autoRelMap.get(toCamelCase(configRel.name));
+
+    // If no name match but config rel has unresolved remoteTable (from FK string form),
+    // try matching by localColumns to find the auto-detected counterpart
+    if (!autoRel && !configRel.remoteTable?.name && configRel.localColumns?.length) {
+      autoRel = autoRelByColumns.get(configRel.localColumns.join(','));
+    }
+
     if (autoRel) {
       // Merge: config takes precedence, but fill gaps from auto-detected
       merged.push({
