@@ -172,7 +172,7 @@ export async function registerEventWorkers(
       if (result.success) {
         // Mark as delivered
         await pool.query(
-          `UPDATE ${quoteIdent(schemaName)}.event_log SET status = 'delivered', delivered_at = now(),
+          `UPDATE ${quoteIdent(schemaName)}.event_log SET status = 'delivered', delivered = true, delivered_at = now(),
            response_status = $2 WHERE id = $1`,
           [eventId, result.statusCode],
         );
