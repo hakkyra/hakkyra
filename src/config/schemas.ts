@@ -324,6 +324,8 @@ const RequestTransformSchema = z
     content_type: z.string().optional(),
     query_params: z.record(z.string(), z.string()).optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    template_engine: z.string().optional(),
+    version: z.number().optional(),
   })
   .strict();
 
