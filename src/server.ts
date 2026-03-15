@@ -241,7 +241,7 @@ export async function createServer(
       const { errors } = body as { errors?: unknown[] };
       if (Array.isArray(errors) && errors.length > 0) {
         server.log.error(
-          { method: request.method, url: request.url, errors },
+          { method: request.method, url: request.url, requestBody: request.body, errors },
           'GraphQL request returned errors',
         );
       }
