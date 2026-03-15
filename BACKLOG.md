@@ -756,7 +756,7 @@ Findings from comprehensive code review of permissions, relationships, computed 
 
 - [x] **Self-referential relationships** — Category table with parent/child hierarchy, object + array relationships (3 tests, 2 skipped — array rel FK filter bug)
 - [x] **Composite foreign keys** — fiscal_report → fiscal_period via composite FK, manual column_mapping (3 tests, 1 skipped — multi-column filter bug)
-- [x] **Relationships in subscriptions** — Nested relationships in subscription results (1 todo — Mercurius context propagation)
+- [ ] **Relationships in subscriptions** — Test fixtures exist but blocked by Mercurius subscription context propagation bug (4 tests skipped)
 - [x] **Relationships in REST responses** — Nested relationships in GraphQL JSON and REST list endpoints (5 tests)
 - [x] **WHERE filters on array relationships** — Filter invoices/accounts/appointments by various conditions (6 tests)
 - [x] **Relationship limit/offset** — limit, offset, combined, limit:0, large offset (5 tests)
@@ -769,13 +769,13 @@ Findings from comprehensive code review of permissions, relationships, computed 
 
 - [ ] **Computed fields in WHERE clauses** — Feature gap: computed fields not included in BoolExp input types
 - [ ] **Computed fields in ORDER BY** — Feature gap: computed fields not included in OrderBy input types
-- [x] **SETOF computed fields** — `client_active_accounts` function, test fixtures + metadata (todo: schema generation)
-- [x] **Computed fields in UPDATE/DELETE RETURNING** — UPDATE + DELETE RETURNING with totalBalance (2 tests)
-- [x] **Computed fields with arguments** — `client_balance_in_currency` with target_currency arg, test fixtures + metadata (todo: schema generation)
-- [x] **Computed fields in subscriptions** — Test fixture (todo: Mercurius subscription context fix)
+- [x] **SETOF computed fields** — `client_active_accounts` function, test fixtures + metadata + E2E tests (5 tests)
+- [ ] **Computed fields in UPDATE/DELETE RETURNING** — Test fixtures exist but resolvers don't pass computed fields to RETURNING clause (2 todos)
+- [ ] **Computed fields with arguments** — `client_balance_in_currency` function + metadata exist; arg passing not yet in type-builder/SQL compiler (2 todos)
+- [ ] **Computed fields in subscriptions** — Test fixture exists; blocked by Mercurius subscription context propagation bug (1 todo)
 - [ ] **Computed fields in aggregations** — COUNT/SUM/AVG on result sets, GROUP BY with computed fields
-- [x] **Computed fields with session variables** — `client_is_own` with hasura_session arg, test fixtures + metadata (todo: schema generation)
-- [x] **Computed fields on views/materialized views** — `client_summary_score` on materialized view, test fixtures + metadata (todo: schema generation)
+- [ ] **Computed fields with session variables** — `client_is_own` function + metadata exist; session injection not yet in SQL compiler (1 todo)
+- [x] **Computed fields on views/materialized views** — `client_summary_score` on materialized view with E2E tests (4 tests)
 
 ### P6.5 — Tracked Function Test Gaps (Medium) — PARTIAL
 
@@ -824,7 +824,7 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Streaming subscriptions | 13 | Pass |
 | Actions | 19 | Pass |
 | Async actions | 18 | Pass |
-| Computed fields | 26 | Pass (3 todo) |
+| Computed fields | 26 | Pass (5 todo) |
 | Upsert | 22 | Pass |
 | Distinct | 22 | Pass |
 | Returning rels | 16 | Pass |
@@ -841,8 +841,8 @@ Findings from comprehensive code review of permissions, relationships, computed 
 | Array comparison | 24 | Pass |
 | Role-aware docs | 14 | Pass |
 | Permission gaps | 49 | Pass |
-| Relationship gaps | 68 | Pass (3 skipped, 2 todo) |
+| Relationship gaps | 68 | Pass (7 skipped) |
 | Security tests | 28 | Pass |
 | Hasura REST endpoints | 5 | Pass |
 | Config unsupported | 34 | Pass |
-| **Total** | **1125** | **34 suites, 1109 passing, 7 skipped, 7 todo** |
+| **Total** | **1125** | **34 suites, 1103 passing, 7 skipped, 7 todo** |
