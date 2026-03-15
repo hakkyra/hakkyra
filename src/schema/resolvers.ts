@@ -224,6 +224,14 @@ function remapBoolExp(
     }
   }
 
+  // Build a map of relationship name -> relationship config for traversal filters
+  const relMap = new Map<string, TableInfo['relationships'][number]>();
+  if (table) {
+    for (const rel of table.relationships) {
+      relMap.set(toCamelCase(rel.name), rel);
+    }
+  }
+
   // Column-level: remap keys from camelCase to snake_case
   const result: Record<string, unknown> = {};
   const aggregateFilters: unknown[] = [];
@@ -282,11 +290,51 @@ function remapBoolExp(
       continue;
     }
 
+    // Check for relationship traversal filter keys (e.g., campaign: { key: { _eq: "foo" } })
+    const rel = relMap.get(key);
+    if (rel && value && typeof value === 'object' && allTables) {
+      const remoteTable = allTables.find(
+        (t) => t.name === rel.remoteTable.name && t.schema === rel.remoteTable.schema,
+      );
+      if (remoteTable) {
+        // Build column mapping from the relationship config
+        const colMapping: Record<string, string> = {};
+        if (rel.columnMapping) {
+          for (const [localCol, remoteCol] of Object.entries(rel.columnMapping)) {
+            colMapping[localCol] = remoteCol;
+          }
+        } else if (rel.localColumns && rel.remoteColumns) {
+          for (let i = 0; i < rel.localColumns.length; i++) {
+            colMapping[rel.localColumns[i]] = rel.remoteColumns[i];
+          }
+        }
+
+        // Recursively remap the child BoolExp using remote table's column map
+        const remoteColMap = camelToColumnMap(remoteTable);
+        const remappedChild = remapBoolExp(
+          value as BoolExp,
+          remoteColMap,
+          remoteTable,
+          allTables,
+        );
+
+        aggregateFilters.push({
+          _relationshipFilter: {
+            columnMapping: colMapping,
+            remoteSchema: remoteTable.schema,
+            remoteTable: remoteTable.name,
+            where: remappedChild,
+          },
+        });
+        continue;
+      }
+    }
+
     const pgName = columnMap.get(key) ?? key;
     result[pgName] = value;
   }
 
-  // If we have aggregate filters, combine them with regular filters using _and
+  // If we have aggregate/relationship filters, combine them with regular filters using _and
   if (aggregateFilters.length > 0) {
     const parts: BoolExp[] = [];
     if (Object.keys(result).length > 0) {

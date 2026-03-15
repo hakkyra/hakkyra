@@ -66,7 +66,7 @@ export class PgBossAdapter implements JobQueue {
   }
 
   async createQueue(name: string, options?: QueueOptions): Promise<void> {
-    await this.boss.createQueue(name, options ? stripUndefined(options) : {});
+    await this.boss.createQueue(name, options ? stripUndefined(options as Record<string, unknown>) : {});
   }
 
   async schedule(
@@ -75,6 +75,6 @@ export class PgBossAdapter implements JobQueue {
     data?: JobData,
     options?: ScheduleOptions,
   ): Promise<void> {
-    await this.boss.schedule(name, cron, data ?? {}, options ? stripUndefined(options) : {});
+    await this.boss.schedule(name, cron, data ?? {}, options ? stripUndefined(options as Record<string, unknown>) : {});
   }
 }

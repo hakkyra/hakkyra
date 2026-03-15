@@ -52,6 +52,9 @@ let existsAliasCounter = 0;
 /** Alias counter for aggregate filter subqueries within a single WHERE compilation. */
 let aggAliasCounter = 0;
 
+/** Alias counter for relationship filter subqueries within a single WHERE compilation. */
+let relAliasCounter = 0;
+
 /**
  * Compile column-level operators into SQL fragments.
  *
@@ -356,6 +359,35 @@ function compileBoolExp(
     return predClauses.join(' AND ');
   }
 
+  // ── _relationshipFilter (internal, emitted by resolver's remapBoolExp) ──
+
+  if ('_relationshipFilter' in exp) {
+    const relFilter = (exp as Record<string, unknown>)['_relationshipFilter'] as {
+      columnMapping: Record<string, string>;
+      remoteSchema: string;
+      remoteTable: string;
+      where?: BoolExp;
+    };
+
+    const subAlias = `_rel_${relAliasCounter++}`;
+
+    // Build join conditions from column mapping
+    const joinConds = Object.entries(relFilter.columnMapping)
+      .map(([local, remote]) =>
+        `${quoteIdentifier(subAlias)}.${quoteIdentifier(remote)} = ${quoteIdentifier(tableAlias)}.${quoteIdentifier(local)}`,
+      )
+      .join(' AND ');
+
+    // Build optional user filter
+    let filterClause = '';
+    if (relFilter.where) {
+      const filterSQL = compileBoolExp(relFilter.where, params, subAlias, session);
+      if (filterSQL) filterClause = ` AND ${filterSQL}`;
+    }
+
+    return `EXISTS (SELECT 1 FROM ${quoteTableRef(relFilter.remoteSchema, relFilter.remoteTable)} ${quoteIdentifier(subAlias)} WHERE ${joinConds}${filterClause})`;
+  }
+
   // ── Column-level expressions (implicit AND across all keys) ──
 
   // Build a lookup map for computed fields by snake_case name
@@ -439,5 +471,6 @@ export function compileWhere(
   // Reset alias counters for each top-level compilation
   existsAliasCounter = 0;
   aggAliasCounter = 0;
+  relAliasCounter = 0;
   return compileBoolExp(boolExp, params, tableAlias, session, columnLookup, computedFields);
 }
