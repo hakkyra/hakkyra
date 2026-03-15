@@ -20,6 +20,7 @@ import type {
   Job,
   QueueOptions,
   ScheduleOptions,
+  WorkOptions,
 } from './types.js';
 
 // BullMQ types imported lazily — we only define the shapes we need here so
@@ -116,7 +117,7 @@ export class BullMQAdapter implements JobQueue {
     return job.id ?? null;
   }
 
-  async work<T extends JobData>(queue: string, handler: JobHandler<T>): Promise<void> {
+  async work<T extends JobData>(queue: string, handler: JobHandler<T>, options?: WorkOptions): Promise<void> {
     const { Worker: BullWorker } = this.bullmq;
 
     const worker = new BullWorker(
@@ -131,7 +132,10 @@ export class BullMQAdapter implements JobQueue {
         };
         await handler([job]);
       },
-      { connection: this.connectionOpts },
+      {
+        connection: this.connectionOpts,
+        ...(options?.concurrency ? { concurrency: options.concurrency } : {}),
+      },
     );
 
     this.workers.push(worker);

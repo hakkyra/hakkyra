@@ -364,6 +364,7 @@ export async function loadConfig(
     }),
     eventDelivery: stripUndefined({
       batchSize: serverConfig?.event_delivery?.batch_size,
+      httpConcurrency: serverConfig?.event_delivery?.http_concurrency,
     }),
     eventCleanup: stripUndefined({
       schedule: serverConfig?.event_cleanup?.schedule,
@@ -878,6 +879,7 @@ function transformEventTrigger(raw: RawEventTrigger): EventTriggerConfig {
     webhook,
     webhookFromEnv: raw.webhook_from_env,
     headers: raw.headers?.map(transformHeader),
+    concurrency: raw.concurrency,
   };
 }
 

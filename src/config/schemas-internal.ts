@@ -119,6 +119,7 @@ export const EventTriggerConfigSchema = z.object({
   webhook: z.string(),
   webhookFromEnv: z.string().optional(),
   headers: z.array(WebhookHeaderSchema).optional(),
+  concurrency: z.number().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -509,7 +510,8 @@ export const HakkyraConfigSchema = z.object({
   }).default({ debounceMs: 50, keepAliveMs: 30000 }),
   eventDelivery: z.object({
     batchSize: z.number().default(100),
-  }).default({ batchSize: 100 }),
+    httpConcurrency: z.number().default(1),
+  }).default({ batchSize: 100, httpConcurrency: 1 }),
   eventCleanup: z.object({
     schedule: z.string().default('0 3 * * *'),
   }).default({ schedule: '0 3 * * *' }),
