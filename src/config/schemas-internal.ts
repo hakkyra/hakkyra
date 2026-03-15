@@ -39,6 +39,8 @@ export const SelectPermissionSchema = z.object({
   limit: z.number().optional(),
   allowAggregations: z.boolean().optional(),
   computedFields: z.array(z.string()).optional(),
+  queryRootFields: z.array(z.string()).optional(),
+  subscriptionRootFields: z.array(z.string()).optional(),
 });
 
 export const InsertPermissionSchema = z.object({
@@ -398,6 +400,71 @@ export const TrackedFunctionConfigSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// LogicalModel & NativeQuery
+// ---------------------------------------------------------------------------
+
+export const LogicalModelFieldSchema = z.object({
+  name: z.string(),
+  type: z.string(),
+  nullable: z.boolean(),
+});
+
+export const LogicalModelPermissionSchema = z.object({
+  role: z.string(),
+  columns: z.array(z.string()),
+  filter: BoolExpSchema,
+});
+
+export const LogicalModelSchema = z.object({
+  name: z.string(),
+  fields: z.array(LogicalModelFieldSchema),
+  selectPermissions: z.array(LogicalModelPermissionSchema).default([]),
+});
+
+export const NativeQueryArgumentSchema = z.object({
+  name: z.string(),
+  type: z.string(),
+  nullable: z.boolean(),
+});
+
+export const NativeQuerySchema = z.object({
+  rootFieldName: z.string(),
+  code: z.string(),
+  arguments: z.array(NativeQueryArgumentSchema).default([]),
+  returns: z.string(),
+});
+
+// ---------------------------------------------------------------------------
+// QueryCollection
+// ---------------------------------------------------------------------------
+
+export const QueryCollectionSchema = z.object({
+  name: z.string(),
+  queries: z.map(z.string(), z.string()),
+});
+
+// ---------------------------------------------------------------------------
+// HasuraRestEndpoint
+// ---------------------------------------------------------------------------
+
+export const HasuraRestEndpointSchema = z.object({
+  name: z.string(),
+  url: z.string(),
+  methods: z.array(z.string()),
+  collectionName: z.string(),
+  queryName: z.string(),
+  comment: z.string().optional(),
+});
+
+// ---------------------------------------------------------------------------
+// IntrospectionConfig
+// ---------------------------------------------------------------------------
+
+export const IntrospectionConfigSchema = z.object({
+  disabledForRoles: z.array(z.string()).default([]),
+});
+
+// ---------------------------------------------------------------------------
 // HakkyraConfig (top-level)
 // ---------------------------------------------------------------------------
 
@@ -418,6 +485,10 @@ export const HakkyraConfigSchema = z.object({
   cronTriggers: z.array(CronTriggerConfigSchema),
   rest: RESTConfigSchema,
   customQueries: z.array(CustomQueryConfigSchema),
+  queryCollections: z.array(QueryCollectionSchema).default([]),
+  hasuraRestEndpoints: z.array(HasuraRestEndpointSchema).default([]),
+  nativeQueries: z.array(NativeQuerySchema).default([]),
+  logicalModels: z.array(LogicalModelSchema).default([]),
   apiDocs: APIDocsConfigSchema,
   tableAliases: z.record(z.string(), z.string()),
   inheritedRoles: z.record(z.string(), z.array(z.string())).default({}),
@@ -453,6 +524,7 @@ export const HakkyraConfigSchema = z.object({
     unnestThreshold: z.number().default(500),
     batchChunkSize: z.number().default(100),
   }).default({ arrayAnyThreshold: 20, unnestThreshold: 500, batchChunkSize: 100 }),
+  introspection: IntrospectionConfigSchema.default({ disabledForRoles: [] }),
 });
 
 // ---------------------------------------------------------------------------

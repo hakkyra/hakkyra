@@ -25,6 +25,8 @@ import { generateSchema } from './schema/generator.js';
 import { createAuthHook } from './auth/middleware.js';
 import { registerRESTRoutes } from './rest/router.js';
 import type { RESTRouterDeps } from './rest/router.js';
+import { registerHasuraRestEndpoints } from './rest/hasura-endpoints.js';
+import type { HasuraRestDeps } from './rest/hasura-endpoints.js';
 import { generateOpenAPISpec } from './docs/openapi.js';
 import { generateLLMDoc } from './docs/llm-format.js';
 import { generateGraphQLSDL } from './docs/graphql-sdl.js';
@@ -396,6 +398,35 @@ export async function createServer(
     },
   });
 
+  // 8b. Introspection control: block introspection for disabled roles
+  if (config.introspection.disabledForRoles.length > 0) {
+    const disabledRoles = new Set(config.introspection.disabledForRoles);
+    server.graphql.addHook('preExecution', async (_schema, document, context) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const auth = (context as any)?.auth;
+      const role: string | undefined = auth?.role;
+      if (role && disabledRoles.has(role)) {
+        // Check if any operation uses introspection fields (__schema or __type)
+        for (const definition of document.definitions) {
+          if (definition.kind === 'OperationDefinition' && definition.selectionSet) {
+            for (const selection of definition.selectionSet.selections) {
+              if (
+                selection.kind === 'Field' &&
+                (selection.name.value === '__schema' || selection.name.value === '__type')
+              ) {
+                throw new mercurius.ErrorWithProps(
+                  'GraphQL introspection is not allowed for the current role',
+                  { code: 'INTROSPECTION_DISABLED' },
+                  400,
+                );
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
   // 9. Register REST routes
   const routerDeps: RESTRouterDeps = {
     getPool: (intent) => connectionManager.getPool(intent),
@@ -403,6 +434,51 @@ export async function createServer(
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerRESTRoutes(server as any, schemaModel.tables, config.rest, routerDeps);
+
+  // 9b. Register Hasura-style REST endpoints (query collections)
+  if (config.hasuraRestEndpoints.length > 0) {
+    const hasuraRestDeps: HasuraRestDeps = {
+      buildContext: (request) => {
+        const auth = request.session ?? {
+          role: 'anonymous',
+          allowedRoles: [] as string[],
+          isAdmin: false,
+          claims: {},
+        };
+        return {
+          auth,
+          queryWithSession: async (
+            sql: string,
+            params: unknown[],
+            session: typeof auth,
+            intent: 'read' | 'write',
+          ) => {
+            const start = performance.now();
+            const result = await connectionManager.queryWithSession(sql, params, session, intent);
+            const durationMs = performance.now() - start;
+            if (slowQueryThresholdMs > 0 && durationMs > slowQueryThresholdMs) {
+              server.log.warn(
+                { durationMs: Math.round(durationMs * 100) / 100, sql: sql.slice(0, 200), paramCount: params.length },
+                'Slow query detected',
+              );
+            }
+            return result;
+          },
+          permissionLookup: resolverPermissionLookup,
+          inheritedRoles: inheritedRolesRef.current,
+          tables: schemaModel.tables,
+          functions: schemaModel.functions,
+          queryCache,
+          subscriptionManager: subscriptionRef.manager,
+          jobQueue: asyncActionRef.jobQueue,
+          pool: asyncActionRef.pool,
+          clientHeaders: request.headers as Record<string, string>,
+        };
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    registerHasuraRestEndpoints(server as any, config.queryCollections, config.hasuraRestEndpoints, hasuraRestDeps);
+  }
 
   // ── Health check endpoint ──────────────────────────────────────────────
   server.get('/healthz', async (_request, reply) => {

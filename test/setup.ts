@@ -3,6 +3,8 @@
  */
 
 import pg from 'pg';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { SignJWT } from 'jose';
 import type { FastifyInstance } from 'fastify';
@@ -143,6 +145,34 @@ export const tokens = {
   },
 };
 
+// ─── Clean Metadata Directory ──────────────────────────────────────────────────
+
+const UNSUPPORTED_METADATA_FILES = [
+  'remote_schemas.yaml', 'remote_schemas.yml',
+  'allowlist.yaml', 'allowlist.yml',
+  'api_limits.yaml', 'api_limits.yml',
+  'opentelemetry.yaml', 'opentelemetry.yml',
+  'network.yaml', 'network.yml',
+  'backend_configs.yaml', 'backend_configs.yml',
+];
+
+let _cleanMetadataDir: string | undefined;
+
+/**
+ * Returns a copy of METADATA_DIR with unsupported Hasura metadata files removed.
+ * The original fixture directory is untouched. Cached across calls.
+ */
+export async function getCleanMetadataDir(): Promise<string> {
+  if (_cleanMetadataDir) return _cleanMetadataDir;
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hakkyra-test-'));
+  await fs.cp(METADATA_DIR, tmpDir, { recursive: true });
+  for (const f of UNSUPPORTED_METADATA_FILES) {
+    try { await fs.unlink(path.join(tmpDir, f)); } catch {}
+  }
+  _cleanMetadataDir = tmpDir;
+  return tmpDir;
+}
+
 // ─── Server Bootstrap ─────────────────────────────────────────────────────────
 
 let _server: FastifyInstance | undefined;
@@ -159,7 +189,8 @@ export async function startServer(): Promise<FastifyInstance> {
   const { loadConfig } = await import('../src/config/loader.js');
   const { createServer } = await import('../src/server.js');
 
-  const config = await loadConfig(METADATA_DIR, SERVER_CONFIG_PATH);
+  const cleanDir = await getCleanMetadataDir();
+  const config = await loadConfig(cleanDir, SERVER_CONFIG_PATH);
   _server = await createServer(config);
   _serverAddress = await _server.listen({ port: 0, host: '127.0.0.1' });
 

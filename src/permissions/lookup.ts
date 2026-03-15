@@ -83,6 +83,8 @@ function compileSelectPermission(
     limit: perm.limit,
     allowAggregations: perm.allowAggregations ?? false,
     computedFields: perm.computedFields,
+    queryRootFields: perm.queryRootFields,
+    subscriptionRootFields: perm.subscriptionRootFields,
   };
 }
 
@@ -201,7 +203,32 @@ function mergeSelectPermissions(
     }
   }
 
-  return { filter, columns, limit, allowAggregations, computedFields };
+  // queryRootFields: most permissive = undefined (allow all) if any constituent has undefined.
+  // Otherwise union of all specified root fields.
+  let queryRootFields: string[] | undefined;
+  const allHaveQueryRF = perms.every((p) => p.queryRootFields !== undefined);
+  if (allHaveQueryRF) {
+    queryRootFields = [];
+    for (const p of perms) {
+      for (const rf of p.queryRootFields!) {
+        if (!queryRootFields.includes(rf)) queryRootFields.push(rf);
+      }
+    }
+  }
+
+  // subscriptionRootFields: same logic as queryRootFields.
+  let subscriptionRootFields: string[] | undefined;
+  const allHaveSubRF = perms.every((p) => p.subscriptionRootFields !== undefined);
+  if (allHaveSubRF) {
+    subscriptionRootFields = [];
+    for (const p of perms) {
+      for (const rf of p.subscriptionRootFields!) {
+        if (!subscriptionRootFields.includes(rf)) subscriptionRootFields.push(rf);
+      }
+    }
+  }
+
+  return { filter, columns, limit, allowAggregations, computedFields, queryRootFields, subscriptionRootFields };
 }
 
 /**

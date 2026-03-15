@@ -59,6 +59,7 @@ import {
   makeSubscriptionStreamSubscribe,
 } from './subscription-resolvers.js';
 import { buildCustomQueryFields } from './custom-queries.js';
+import { buildNativeQueryFields } from './native-queries.js';
 import { resolveTrackedFunctions, buildTrackedFunctionFields } from './tracked-functions.js';
 import type { TrackedFunctionConfig } from '../types.js';
 
@@ -214,6 +215,12 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     tables,
   );
 
+  // ── Step 5b2: Build native query fields ─────────────────────────────────
+  const nativeQueryFieldResult = buildNativeQueryFields(
+    model.nativeQueries ?? [],
+    model.logicalModels ?? [],
+  );
+
   // ── Step 5c: Build tracked function fields ─────────────────────────────
   const trackedFunctionConfigs = options?.trackedFunctions ?? model.trackedFunctions ?? [];
   const resolvedTrackedFunctions = resolveTrackedFunctions(
@@ -309,6 +316,11 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
   // Add custom query fields to Query
   for (const [name, fieldConfig] of Object.entries(customFields.queryFields)) {
+    queryFields[name] = fieldConfig;
+  }
+
+  // Add native query fields to Query
+  for (const [name, fieldConfig] of Object.entries(nativeQueryFieldResult.queryFields)) {
     queryFields[name] = fieldConfig;
   }
 
@@ -575,6 +587,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       OrderByDirection,
       CursorOrdering,
       ...customFields.outputTypes,
+      ...nativeQueryFieldResult.outputTypes,
       // Note: action types are NOT included here because they are reachable
       // through the query/mutation field graph. Including them would cause
       // ESM/CJS dual-module issues when Mercurius rebuilds the schema via SDL.

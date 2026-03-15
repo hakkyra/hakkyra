@@ -10,3 +10,61 @@
         retries: 1
       use_prepared_statements: true
   tables: !include default/tables/tables.yaml
+  logical_models:
+    - fields:
+        - name: count
+          type:
+            nullable: false
+            scalar: bigint
+      name: BranchClientCount
+      select_permissions:
+        - permission:
+            columns:
+              - count
+            filter: {}
+          role: backoffice
+        - permission:
+            columns:
+              - count
+            filter: {}
+          role: administrator
+    - fields:
+        - name: id
+          type:
+            nullable: false
+            scalar: uuid
+        - name: name
+          type:
+            nullable: false
+            scalar: text
+      name: ClientNameResult
+      select_permissions:
+        - permission:
+            columns:
+              - id
+              - name
+            filter:
+              id:
+                _eq: X-Hasura-User-Id
+          role: client
+        - permission:
+            columns:
+              - id
+              - name
+            filter: {}
+          role: backoffice
+  native_queries:
+    - arguments:
+        branchId:
+          nullable: false
+          type: uuid
+      code: "SELECT count(*)::bigint as \"count\" FROM client WHERE branch_id = {{branchId}}"
+      returns: BranchClientCount
+      root_field_name: branchClientCount
+    - arguments:
+        branchId:
+          nullable: false
+          type: uuid
+      code: "SELECT id, name FROM client WHERE branch_id = {{branchId}}"
+      returns: ClientNameResult
+      root_field_name: clientNamesByBranch

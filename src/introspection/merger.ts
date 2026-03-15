@@ -289,6 +289,8 @@ export function mergeSchemaModel(
     functions: introspection.functions,
     customQueries: config.customQueries ?? [],
     trackedFunctions: config.trackedFunctions ?? [],
+    nativeQueries: config.nativeQueries ?? [],
+    logicalModels: config.logicalModels ?? [],
   };
 
   return { model, warnings };

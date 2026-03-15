@@ -20,6 +20,7 @@ import type { OrderByItem } from '../sql/select.js';
 import { compileSelect, compileSelectByPk } from '../sql/select.js';
 import { toCamelCase } from './type-builder.js';
 import type { ResolverContext } from './resolvers.js';
+import { isSubscriptionRootFieldAllowed } from './resolvers.js';
 
 // ─── Async Queue (push-to-pull adapter) ─────────────────────────────────────
 
@@ -259,6 +260,11 @@ export function makeSubscriptionSelectSubscribe(
       throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
     }
 
+    // Check subscription root field visibility
+    if (!auth.isAdmin && !isSubscriptionRootFieldAllowed(perm, 'select')) {
+      throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
+    }
+
     const columns = getAllowedColumns(table, perm?.columns);
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
     const orderBy = remapOrderBy(args.orderBy as Array<Record<string, string>> | undefined, columnMap);
@@ -348,6 +354,11 @@ export function makeSubscriptionSelectByPkSubscribe(
     const perm = permissionLookup.getSelect(table.schema, table.name, auth.role);
 
     if (!perm && !auth.isAdmin) {
+      throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
+    }
+
+    // Check subscription root field visibility
+    if (!auth.isAdmin && !isSubscriptionRootFieldAllowed(perm, 'select_by_pk')) {
       throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
     }
 
@@ -443,6 +454,11 @@ export function makeSubscriptionStreamSubscribe(
     const perm = permissionLookup.getSelect(table.schema, table.name, auth.role);
 
     if (!perm && !auth.isAdmin) {
+      throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
+    }
+
+    // Check subscription root field visibility
+    if (!auth.isAdmin && !isSubscriptionRootFieldAllowed(perm, 'select_stream')) {
       throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
     }
 

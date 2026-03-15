@@ -32,6 +32,8 @@ import type {
   RawRESTOverrideSchema,
   RawServerConfigSchema,
   RawTrackedFunctionSchema,
+  RawLogicalModelSchema,
+  RawNativeQuerySchema,
 } from './schemas.js';
 
 // ─── Hasura metadata version ────────────────────────────────────────────────
@@ -85,6 +87,11 @@ export type RawRESTOverride = z.infer<typeof RawRESTOverrideSchema>;
 // ─── Tracked Functions ───────────────────────────────────────────────────────
 
 export type RawTrackedFunction = z.infer<typeof RawTrackedFunctionSchema>;
+
+// ─── Logical Models & Native Queries ─────────────────────────────────────────
+
+export type RawLogicalModel = z.infer<typeof RawLogicalModelSchema>;
+export type RawNativeQuery = z.infer<typeof RawNativeQuerySchema>;
 
 // ─── Server config (standalone) ─────────────────────────────────────────────
 

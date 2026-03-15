@@ -64,6 +64,58 @@ export const RawTableReferenceSchema = z
   })
   .passthrough();
 
+// ─── Logical Models & Native Queries (Hasura v2.28+) ────────────────────────
+
+const RawLogicalModelFieldTypeSchema = z
+  .object({
+    nullable: z.boolean().optional(),
+    scalar: z.string(),
+  })
+  .passthrough();
+
+const RawLogicalModelFieldSchema = z
+  .object({
+    name: z.string(),
+    type: RawLogicalModelFieldTypeSchema,
+  })
+  .passthrough();
+
+const RawLogicalModelPermissionSchema = z
+  .object({
+    permission: z
+      .object({
+        columns: z.array(z.string()),
+        filter: z.record(z.string(), z.unknown()),
+      })
+      .passthrough(),
+    role: z.string(),
+  })
+  .passthrough();
+
+export const RawLogicalModelSchema = z
+  .object({
+    name: z.string(),
+    fields: z.array(RawLogicalModelFieldSchema),
+    select_permissions: z.array(RawLogicalModelPermissionSchema).optional(),
+  })
+  .passthrough();
+
+const RawNativeQueryArgumentSchema = z
+  .object({
+    nullable: z.boolean().optional(),
+    type: z.string(),
+  })
+  .passthrough();
+
+export const RawNativeQuerySchema = z
+  .object({
+    arguments: z.record(z.string(), RawNativeQueryArgumentSchema).optional(),
+    code: z.string(),
+    returns: z.string(),
+    root_field_name: z.string(),
+  })
+  .passthrough();
+
 export const RawDatabaseEntrySchema = z
   .object({
     name: z.string(),
@@ -75,6 +127,8 @@ export const RawDatabaseEntrySchema = z
       })
       .passthrough(),
     tables: z.unknown(),  // may be IncludeRef, string, or array — resolved downstream
+    native_queries: z.array(RawNativeQuerySchema).optional(),
+    logical_models: z.array(RawLogicalModelSchema).optional(),
   })
   .passthrough();
 
@@ -144,6 +198,8 @@ export const RawSelectPermissionSchema = z
     limit: z.number().optional(),
     allow_aggregations: z.boolean().optional(),
     computed_fields: z.array(z.string()).optional(),
+    query_root_fields: z.array(z.string()).optional(),
+    subscription_root_fields: z.array(z.string()).optional(),
   })
   .passthrough();
 
@@ -398,6 +454,53 @@ export const RawApiConfigSchema = z
       })
       .passthrough()
       .optional(),
+  })
+  .passthrough();
+
+// ─── Query Collections ──────────────────────────────────────────────────
+
+export const RawQueryCollectionQuerySchema = z
+  .object({
+    name: z.string(),
+    query: z.string(),
+  })
+  .passthrough();
+
+export const RawQueryCollectionSchema = z
+  .object({
+    name: z.string(),
+    definition: z
+      .object({
+        queries: z.array(RawQueryCollectionQuerySchema),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+// ─── REST Endpoints (Hasura-style) ──────────────────────────────────────
+
+export const RawHasuraRestEndpointSchema = z
+  .object({
+    name: z.string(),
+    url: z.string(),
+    methods: z.array(z.string()),
+    definition: z
+      .object({
+        query: z.object({
+          collection_name: z.string(),
+          query_name: z.string(),
+        }),
+      })
+      .passthrough(),
+    comment: z.string().optional(),
+  })
+  .passthrough();
+
+// ─── Introspection Control ──────────────────────────────────────────────
+
+export const RawIntrospectionConfigSchema = z
+  .object({
+    disabled_for_roles: z.array(z.string()).optional(),
   })
   .passthrough();
 

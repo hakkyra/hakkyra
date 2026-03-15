@@ -33,6 +33,14 @@ import {
   PoolConfigSchema,
   ComputedFieldConfigSchema,
   TrackedFunctionConfigSchema,
+  LogicalModelSchema,
+  LogicalModelFieldSchema,
+  LogicalModelPermissionSchema,
+  NativeQuerySchema,
+  NativeQueryArgumentSchema,
+  QueryCollectionSchema,
+  HasuraRestEndpointSchema,
+  IntrospectionConfigSchema,
   HakkyraConfigSchema,
 } from './config/schemas-internal.js';
 
@@ -51,6 +59,14 @@ export type PgScalarType =
   | 'point' | 'line' | 'lseg' | 'box' | 'path' | 'polygon' | 'circle'
   | 'oid';
 
+// ─── Logical Models & Native Queries ─────────────────────────────────────────
+
+export type LogicalModel = z.infer<typeof LogicalModelSchema>;
+export type LogicalModelField = z.infer<typeof LogicalModelFieldSchema>;
+export type LogicalModelPermission = z.infer<typeof LogicalModelPermissionSchema>;
+export type NativeQuery = z.infer<typeof NativeQuerySchema>;
+export type NativeQueryArgument = z.infer<typeof NativeQueryArgumentSchema>;
+
 // ─── Internal Schema Model (merged introspection + config) ──────────────────
 
 export interface SchemaModel {
@@ -59,6 +75,8 @@ export interface SchemaModel {
   functions: FunctionInfo[];
   customQueries: CustomQueryConfig[];
   trackedFunctions: TrackedFunctionConfig[];
+  nativeQueries: NativeQuery[];
+  logicalModels: LogicalModel[];
 }
 
 export interface TableInfo {
@@ -244,6 +262,12 @@ export interface AsyncActionResult {
   updatedAt: string;
 }
 
+// ─── Query Collections & Hasura REST Endpoints ──────────────────────────────
+
+export type QueryCollection = z.infer<typeof QueryCollectionSchema>;
+
+export type HasuraRestEndpoint = z.infer<typeof HasuraRestEndpointSchema>;
+
 // ─── REST API Config (Hakkyra extension) ────────────────────────────────────
 
 export type RESTEndpointOverride = z.infer<typeof RESTEndpointOverrideSchema>;
@@ -290,6 +314,8 @@ export interface CompiledPermission {
     limit?: number;
     allowAggregations: boolean;
     computedFields?: string[];
+    queryRootFields?: string[];
+    subscriptionRootFields?: string[];
   };
   insert?: {
     check: CompiledFilter;
@@ -338,6 +364,8 @@ export type DatabasesConfig = z.infer<typeof DatabasesConfigSchema>;
 export type PoolConfig = z.infer<typeof PoolConfigSchema>;
 
 export type RedisConfig = z.infer<typeof RedisConfigSchema>;
+
+export type IntrospectionConfig = z.infer<typeof IntrospectionConfigSchema>;
 
 // ─── Utility types ──────────────────────────────────────────────────────────
 
