@@ -104,6 +104,7 @@ const RawNativeQueryArgumentSchema = z
   .object({
     nullable: z.boolean().optional(),
     type: z.string(),
+    description: z.string().optional(),
   })
   .strict();
 
@@ -127,6 +128,7 @@ export const RawDatabaseEntrySchema = z
       })
       .strict(),
     tables: z.unknown(),  // may be IncludeRef, string, or array — resolved downstream
+    functions: z.unknown().optional(),  // may be IncludeRef, string, or array — resolved via loadAllFunctions
     native_queries: z.array(RawNativeQuerySchema).optional(),
     logical_models: z.array(RawLogicalModelSchema).optional(),
   })
