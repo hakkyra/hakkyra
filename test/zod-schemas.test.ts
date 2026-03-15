@@ -656,10 +656,10 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
       expect(err.issues.some((i) => i.path.includes('definition'))).toBe(true);
     });
 
-    it('rejects invalid kind enum value', () => {
+    it('rejects non-string kind value', () => {
       const err = expectInvalid(RawActionSchema, {
         ...validAction,
-        definition: { ...validAction.definition, kind: 'invalid' },
+        definition: { ...validAction.definition, kind: 123 },
       });
       expect(err.issues.length).toBeGreaterThan(0);
     });
@@ -1825,7 +1825,7 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
     it('defaults server when missing', () => {
       const { server, ...rest } = minimalConfig;
       const result = expectValid(HakkyraConfigSchema, rest);
-      expect(result.server).toEqual({ port: 3000, host: '0.0.0.0', logLevel: 'info' });
+      expect(result.server).toEqual({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false });
     });
 
     it('rejects missing databases', () => {

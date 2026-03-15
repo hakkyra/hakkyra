@@ -221,10 +221,8 @@ describe('DISTINCT ON — Schema', () => {
 
   it('should have enum values matching table columns in camelCase', () => {
     const typeMap = schema.getTypeMap();
-    // Find the Client SelectColumn enum
-    const enumType = Object.values(typeMap).find(
-      (t) => t instanceof GraphQLEnumType && t.name.includes('SelectColumn') && t.name.includes('Client'),
-    ) as GraphQLEnumType | undefined;
+    // Find the Client SelectColumn enum (exact match to avoid ClientData, ClientService, etc.)
+    const enumType = typeMap['ClientSelectColumn'] as GraphQLEnumType | undefined;
     expect(enumType).toBeDefined();
 
     const values = enumType!.getValues();
@@ -237,9 +235,7 @@ describe('DISTINCT ON — Schema', () => {
 
   it('should have SelectColumn enum values that resolve to PG column names', () => {
     const typeMap = schema.getTypeMap();
-    const enumType = Object.values(typeMap).find(
-      (t) => t instanceof GraphQLEnumType && t.name.includes('SelectColumn') && t.name.includes('Client'),
-    ) as GraphQLEnumType | undefined;
+    const enumType = typeMap['ClientSelectColumn'] as GraphQLEnumType | undefined;
     expect(enumType).toBeDefined();
 
     const values = enumType!.getValues();
