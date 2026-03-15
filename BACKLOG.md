@@ -381,6 +381,23 @@ Move all hardcoded default values to Zod `.default()` in `src/config/schemas-int
 - [x] `rest.autoGenerate` → `true`
 - [x] `rest.basePath` → `'/api'`
 
+### Table Configuration: `column_config` and `custom_name`
+
+Hasura's table `configuration` block supports `column_config` (per-column settings like `custom_name` and `comment`) and `custom_name` (table-level custom name). These override the `custom_column_names` shorthand with richer per-column config.
+
+- [x] Accept `column_config` in table configuration Zod schema (record of column → `{ custom_name?, comment? }`)
+- [x] Accept `custom_name` in table configuration Zod schema
+- [ ] Config loader: merge `column_config` custom names into `custom_column_names` (column_config takes precedence)
+- [ ] Config loader: apply table-level `custom_name` as table alias for type naming and root fields
+- [ ] `column_config.comment`: surface as GraphQL field descriptions
+
+### Nested Insert Ordering (`insertion_order`)
+
+Hasura supports `insertion_order` in object relationship `manual_configuration` to control whether the related row is inserted before or after the parent row in nested inserts. Values: `before_parent` (default) or `after_parent`. Schema validation accepts the field (Zod schema updated); runtime implementation pending.
+
+- [x] Accept `insertion_order` in relationship manual_configuration Zod schema (nullable, optional)
+- [ ] INSERT compiler: respect `insertion_order` when compiling nested inserts — `before_parent` inserts child first (for FK on parent), `after_parent` inserts parent first (for FK on child)
+
 ### Other Improvements
 - [x] Dual connection pool — dedicated session-mode pool for LISTEN/NOTIFY, separate pooled connections for queries/mutations (enables PgBouncer transaction-mode compatibility)
 - [x] Redis pub/sub fanout for multi-instance subscriptions
