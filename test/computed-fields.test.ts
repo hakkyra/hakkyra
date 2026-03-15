@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { GraphQLObjectType } from 'graphql';
+import { GraphQLObjectType, GraphQLInputObjectType, GraphQLSchema } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
 import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
@@ -7,6 +7,7 @@ import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
 import { compileSelect, compileSelectByPk } from '../src/sql/select.js';
 import { configureStringifyNumericTypes } from '../src/introspection/type-map.js';
+import { resetComparisonTypeCache } from '../src/schema/filters.js';
 import type { ComputedFieldSelection } from '../src/sql/select.js';
 import type { SchemaModel, TableInfo, BoolExp, FunctionInfo } from '../src/types.js';
 import {
@@ -19,6 +20,7 @@ import {
 type AnyRow = Record<string, unknown>;
 
 let schemaModel: SchemaModel;
+let schema: GraphQLSchema;
 
 function findTable(name: string): TableInfo {
   const table = schemaModel.tables.find((t) => t.name === name);
@@ -53,6 +55,9 @@ beforeAll(async () => {
   const config = await loadConfig(METADATA_DIR, SERVER_CONFIG_PATH);
   const result = mergeSchemaModel(introspection, config);
   schemaModel = result.model;
+  resetComparisonTypeCache();
+  resetCustomOutputTypeCache();
+  schema = generateSchema(schemaModel);
 }, 30_000);
 
 afterAll(async () => {
@@ -740,5 +745,275 @@ describe('Computed Fields — Materialized Views (P6.4i)', () => {
     const client = aliceSummary!.client as AnyRow;
     expect(client).toBeDefined();
     expect(client.username).toBe('alice');
+  });
+});
+
+// ─── Computed Fields in BoolExp (WHERE) ─────────────────────────────────────
+
+describe('Computed Fields — BoolExp (WHERE)', () => {
+  it('BoolExp type includes scalar computed fields', () => {
+    const typeMap = schema.getTypeMap();
+    const clientBoolExp = typeMap['ClientBoolExp'] as GraphQLInputObjectType | undefined;
+    expect(clientBoolExp).toBeDefined();
+    const fields = clientBoolExp!.getFields();
+    // totalBalance is a scalar computed field on client (returns numeric)
+    expect(fields['totalBalance']).toBeDefined();
+    // balanceInCurrency is a scalar computed field (returns numeric)
+    expect(fields['balanceInCurrency']).toBeDefined();
+    // isOwn is a scalar computed field (returns boolean)
+    expect(fields['isOwn']).toBeDefined();
+  });
+
+  it('BoolExp type does NOT include set-returning computed fields', () => {
+    const typeMap = schema.getTypeMap();
+    const clientBoolExp = typeMap['ClientBoolExp'] as GraphQLInputObjectType | undefined;
+    expect(clientBoolExp).toBeDefined();
+    const fields = clientBoolExp!.getFields();
+    // activeAccounts is a SETOF computed field — should NOT be in BoolExp
+    expect(fields['activeAccounts']).toBeUndefined();
+  });
+
+  it('account BoolExp type includes total computed field', () => {
+    const typeMap = schema.getTypeMap();
+    const accountBoolExp = typeMap['AccountBoolExp'] as GraphQLInputObjectType | undefined;
+    expect(accountBoolExp).toBeDefined();
+    const fields = accountBoolExp!.getFields();
+    expect(fields['total']).toBeDefined();
+  });
+
+  it('E2E: filter clients by totalBalance computed field', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(where: { totalBalance: { _gt: 100 } }) {
+          id
+          username
+          totalBalance
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    // Alice has totalBalance=1700, should be included
+    expect(clients.length).toBeGreaterThan(0);
+    for (const c of clients) {
+      expect(Number(c.totalBalance)).toBeGreaterThan(100);
+    }
+    const alice = clients.find((c) => c.id === ALICE_ID);
+    expect(alice).toBeDefined();
+    expect(Number(alice!.totalBalance)).toBe(1700);
+  });
+
+  it('E2E: filter clients by totalBalance with _eq', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(where: { totalBalance: { _eq: 1700 } }) {
+          id
+          username
+          totalBalance
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients.length).toBe(1);
+    expect(clients[0].id).toBe(ALICE_ID);
+  });
+
+  it('E2E: filter accounts by total computed field', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        account(where: { total: { _gte: 1000 } }) {
+          id
+          balance
+          creditBalance
+          total
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const accounts = (body.data as { account: AnyRow[] }).account;
+    expect(accounts.length).toBeGreaterThan(0);
+    for (const a of accounts) {
+      expect(Number(a.total)).toBeGreaterThanOrEqual(1000);
+    }
+  });
+
+  it('E2E: filter with computed field combined with regular column filter', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(where: { _and: [{ totalBalance: { _gt: 0 } }, { status: { _eq: ACTIVE } }] }) {
+          id
+          username
+          totalBalance
+          status
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients.length).toBeGreaterThan(0);
+    for (const c of clients) {
+      expect(Number(c.totalBalance)).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ─── Computed Fields in ORDER BY ────────────────────────────────────────────
+
+describe('Computed Fields — ORDER BY', () => {
+  it('OrderBy type includes scalar computed fields', () => {
+    const typeMap = schema.getTypeMap();
+    const clientOrderBy = typeMap['ClientOrderBy'] as GraphQLInputObjectType | undefined;
+    expect(clientOrderBy).toBeDefined();
+    const fields = clientOrderBy!.getFields();
+    // totalBalance is a scalar computed field
+    expect(fields['totalBalance']).toBeDefined();
+    // balanceInCurrency is a scalar computed field
+    expect(fields['balanceInCurrency']).toBeDefined();
+    // isOwn is a scalar computed field
+    expect(fields['isOwn']).toBeDefined();
+  });
+
+  it('OrderBy type does NOT include set-returning computed fields', () => {
+    const typeMap = schema.getTypeMap();
+    const clientOrderBy = typeMap['ClientOrderBy'] as GraphQLInputObjectType | undefined;
+    expect(clientOrderBy).toBeDefined();
+    const fields = clientOrderBy!.getFields();
+    // activeAccounts is a SETOF computed field — should NOT be in OrderBy
+    expect(fields['activeAccounts']).toBeUndefined();
+  });
+
+  it('E2E: order clients by totalBalance computed field ASC', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(orderBy: [{ totalBalance: ASC }]) {
+          id
+          username
+          totalBalance
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients.length).toBeGreaterThan(1);
+    // Verify ascending order
+    for (let i = 1; i < clients.length; i++) {
+      expect(Number(clients[i].totalBalance)).toBeGreaterThanOrEqual(Number(clients[i - 1].totalBalance));
+    }
+  });
+
+  it('E2E: order clients by totalBalance computed field DESC', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(orderBy: [{ totalBalance: DESC }]) {
+          id
+          username
+          totalBalance
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients.length).toBeGreaterThan(1);
+    // Verify descending order
+    for (let i = 1; i < clients.length; i++) {
+      expect(Number(clients[i].totalBalance)).toBeLessThanOrEqual(Number(clients[i - 1].totalBalance));
+    }
+    // Alice (totalBalance=1700) should be among the first (highest)
+    const alice = clients.find((c) => c.id === ALICE_ID);
+    expect(alice).toBeDefined();
+    expect(Number(alice!.totalBalance)).toBe(1700);
+  });
+
+  it('E2E: order accounts by total computed field', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        account(orderBy: [{ total: DESC }]) {
+          id
+          total
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const accounts = (body.data as { account: AnyRow[] }).account;
+    expect(accounts.length).toBeGreaterThan(0);
+    // Verify descending order
+    for (let i = 1; i < accounts.length; i++) {
+      expect(Number(accounts[i].total)).toBeLessThanOrEqual(Number(accounts[i - 1].total));
+    }
+  });
+});
+
+// ─── Computed Fields in Aggregations ────────────────────────────────────────
+
+describe('Computed Fields — Aggregations', () => {
+  it('SumFields type includes numeric computed fields', () => {
+    const typeMap = schema.getTypeMap();
+    const sumFields = typeMap['AccountSumFields'] as GraphQLObjectType | undefined;
+    expect(sumFields).toBeDefined();
+    const fields = sumFields!.getFields();
+    // total is a numeric computed field on account
+    expect(fields['total']).toBeDefined();
+  });
+
+  it('AvgFields type includes numeric computed fields', () => {
+    const typeMap = schema.getTypeMap();
+    const avgFields = typeMap['AccountAvgFields'] as GraphQLObjectType | undefined;
+    expect(avgFields).toBeDefined();
+    const fields = avgFields!.getFields();
+    expect(fields['total']).toBeDefined();
+  });
+
+  it('MinFields type includes orderable computed fields', () => {
+    const typeMap = schema.getTypeMap();
+    const minFields = typeMap['AccountMinFields'] as GraphQLObjectType | undefined;
+    expect(minFields).toBeDefined();
+    const fields = minFields!.getFields();
+    expect(fields['total']).toBeDefined();
+  });
+
+  it('MaxFields type includes orderable computed fields', () => {
+    const typeMap = schema.getTypeMap();
+    const maxFields = typeMap['AccountMaxFields'] as GraphQLObjectType | undefined;
+    expect(maxFields).toBeDefined();
+    const fields = maxFields!.getFields();
+    expect(fields['total']).toBeDefined();
+  });
+
+  it('ClientSumFields includes numeric totalBalance computed field', () => {
+    const typeMap = schema.getTypeMap();
+    const sumFields = typeMap['ClientSumFields'] as GraphQLObjectType | undefined;
+    expect(sumFields).toBeDefined();
+    const fields = sumFields!.getFields();
+    expect(fields['totalBalance']).toBeDefined();
+  });
+
+  it('GroupByKeys includes computed fields', () => {
+    const typeMap = schema.getTypeMap();
+    const groupByKeys = typeMap['AccountGroupByKeys'] as GraphQLObjectType | undefined;
+    expect(groupByKeys).toBeDefined();
+    const fields = groupByKeys!.getFields();
+    expect(fields['total']).toBeDefined();
   });
 });

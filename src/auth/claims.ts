@@ -165,7 +165,7 @@ export function extractSessionVariables(
     role,
     userId,
     allowedRoles,
-    isAdmin: false,
+    isAdmin: config.jwt?.adminRoleIsAdmin === true && role === 'admin',
     claims,
   };
 }

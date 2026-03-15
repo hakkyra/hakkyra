@@ -299,6 +299,7 @@ export const AuthConfigSchema = z.object({
       audience: z.string().optional(),
       issuer: z.string().optional(),
       requireExp: z.boolean().default(true),
+      adminRoleIsAdmin: z.boolean().default(false),
     })
     .optional(),
   adminSecretEnv: z.string().optional(),
@@ -477,7 +478,8 @@ export const HakkyraConfigSchema = z.object({
     logLevel: z.string().default('info'),
     stringifyNumericTypes: z.boolean().default(false),
     bodyLimit: z.number().default(1048576),
-  }).default({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false, bodyLimit: 1048576 }),
+    schemaName: z.string().default('hakkyra'),
+  }).default({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false, bodyLimit: 1048576, schemaName: 'hakkyra' }),
   auth: AuthConfigSchema,
   databases: DatabasesConfigSchema,
   tables: z.array(z.any()), // TableInfo contains introspection data — not validated

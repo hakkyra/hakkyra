@@ -92,6 +92,7 @@ function createPool(urlEnv: string, poolConfig?: PoolConfig): PoolInstance {
 export function createConnectionManager(
   config: DatabasesConfig,
   logger?: pino.Logger,
+  schemaName: string = 'hakkyra',
 ): ConnectionManager {
   const log = logger ?? defaultLogger;
 
@@ -174,9 +175,9 @@ export function createConnectionManager(
         const sessionJson = JSON.stringify(session.claims);
         await client.query(`SELECT set_config('hasura.user', $1, true)`, [sessionJson]);
         if (session.userId) {
-          await client.query(`SELECT set_config('hakkyra.user_id', $1, true)`, [session.userId]);
+          await client.query(`SELECT set_config('${schemaName}.user_id', $1, true)`, [session.userId]);
         }
-        await client.query(`SELECT set_config('hakkyra.role', $1, true)`, [session.role]);
+        await client.query(`SELECT set_config('${schemaName}.role', $1, true)`, [session.role]);
 
         const result = stmtManager
           ? await client.query(stmtManager.prepare(sql, params))

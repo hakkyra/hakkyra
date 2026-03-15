@@ -2,7 +2,7 @@
  * Event trigger installation.
  *
  * Installs PostgreSQL trigger functions on tracked tables that write
- * to the hakkyra.event_log table when data changes, implementing
+ * to the event_log table when data changes, implementing
  * the outbox pattern for reliable event delivery.
  */
 
@@ -33,10 +33,11 @@ export interface GeneratedEventTrigger {
 export function generateEventTriggerSQL(
   table: TableInfo,
   triggers: EventTriggerConfig[],
+  schemaName: string = 'hakkyra',
 ): GeneratedEventTrigger {
-  const funcSchema = 'hakkyra';
+  const funcSchema = schemaName;
   const funcName = `event_trigger_${table.schema}_${table.name}`;
-  const triggerName = `hakkyra_event_${table.schema}_${table.name}`;
+  const triggerName = `${schemaName}_event_${table.schema}_${table.name}`;
   const tableRef = `${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
 
   const insertTriggers = triggers.filter((t) => t.definition.insert);
@@ -52,7 +53,7 @@ export function generateEventTriggerSQL(
   if (insertTriggers.length > 0) {
     blocks.push(`  IF TG_OP = 'INSERT' THEN`);
     for (const trigger of insertTriggers) {
-      blocks.push(`    INSERT INTO hakkyra.event_log(trigger_name, table_schema, table_name, operation, new_data, session_vars)
+      blocks.push(`    INSERT INTO ${quoteIdentifier(schemaName)}.event_log(trigger_name, table_schema, table_name, operation, new_data, session_vars)
     VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'INSERT', to_jsonb(NEW), _session_vars);`);
     }
     blocks.push(`  END IF;`);
@@ -69,11 +70,11 @@ export function generateEventTriggerSQL(
           (col) => `OLD.${quoteIdentifier(col)} IS DISTINCT FROM NEW.${quoteIdentifier(col)}`,
         );
         blocks.push(`    IF ${conditions.join(' OR ')} THEN`);
-        blocks.push(`      INSERT INTO hakkyra.event_log(trigger_name, table_schema, table_name, operation, old_data, new_data, session_vars)
+        blocks.push(`      INSERT INTO ${quoteIdentifier(schemaName)}.event_log(trigger_name, table_schema, table_name, operation, old_data, new_data, session_vars)
       VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'UPDATE', to_jsonb(OLD), to_jsonb(NEW), _session_vars);`);
         blocks.push(`    END IF;`);
       } else {
-        blocks.push(`    INSERT INTO hakkyra.event_log(trigger_name, table_schema, table_name, operation, old_data, new_data, session_vars)
+        blocks.push(`    INSERT INTO ${quoteIdentifier(schemaName)}.event_log(trigger_name, table_schema, table_name, operation, old_data, new_data, session_vars)
     VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'UPDATE', to_jsonb(OLD), to_jsonb(NEW), _session_vars);`);
       }
     }
@@ -84,14 +85,15 @@ export function generateEventTriggerSQL(
   if (deleteTriggers.length > 0) {
     blocks.push(`  IF TG_OP = 'DELETE' THEN`);
     for (const trigger of deleteTriggers) {
-      blocks.push(`    INSERT INTO hakkyra.event_log(trigger_name, table_schema, table_name, operation, old_data, session_vars)
+      blocks.push(`    INSERT INTO ${quoteIdentifier(schemaName)}.event_log(trigger_name, table_schema, table_name, operation, old_data, session_vars)
     VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'DELETE', to_jsonb(OLD), _session_vars);`);
     }
     blocks.push(`  END IF;`);
   }
 
   // Notification for delivery worker
-  blocks.push(`  PERFORM pg_notify('hakkyra_events', json_build_object(
+  const channelName = `${schemaName}_events`;
+  blocks.push(`  PERFORM pg_notify('${channelName}', json_build_object(
     'table', TG_TABLE_NAME,
     'schema', TG_TABLE_SCHEMA,
     'op', TG_OP
@@ -110,7 +112,7 @@ ${blocks.slice(1).join('\n')}
   RETURN COALESCE(NEW, OLD);`.trim();
 
   const createFunctionSQL = `
-CREATE OR REPLACE FUNCTION ${funcSchema}.${funcName}() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION ${quoteIdentifier(funcSchema)}.${funcName}() RETURNS trigger AS $$
 DECLARE
   _session_vars JSONB;
 BEGIN
@@ -123,7 +125,7 @@ $$ LANGUAGE plpgsql;`;
 CREATE TRIGGER ${triggerName}
   AFTER ${events} ON ${tableRef}
   FOR EACH ROW
-  EXECUTE FUNCTION ${funcSchema}.${funcName}();`;
+  EXECUTE FUNCTION ${quoteIdentifier(funcSchema)}.${funcName}();`;
 
   return {
     triggerName,
@@ -142,8 +144,9 @@ CREATE TRIGGER ${triggerName}
 function generateTriggerFunctionSQL(
   table: TableInfo,
   triggers: EventTriggerConfig[],
+  schemaName: string = 'hakkyra',
 ): string {
-  const gen = generateEventTriggerSQL(table, triggers);
+  const gen = generateEventTriggerSQL(table, triggers, schemaName);
   const tableRef = `${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
   return `${gen.createFunctionSQL}
 DROP TRIGGER IF EXISTS ${gen.triggerName} ON ${tableRef};
@@ -165,11 +168,12 @@ function quoteLiteral(value: string): string {
 export async function installEventTriggers(
   pool: Pool,
   tables: TableInfo[],
+  schemaName: string = 'hakkyra',
 ): Promise<void> {
   for (const table of tables) {
     if (table.eventTriggers.length === 0) continue;
 
-    const sql = generateTriggerFunctionSQL(table, table.eventTriggers);
+    const sql = generateTriggerFunctionSQL(table, table.eventTriggers, schemaName);
     await pool.query(sql);
   }
 }
@@ -181,13 +185,14 @@ export async function installEventTriggers(
 export async function removeEventTriggers(
   pool: Pool,
   tables: TableInfo[],
+  schemaName: string = 'hakkyra',
 ): Promise<void> {
   for (const table of tables) {
     if (table.eventTriggers.length === 0) continue;
 
-    const triggerName = `hakkyra_event_${table.schema}_${table.name}`;
+    const triggerName = `${schemaName}_event_${table.schema}_${table.name}`;
     const tableRef = `${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
     await pool.query(`DROP TRIGGER IF EXISTS ${triggerName} ON ${tableRef}`);
-    await pool.query(`DROP FUNCTION IF EXISTS hakkyra.event_trigger_${table.schema}_${table.name}()`);
+    await pool.query(`DROP FUNCTION IF EXISTS ${quoteIdentifier(schemaName)}.event_trigger_${table.schema}_${table.name}()`);
   }
 }

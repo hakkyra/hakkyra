@@ -5,7 +5,7 @@
  * permission filters) into parameterized SQL WHERE clause fragments.
  */
 
-import type { BoolExp, ColumnInfo, ColumnOperators, ExistsExp, SessionVariables } from '../types.js';
+import type { BoolExp, ColumnInfo, ColumnOperators, ComputedFieldConfig, ExistsExp, SessionVariables } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 
 /**
@@ -249,6 +249,7 @@ function compileBoolExp(
   tableAlias: string,
   session?: SessionVariables,
   columnLookup?: Map<string, ColumnInfo>,
+  computedFields?: ComputedFieldConfig[],
 ): string {
   if (!exp || typeof exp !== 'object') return '';
 
@@ -260,7 +261,7 @@ function compileBoolExp(
   if ('_and' in exp) {
     const andExp = exp as { _and: BoolExp[] };
     const parts = andExp._and
-      .map((sub) => compileBoolExp(sub, params, tableAlias, session, columnLookup))
+      .map((sub) => compileBoolExp(sub, params, tableAlias, session, columnLookup, computedFields))
       .filter(Boolean);
     if (parts.length === 0) return '';
     if (parts.length === 1) return parts[0];
@@ -270,7 +271,7 @@ function compileBoolExp(
   if ('_or' in exp) {
     const orExp = exp as { _or: BoolExp[] };
     const parts = orExp._or
-      .map((sub) => compileBoolExp(sub, params, tableAlias, session, columnLookup))
+      .map((sub) => compileBoolExp(sub, params, tableAlias, session, columnLookup, computedFields))
       .filter(Boolean);
     if (parts.length === 0) return '';
     if (parts.length === 1) return parts[0];
@@ -279,7 +280,7 @@ function compileBoolExp(
 
   if ('_not' in exp) {
     const notExp = exp as { _not: BoolExp };
-    const inner = compileBoolExp(notExp._not, params, tableAlias, session, columnLookup);
+    const inner = compileBoolExp(notExp._not, params, tableAlias, session, columnLookup, computedFields);
     if (!inner) return '';
     return `NOT (${inner})`;
   }
@@ -357,11 +358,25 @@ function compileBoolExp(
 
   // ── Column-level expressions (implicit AND across all keys) ──
 
+  // Build a lookup map for computed fields by snake_case name
+  const cfLookup = computedFields
+    ? new Map(computedFields.map((cf) => [cf.name, cf]))
+    : undefined;
+
   const clauses: string[] = [];
 
   for (const key of keys) {
     const value = (exp as Record<string, unknown>)[key];
-    const columnRef = `${quoteIdentifier(tableAlias)}.${quoteIdentifier(key)}`;
+
+    // Check if this key is a computed field — if so, use function call as LHS
+    const cfConfig = cfLookup?.get(key);
+    let columnRef: string;
+    if (cfConfig) {
+      const fnSchema = cfConfig.function.schema ?? 'public';
+      columnRef = `${quoteIdentifier(fnSchema)}.${quoteIdentifier(cfConfig.function.name)}(${quoteIdentifier(tableAlias)})`;
+    } else {
+      columnRef = `${quoteIdentifier(tableAlias)}.${quoteIdentifier(key)}`;
+    }
 
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       // Check if the value has any known column operator keys
@@ -386,7 +401,7 @@ function compileBoolExp(
         // It's a nested BoolExp for relationship traversal — not handled
         // at this level (relationship traversal needs schema context).
         // For now, treat as nested column filters.
-        const nested = compileBoolExp(value as BoolExp, params, tableAlias, session, columnLookup);
+        const nested = compileBoolExp(value as BoolExp, params, tableAlias, session, columnLookup, computedFields);
         if (nested) clauses.push(nested);
       }
     }
@@ -407,6 +422,9 @@ function compileBoolExp(
  * @param tableAlias    - The table alias to prefix column references with.
  * @param session       - Session variables for resolving x-hasura-* references.
  * @param columnLookup  - Optional map of column name → ColumnInfo for array detection.
+ * @param computedFields - Optional array of computed field configs for this table.
+ *   When a BoolExp key matches a computed field name, the compiler emits a
+ *   function call (e.g. `"public"."fn"("t0")`) instead of a column reference.
  * @returns The compiled SQL string, or empty string for empty/null filters.
  */
 export function compileWhere(
@@ -415,10 +433,11 @@ export function compileWhere(
   tableAlias: string,
   session?: SessionVariables,
   columnLookup?: Map<string, ColumnInfo>,
+  computedFields?: ComputedFieldConfig[],
 ): string {
   if (!boolExp) return '';
   // Reset alias counters for each top-level compilation
   existsAliasCounter = 0;
   aggAliasCounter = 0;
-  return compileBoolExp(boolExp, params, tableAlias, session, columnLookup);
+  return compileBoolExp(boolExp, params, tableAlias, session, columnLookup, computedFields);
 }

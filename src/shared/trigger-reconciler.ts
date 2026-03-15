@@ -1,7 +1,7 @@
 /**
  * Trigger reconciler — diff-based startup instead of DROP+CREATE all.
  *
- * Queries existing hakkyra triggers from pg_trigger/pg_proc, diffs them
+ * Queries existing triggers from pg_trigger/pg_proc, diffs them
  * against the desired triggers from YAML config, and only creates new,
  * drops orphaned, or replaces changed triggers.
  */
@@ -12,8 +12,8 @@ import type { TableInfo } from '../types.js';
 import { quoteIdentifier } from '../sql/utils.js';
 import { generateEventTriggerSQL } from '../events/triggers.js';
 import {
-  SUBSCRIPTION_FUNCTION_BODY,
-  SUBSCRIPTION_FUNCTION_SQL,
+  subscriptionFunctionBody,
+  subscriptionFunctionSQL,
   generateSubscriptionTriggerSQL,
 } from '../subscriptions/triggers.js';
 
@@ -51,6 +51,8 @@ export interface ReconcileResult {
 export interface ReconcileOptions {
   /** Filter discovery to triggers matching this prefix (e.g. 'hakkyra_event_'). */
   triggerPrefix?: string;
+  /** Internal schema name for CREATE SCHEMA IF NOT EXISTS (default: 'hakkyra'). */
+  schemaName?: string;
 }
 
 // ─── Catalog discovery ──────────────────────────────────────────────────────
@@ -118,7 +120,8 @@ export async function reconcileTriggers(
   logger: Logger,
   options?: ReconcileOptions,
 ): Promise<ReconcileResult> {
-  const prefix = options?.triggerPrefix ?? 'hakkyra_';
+  const schemaName = options?.schemaName ?? 'hakkyra';
+  const prefix = options?.triggerPrefix ?? `${schemaName}_`;
   const existing = await fetchExistingTriggers(pool, prefix);
 
   const existingMap = new Map<string, ExistingTrigger>();
@@ -134,8 +137,8 @@ export async function reconcileTriggers(
     unchanged: [],
   };
 
-  // Ensure hakkyra schema exists
-  await pool.query('CREATE SCHEMA IF NOT EXISTS hakkyra');
+  // Ensure internal schema exists
+  await pool.query(`CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`);
 
   // Process desired triggers
   for (const [name, d] of desiredMap) {
@@ -205,22 +208,23 @@ export async function reconcileTriggers(
  */
 export function buildDesiredSubscriptionTriggers(
   tables: TableInfo[],
+  schemaName: string = 'hakkyra',
 ): DesiredTrigger[] {
   const desired: DesiredTrigger[] = [];
 
   for (const table of tables) {
     if (table.isView) continue;
-    const gen = generateSubscriptionTriggerSQL(table);
+    const gen = generateSubscriptionTriggerSQL(table, schemaName);
 
     desired.push({
       triggerName: gen.triggerName,
       tableSchema: table.schema,
       tableName: table.name,
-      functionSchema: 'hakkyra',
+      functionSchema: schemaName,
       functionName: 'notify_change',
       events: gen.events,
-      functionBody: SUBSCRIPTION_FUNCTION_BODY,
-      createFunctionSQL: SUBSCRIPTION_FUNCTION_SQL,
+      functionBody: subscriptionFunctionBody(schemaName),
+      createFunctionSQL: subscriptionFunctionSQL(schemaName),
       createTriggerSQL: gen.createTriggerSQL,
     });
   }
@@ -233,6 +237,7 @@ export function buildDesiredSubscriptionTriggers(
  */
 export function buildDesiredEventTriggers(
   tables: TableInfo[],
+  schemaName: string = 'hakkyra',
 ): DesiredTrigger[] {
   const desired: DesiredTrigger[] = [];
 
@@ -240,7 +245,7 @@ export function buildDesiredEventTriggers(
     if (table.isView) continue;
     if (table.eventTriggers.length === 0) continue;
 
-    const gen = generateEventTriggerSQL(table, table.eventTriggers);
+    const gen = generateEventTriggerSQL(table, table.eventTriggers, schemaName);
 
     desired.push({
       triggerName: gen.triggerName,

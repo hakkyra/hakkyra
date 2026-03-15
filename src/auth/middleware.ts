@@ -181,7 +181,7 @@ export function createAuthHook(config: AuthConfig): any {
             );
             return;
           }
-          session = { ...session, role: requestedRole };
+          session = { ...session, role: requestedRole, isAdmin: config.jwt?.adminRoleIsAdmin === true && requestedRole === 'admin' };
         }
 
         request.session = session;

@@ -41,6 +41,11 @@ export interface OrderByItem {
     function: 'count' | 'avg' | 'max' | 'min' | 'sum' | 'stddev' | 'stddev_pop' | 'stddev_samp' | 'var_pop' | 'var_samp' | 'variance';
     column?: string; // undefined for count
   };
+  /** For computed field ordering: emit function call instead of column ref */
+  computedField?: {
+    functionName: string;
+    schema: string;
+  };
 }
 
 export interface ComputedFieldSelection {
@@ -95,6 +100,13 @@ export interface RelationshipSelection {
   };
 }
 
+export interface AggregateComputedFieldRef {
+  /** snake_case computed field name (used as JSON key in output) */
+  name: string;
+  functionName: string;
+  schema: string;
+}
+
 export interface AggregateSelection {
   count?: { columns?: string[]; distinct?: boolean };
   sum?: string[];
@@ -107,6 +119,19 @@ export interface AggregateSelection {
   variance?: string[];
   varPop?: string[];
   varSamp?: string[];
+  /** Computed fields to include in aggregate functions (sum, avg, etc.) */
+  computedFields?: {
+    sum?: AggregateComputedFieldRef[];
+    avg?: AggregateComputedFieldRef[];
+    min?: AggregateComputedFieldRef[];
+    max?: AggregateComputedFieldRef[];
+    stddev?: AggregateComputedFieldRef[];
+    stddevPop?: AggregateComputedFieldRef[];
+    stddevSamp?: AggregateComputedFieldRef[];
+    variance?: AggregateComputedFieldRef[];
+    varPop?: AggregateComputedFieldRef[];
+    varSamp?: AggregateComputedFieldRef[];
+  };
 }
 
 export interface SelectOptions {
@@ -314,9 +339,15 @@ function compileOrderByFull(
   const hasAggregate = orderBy.some((item) => item.aggregate);
 
   if (!hasRelationship && !hasAggregate) {
-    // Simple case: just column ordering, no JOINs needed
+    // Simple case: just column ordering (and possibly computed fields), no JOINs needed
     const parts = orderBy.map((item) => {
-      let clause = `${quoteIdentifier(alias)}.${quoteIdentifier(item.column)} ${item.direction.toUpperCase()}`;
+      let ref: string;
+      if (item.computedField) {
+        ref = `${quoteIdentifier(item.computedField.schema)}.${quoteIdentifier(item.computedField.functionName)}(${quoteIdentifier(alias)})`;
+      } else {
+        ref = `${quoteIdentifier(alias)}.${quoteIdentifier(item.column)}`;
+      }
+      let clause = `${ref} ${item.direction.toUpperCase()}`;
       if (item.nulls) {
         clause += ` NULLS ${item.nulls.toUpperCase()}`;
       }
@@ -356,8 +387,14 @@ function compileOrderByFull(
       return clause;
     }
 
-    // Regular column ordering
-    let clause = `${quoteIdentifier(alias)}.${quoteIdentifier(item.column)} ${item.direction.toUpperCase()}`;
+    // Regular column or computed field ordering
+    let ref: string;
+    if (item.computedField) {
+      ref = `${quoteIdentifier(item.computedField.schema)}.${quoteIdentifier(item.computedField.functionName)}(${quoteIdentifier(alias)})`;
+    } else {
+      ref = `${quoteIdentifier(alias)}.${quoteIdentifier(item.column)}`;
+    }
+    let clause = `${ref} ${item.direction.toUpperCase()}`;
     if (item.nulls) {
       clause += ` NULLS ${item.nulls.toUpperCase()}`;
     }
@@ -373,7 +410,13 @@ function compileOrderBy(orderBy: OrderByItem[], alias: string): string {
   if (orderBy.length === 0) return '';
 
   const parts = orderBy.map((item) => {
-    let clause = `${quoteIdentifier(alias)}.${quoteIdentifier(item.column)} ${item.direction.toUpperCase()}`;
+    let ref: string;
+    if (item.computedField) {
+      ref = `${quoteIdentifier(item.computedField.schema)}.${quoteIdentifier(item.computedField.functionName)}(${quoteIdentifier(alias)})`;
+    } else {
+      ref = `${quoteIdentifier(alias)}.${quoteIdentifier(item.column)}`;
+    }
+    let clause = `${ref} ${item.direction.toUpperCase()}`;
     if (item.nulls) {
       clause += ` NULLS ${item.nulls.toUpperCase()}`;
     }
@@ -810,7 +853,7 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
 
   // User-provided filter
   const columnLookup = new Map(opts.table.columns.map(c => [c.name, c]));
-  const userWhere = compileWhere(opts.where, params, alias, opts.session, columnLookup);
+  const userWhere = compileWhere(opts.where, params, alias, opts.session, columnLookup, opts.table.computedFields);
   if (userWhere) whereParts.push(userWhere);
 
   // Permission filter
@@ -958,7 +1001,7 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
   const whereParts: string[] = [];
 
   const aggColumnLookup = new Map(opts.table.columns.map(c => [c.name, c]));
-  const userWhere = compileWhere(opts.where, params, alias, opts.session, aggColumnLookup);
+  const userWhere = compileWhere(opts.where, params, alias, opts.session, aggColumnLookup, opts.table.computedFields);
   if (userWhere) whereParts.push(userWhere);
 
   if (opts.permission?.filter) {
@@ -995,11 +1038,21 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
 
   for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
     const fieldCols = agg[fn];
+    const cfRefs = agg.computedFields?.[fn];
+    const allParts: string[] = [];
     if (fieldCols && fieldCols.length > 0) {
-      const fnFields = fieldCols.map(
-        (c) => `'${c}', ${fn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`,
-      ).join(', ');
-      aggFields.push(`'${fn}', json_build_object(${fnFields})`);
+      for (const c of fieldCols) {
+        allParts.push(`'${c}', ${fn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`);
+      }
+    }
+    if (cfRefs && cfRefs.length > 0) {
+      for (const cf of cfRefs) {
+        const funcCall = `${quoteIdentifier(cf.schema)}.${quoteIdentifier(cf.functionName)}(${quoteIdentifier(alias)})`;
+        allParts.push(`'${cf.name}', ${fn}(${funcCall})`);
+      }
+    }
+    if (allParts.length > 0) {
+      aggFields.push(`'${fn}', json_build_object(${allParts.join(', ')})`);
     }
   }
 
@@ -1015,11 +1068,22 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
 
   for (const { key, sqlFn } of STAT_AGG_MAP) {
     const fieldCols = agg[key] as string[] | undefined;
+    const cfKey = key as keyof NonNullable<AggregateSelection['computedFields']>;
+    const cfRefs = agg.computedFields?.[cfKey];
+    const allParts: string[] = [];
     if (fieldCols && fieldCols.length > 0) {
-      const fnFields = fieldCols.map(
-        (c) => `'${c}', ${sqlFn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`,
-      ).join(', ');
-      aggFields.push(`'${key}', json_build_object(${fnFields})`);
+      for (const c of fieldCols) {
+        allParts.push(`'${c}', ${sqlFn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`);
+      }
+    }
+    if (cfRefs && cfRefs.length > 0) {
+      for (const cf of cfRefs) {
+        const funcCall = `${quoteIdentifier(cf.schema)}.${quoteIdentifier(cf.functionName)}(${quoteIdentifier(alias)})`;
+        allParts.push(`'${cf.name}', ${sqlFn}(${funcCall})`);
+      }
+    }
+    if (allParts.length > 0) {
+      aggFields.push(`'${key}', json_build_object(${allParts.join(', ')})`);
     }
   }
 

@@ -977,6 +977,26 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
         redis: {},
       });
     });
+
+    it('accepts server config with schema_name', () => {
+      expectValid(RawServerConfigSchema, {
+        server: { port: 8080, schema_name: 'custom_schema' },
+      });
+    });
+
+    it('accepts server config without schema_name (optional)', () => {
+      const result = expectValid(RawServerConfigSchema, {
+        server: { port: 8080 },
+      });
+      expect(result.server.schema_name).toBeUndefined();
+    });
+
+    it('rejects non-string schema_name', () => {
+      const err = expectInvalid(RawServerConfigSchema, {
+        server: { schema_name: 123 },
+      });
+      expect(err.issues.length).toBeGreaterThan(0);
+    });
   });
 });
 
@@ -1825,7 +1845,7 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
     it('defaults server when missing', () => {
       const { server, ...rest } = minimalConfig;
       const result = expectValid(HakkyraConfigSchema, rest);
-      expect(result.server).toEqual({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false, bodyLimit: 1048576 });
+      expect(result.server).toEqual({ port: 3000, host: '0.0.0.0', logLevel: 'info', stringifyNumericTypes: false, bodyLimit: 1048576, schemaName: 'hakkyra' });
     });
 
     it('rejects missing databases', () => {
@@ -1874,6 +1894,19 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
         queryDepth: 10,
         maxLimit: 100,
       });
+    });
+
+    it('defaults server.schemaName to hakkyra when not specified', () => {
+      const result = expectValid(HakkyraConfigSchema, minimalConfig);
+      expect(result.server.schemaName).toBe('hakkyra');
+    });
+
+    it('accepts custom schemaName in server config', () => {
+      const result = expectValid(HakkyraConfigSchema, {
+        ...minimalConfig,
+        server: { ...minimalConfig.server, schemaName: 'my_internal' },
+      });
+      expect(result.server.schemaName).toBe('my_internal');
     });
 
     it('allows overriding configurable section defaults', () => {

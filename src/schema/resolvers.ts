@@ -24,7 +24,7 @@ import type { QueryCache } from '../sql/cache.js';
 import type { SubscriptionManager } from '../subscriptions/manager.js';
 import type { JobQueue } from '../shared/job-queue/types.js';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../sql/select.js';
-import type { OrderByItem, AggregateSelection, ComputedFieldSelection, SetReturningComputedFieldSelection } from '../sql/select.js';
+import type { OrderByItem, AggregateSelection, AggregateComputedFieldRef, ComputedFieldSelection, SetReturningComputedFieldSelection } from '../sql/select.js';
 import { compileInsertOne, compileInsert } from '../sql/insert.js';
 import { compileUpdateByPk, compileUpdate, compileUpdateMany } from '../sql/update.js';
 import { compileDeleteByPk, compileDelete } from '../sql/delete.js';
@@ -138,6 +138,20 @@ function camelToColumnMap(table: TableInfo): Map<string, string> {
   const map = new Map<string, string>();
   for (const col of table.columns) {
     map.set(toCamelCase(col.name), col.name);
+  }
+  return map;
+}
+
+/**
+ * Build a mapping of camelCase field names → snake_case names for columns AND computed fields.
+ * Used by remapBoolExp and remapOrderBy so that computed field names are correctly remapped.
+ */
+function camelToColumnAndCFMap(table: TableInfo): Map<string, string> {
+  const map = camelToColumnMap(table);
+  if (table.computedFields) {
+    for (const cf of table.computedFields) {
+      map.set(toCamelCase(cf.name), cf.name);
+    }
   }
   return map;
 }
@@ -335,9 +349,32 @@ function remapOrderBy(
 
   const result: OrderByItem[] = [];
 
+  // Build a lookup for computed field camelCase name → config
+  const cfLookup = new Map<string, { functionName: string; schema: string }>();
+  if (table?.computedFields) {
+    for (const cf of table.computedFields) {
+      cfLookup.set(toCamelCase(cf.name), {
+        functionName: cf.function.name,
+        schema: cf.function.schema ?? 'public',
+      });
+    }
+  }
+
   for (const item of orderBy) {
     for (const [camelKey, value] of Object.entries(item)) {
       if (typeof value === 'string') {
+        // Check if this is a computed field ordering
+        const cfInfo = cfLookup.get(camelKey);
+        if (cfInfo) {
+          const { direction, nulls } = parseDirection(value);
+          result.push({
+            column: '',
+            direction,
+            nulls,
+            computedField: cfInfo,
+          });
+          continue;
+        }
         // Simple column ordering
         const pgName = columnMap.get(camelKey) ?? camelKey;
         const { direction, nulls } = parseDirection(value);
@@ -669,7 +706,7 @@ function remapRowsToCamel(
 export function makeSelectResolver(
   table: TableInfo,
 ): GraphQLFieldResolver<unknown, ResolverContext> {
-  const columnMap = camelToColumnMap(table);
+  const columnMap = camelToColumnAndCFMap(table);
 
   return async (_parent, args, context, info) => {
     const { auth, queryWithSession, permissionLookup } = context;
@@ -846,7 +883,7 @@ export function makeSelectByPkResolver(
 export function makeSelectAggregateResolver(
   table: TableInfo,
 ): GraphQLFieldResolver<unknown, ResolverContext> {
-  const columnMap = camelToColumnMap(table);
+  const columnMap = camelToColumnAndCFMap(table);
 
   return async (_parent, args, context, info) => {
     const { auth, queryWithSession, permissionLookup } = context;
@@ -896,6 +933,22 @@ export function makeSelectAggregateResolver(
     // Build aggregate selection — request count + sum/avg/min/max for numeric columns
     const aggregate: AggregateSelection = { count: {} };
 
+    // Build computed field refs for aggregation
+    const numericCFRefs: AggregateComputedFieldRef[] = [];
+    if (table.computedFields) {
+      for (const cf of table.computedFields) {
+        const fnSchema = cf.function.schema ?? 'public';
+        const fn = context.functions.find(
+          (f) => f.name === cf.function.name && f.schema === fnSchema,
+        );
+        if (!fn || fn.isSetReturning) continue;
+        const NUMERIC_PG_RETURN = new Set(['int2', 'int4', 'int8', 'float4', 'float8', 'numeric', 'serial', 'serial4', 'serial8', 'bigserial', 'oid']);
+        if (NUMERIC_PG_RETURN.has(fn.returnType)) {
+          numericCFRefs.push({ name: cf.name, functionName: cf.function.name, schema: fnSchema });
+        }
+      }
+    }
+
     // When groupBy is present, also request sum/avg/stddev/variance for numeric columns
     if (groupBy) {
       const numericCols = table.columns
@@ -912,6 +965,21 @@ export function makeSelectAggregateResolver(
         aggregate.variance = numericCols;
         aggregate.varPop = numericCols;
         aggregate.varSamp = numericCols;
+      }
+      // Add numeric computed fields to group-by aggregates
+      if (numericCFRefs.length > 0) {
+        aggregate.computedFields = {
+          sum: numericCFRefs,
+          avg: numericCFRefs,
+          min: numericCFRefs,
+          max: numericCFRefs,
+          stddev: numericCFRefs,
+          stddevPop: numericCFRefs,
+          stddevSamp: numericCFRefs,
+          variance: numericCFRefs,
+          varPop: numericCFRefs,
+          varSamp: numericCFRefs,
+        };
       }
     }
 
