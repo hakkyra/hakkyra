@@ -400,7 +400,7 @@ export const RawCronTriggerSchema = z
   })
   .strict();
 
-// ─── Hakkyra extension: api_config.yaml ─────────────────────────────────────
+// ─── REST Override (used by hakkyra.yaml rest.overrides) ─────────────────────
 
 export const RawRESTOverrideSchema = z
   .object({
@@ -409,10 +409,6 @@ export const RawRESTOverrideSchema = z
     operation: z.string(),
     default_order: z.string().optional(),
   })
-  .strict();
-
-export const RawApiConfigSchema = z
-  .object({})
   .strict();
 
 // ─── Query Collections ──────────────────────────────────────────────────

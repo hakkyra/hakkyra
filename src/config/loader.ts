@@ -37,7 +37,6 @@ import type {
   RawHeader,
   RawAction,
   RawCronTrigger,
-  RawApiConfig,
   RawServerConfig,
   RawDatabaseEntry,
   RawTrackedFunction,
@@ -54,7 +53,6 @@ import {
   RawActionSchema,
   RawActionsYamlSchema,
   RawCronTriggerSchema,
-  RawApiConfigSchema,
   RawServerConfigSchema,
   RawIntrospectionConfigSchema,
   RawQueryCollectionSchema,
@@ -307,7 +305,6 @@ export async function loadConfig(
   const actions = await loadActions(absMetadataDir);
   const actionsGraphql = await loadActionsGraphql(absMetadataDir);
   const cronTriggers = await loadCronTriggers(absMetadataDir);
-  const apiConfig = await loadApiConfig(absMetadataDir);
   const serverConfig = await loadServerConfig(serverConfigPath);
   const inheritedRoles = await loadInheritedRoles(absMetadataDir);
   const introspectionConfig = await loadIntrospectionConfig(absMetadataDir);
@@ -1137,21 +1134,6 @@ function transformCronTrigger(raw: RawCronTrigger): CronTriggerConfig {
   };
 }
 
-// ─── Hakkyra extension: api_config.yaml ─────────────────────────────────────
-
-async function loadApiConfig(metadataDir: string): Promise<RawApiConfig | null> {
-  const apiConfigPath = path.join(metadataDir, 'api_config.yaml');
-  let raw = await readYamlIfExists(apiConfigPath);
-  if (!raw) {
-    const parentPath = path.join(path.dirname(metadataDir), 'api_config.yaml');
-    raw = await readYamlIfExists(parentPath);
-  }
-  if (!raw || typeof raw !== 'object') return null;
-
-  // .strict() on RawApiConfigSchema now rejects unknown fields automatically
-  const config = RawApiConfigSchema.parse(raw);
-  return config;
-}
 
 function transformRESTConfig(serverConfig: RawServerConfig | null): RESTConfig {
   const rest = serverConfig?.rest;

@@ -15,7 +15,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { GraphQLSchema, GraphQLObjectType, GraphQLList, GraphQLNonNull } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
-import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
@@ -56,7 +55,6 @@ function findFunction(name: string, fnSchema = 'public'): FunctionInfo {
 beforeAll(async () => {
   process.env['DATABASE_URL'] = TEST_DB_URL;
   process.env['HAKKYRA_ADMIN_SECRET'] = ADMIN_SECRET;
-  resetCustomOutputTypeCache();
   configureStringifyNumericTypes(false);
   await waitForDb();
 
@@ -109,7 +107,6 @@ beforeAll(async () => {
   const result = mergeSchemaModel(introspection, config);
   schemaModel = result.model;
   resetComparisonTypeCache();
-  resetCustomOutputTypeCache();
   schema = generateSchema(schemaModel);
 }, 30_000);
 
@@ -456,8 +453,7 @@ describe('Regression: 81da417 — stringify_numeric_types schema type names', ()
     configureStringifyNumericTypes(true);
     try {
       resetComparisonTypeCache();
-      resetCustomOutputTypeCache();
-      const stringifySchema = generateSchema(schemaModel);
+          const stringifySchema = generateSchema(schemaModel);
       const typeMap = stringifySchema.getTypeMap();
 
       // Bigint should still exist as a type (not replaced by String)
@@ -476,8 +472,7 @@ describe('Regression: 81da417 — stringify_numeric_types schema type names', ()
     } finally {
       configureStringifyNumericTypes(false);
       resetComparisonTypeCache();
-      resetCustomOutputTypeCache();
-    }
+        }
   });
 
   it('GraphQL type names are Bigint/Numeric when stringify_numeric_types is disabled', () => {
