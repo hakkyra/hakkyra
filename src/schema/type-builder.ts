@@ -4,7 +4,7 @@
  * Handles:
  * - Column → field mapping with correct GraphQL types
  * - Object relationships (→ nullable related type)
- * - Array relationships (→ [RelatedType!] with where/orderBy/limit args)
+ * - Array relationships (→ nullable [RelatedType!] with where/orderBy/limit args)
  * - Circular reference resolution via TypeRegistry thunks
  * - PascalCase type names, camelCase field names
  */
@@ -302,9 +302,7 @@ export function buildObjectType(
           args['offset'] = { type: GraphQLInt };
 
           fields[getRelFieldName(rel)] = {
-            type: new GraphQLNonNull(
-              new GraphQLList(new GraphQLNonNull(relatedType)),
-            ),
+            type: new GraphQLList(new GraphQLNonNull(relatedType)),
             args,
             description: `Array relationship to ${rel.remoteTable.name}`,
             extensions: {
