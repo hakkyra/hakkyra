@@ -60,6 +60,9 @@ export function migrateEventLogSQL(schemaName: string): string {
 DO $$ BEGIN
   ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS delivered BOOLEAN DEFAULT false;
   ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS response_status INTEGER;
+  ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
+  ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS last_error TEXT;
+  ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS next_retry TIMESTAMPTZ DEFAULT now();
 END $$
 `;
 }
