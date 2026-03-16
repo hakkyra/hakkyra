@@ -29,6 +29,20 @@ import {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/** JSONB mutation operator values, keyed by PG column name */
+export interface JsonbOperators {
+  /** _append: column = column || $N::jsonb */
+  _append?: Record<string, unknown>;
+  /** _prepend: column = $N::jsonb || column */
+  _prepend?: Record<string, unknown>;
+  /** _deleteAtPath: column = column #- $N::text[] */
+  _deleteAtPath?: Record<string, string[]>;
+  /** _deleteElem: column = column - $N (integer index) */
+  _deleteElem?: Record<string, number>;
+  /** _deleteKey: column = column - $N (text key) */
+  _deleteKey?: Record<string, string>;
+}
+
 export interface UpdateByPkOptions {
   table: TableInfo;
   /** Primary key values: { pk_column: value } */
@@ -37,6 +51,8 @@ export interface UpdateByPkOptions {
   _set: Record<string, unknown>;
   /** Numeric column increments: { column: incrementValue } */
   _inc?: Record<string, unknown>;
+  /** JSONB mutation operators */
+  jsonbOps?: JsonbOperators;
   /** Columns to return in the response */
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
@@ -62,6 +78,8 @@ export interface UpdateOptions {
   _set: Record<string, unknown>;
   /** Numeric column increments: { column: incrementValue } */
   _inc?: Record<string, unknown>;
+  /** JSONB mutation operators */
+  jsonbOps?: JsonbOperators;
   /** Columns to return in the response */
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
@@ -92,7 +110,7 @@ function resolvePreset(value: string, session: SessionVariables): unknown {
 
 /**
  * Build the SET clause: validate columns, apply presets, parameterize values.
- * Supports both _set (direct assignment) and _inc (increment) operations.
+ * Handles _set, _inc (increment), and JSONB mutation operators (_append, _prepend, _deleteAtPath, _deleteElem, _deleteKey).
  */
 function buildSetClause(
   _set: Record<string, unknown>,
@@ -101,22 +119,27 @@ function buildSetClause(
   permission: UpdateByPkOptions['permission'],
   session: SessionVariables,
   _inc?: Record<string, unknown>,
+  jsonbOps?: JsonbOperators,
 ): string {
   const tableColumnNames = new Set(table.columns.map((c) => c.name));
+  const jsonbColumnNames = new Set(
+    table.columns.filter((c) => c.udtName === 'jsonb' && !c.isArray).map((c) => c.name),
+  );
   const allowedColumns = permission?.columns;
   const assignments: string[] = [];
-  // Track columns already assigned by _set so _inc doesn't overwrite
+
+  // Track which columns already have an assignment to avoid duplicates
   const assignedColumns = new Set<string>();
 
   const presets = permission?.presets;
 
-  // User-provided SET values
-  for (const [col, val] of Object.entries(_set)) {
-    if (!tableColumnNames.has(col)) continue;
-    // Reject user input for preset columns — presets are authoritative
+  /**
+   * Validate a column is allowed for update (permission + preset checks).
+   */
+  function validateColumn(col: string, opName: string): void {
     if (presets && col in presets) {
       throw new Error(
-        `Column "${col}" has a preset and cannot be provided for update on table "${table.schema}"."${table.name}"`,
+        `Column "${col}" has a preset and cannot be provided for ${opName} on table "${table.schema}"."${table.name}"`,
       );
     }
     if (allowedColumns && allowedColumns !== '*' && !allowedColumns.includes(col)) {
@@ -124,6 +147,13 @@ function buildSetClause(
         `Column "${col}" is not allowed for update on table "${table.schema}"."${table.name}"`,
       );
     }
+  }
+
+  // User-provided SET values
+  for (const [col, val] of Object.entries(_set)) {
+    if (!tableColumnNames.has(col)) continue;
+    // Reject user input for preset columns — presets are authoritative
+    validateColumn(col, 'update');
     assignments.push(`${quoteIdentifier(col)} = ${params.add(val)}`);
     assignedColumns.add(col);
   }
@@ -133,18 +163,69 @@ function buildSetClause(
     for (const [col, val] of Object.entries(_inc)) {
       if (!tableColumnNames.has(col)) continue;
       if (assignedColumns.has(col)) continue; // _set takes precedence
-      if (presets && col in presets) {
-        throw new Error(
-          `Column "${col}" has a preset and cannot be provided for update on table "${table.schema}"."${table.name}"`,
-        );
-      }
-      if (allowedColumns && allowedColumns !== '*' && !allowedColumns.includes(col)) {
-        throw new Error(
-          `Column "${col}" is not allowed for update on table "${table.schema}"."${table.name}"`,
-        );
-      }
+      validateColumn(col, '_inc');
       assignments.push(`${quoteIdentifier(col)} = ${quoteIdentifier(col)} + ${params.add(val)}`);
       assignedColumns.add(col);
+    }
+  }
+
+  // JSONB mutation operators
+  if (jsonbOps) {
+    // _append: column = column || $N::jsonb
+    if (jsonbOps._append) {
+      for (const [col, val] of Object.entries(jsonbOps._append)) {
+        if (!tableColumnNames.has(col) || !jsonbColumnNames.has(col)) continue;
+        if (assignedColumns.has(col)) continue; // _set takes precedence
+        validateColumn(col, '_append');
+        assignments.push(`${quoteIdentifier(col)} = ${quoteIdentifier(col)} || ${params.add(JSON.stringify(val))}::jsonb`);
+        assignedColumns.add(col);
+      }
+    }
+
+    // _prepend: column = $N::jsonb || column
+    if (jsonbOps._prepend) {
+      for (const [col, val] of Object.entries(jsonbOps._prepend)) {
+        if (!tableColumnNames.has(col) || !jsonbColumnNames.has(col)) continue;
+        if (assignedColumns.has(col)) continue;
+        validateColumn(col, '_prepend');
+        assignments.push(`${quoteIdentifier(col)} = ${params.add(JSON.stringify(val))}::jsonb || ${quoteIdentifier(col)}`);
+        assignedColumns.add(col);
+      }
+    }
+
+    // _deleteAtPath: column = column #- $N::text[]
+    if (jsonbOps._deleteAtPath) {
+      for (const [col, val] of Object.entries(jsonbOps._deleteAtPath)) {
+        if (!tableColumnNames.has(col) || !jsonbColumnNames.has(col)) continue;
+        if (assignedColumns.has(col)) continue;
+        validateColumn(col, '_deleteAtPath');
+        assignments.push(`${quoteIdentifier(col)} = ${quoteIdentifier(col)} #- ${params.add(val)}::text[]`);
+        assignedColumns.add(col);
+      }
+    }
+
+    // _deleteElem: column = column - $N::int (integer index)
+    // Explicit ::int cast is required because node-postgres sends params as text,
+    // and PostgreSQL needs to distinguish jsonb - int (by index) from jsonb - text (by key).
+    if (jsonbOps._deleteElem) {
+      for (const [col, val] of Object.entries(jsonbOps._deleteElem)) {
+        if (!tableColumnNames.has(col) || !jsonbColumnNames.has(col)) continue;
+        if (assignedColumns.has(col)) continue;
+        validateColumn(col, '_deleteElem');
+        assignments.push(`${quoteIdentifier(col)} = ${quoteIdentifier(col)} - ${params.add(val)}::int`);
+        assignedColumns.add(col);
+      }
+    }
+
+    // _deleteKey: column = column - $N (text key)
+    if (jsonbOps._deleteKey) {
+      for (const [col, val] of Object.entries(jsonbOps._deleteKey)) {
+        if (!tableColumnNames.has(col) || !jsonbColumnNames.has(col)) continue;
+        if (assignedColumns.has(col)) continue;
+        validateColumn(col, '_deleteKey');
+        assignments.push(`${quoteIdentifier(col)} = ${quoteIdentifier(col)} - ${params.add(val)}`);
+        assignedColumns.add(col);
+      }
     }
   }
 
@@ -221,6 +302,7 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
     opts.permission,
     opts.session,
     opts._inc,
+    opts.jsonbOps,
   );
 
   // Build WHERE for PK
@@ -329,6 +411,7 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
     opts.permission,
     opts.session,
     opts._inc,
+    opts.jsonbOps,
   );
 
   // Build WHERE clause
@@ -427,6 +510,7 @@ export interface UpdateManyEntry {
   where: BoolExp;
   _set: Record<string, unknown>;
   _inc?: Record<string, unknown>;
+  jsonbOps?: JsonbOperators;
 }
 
 export interface UpdateManyOptions {
@@ -471,6 +555,7 @@ export function compileUpdateMany(opts: UpdateManyOptions): CompiledQuery[] {
       where: entry.where,
       _set: entry._set,
       _inc: entry._inc,
+      jsonbOps: entry.jsonbOps,
       returningColumns: opts.returningColumns,
       returningRelationships: opts.returningRelationships,
       returningComputedFields: opts.returningComputedFields,

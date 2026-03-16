@@ -40,7 +40,7 @@ import {
 import type { TypeRegistry } from './type-builder.js';
 import { buildFilterTypes } from './filters.js';
 import { buildMutationInputTypes, buildAllAggregateOrderByTypes, OrderByDirection, CursorOrdering, buildStreamCursorTypes } from './inputs.js';
-import type { MutationInputTypes, StreamCursorTypes } from './inputs.js';
+import type { MutationInputTypes, StreamCursorTypes, RelInsertInputTypes } from './inputs.js';
 import {
   makeSelectResolver,
   makeSelectByPkResolver,
@@ -221,13 +221,14 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
   const mutationInputsByTable = new Map<string, MutationInputTypes>();
   const insertInputTypes = new Map<string, import('graphql').GraphQLInputObjectType>();
+  const relInsertInputTypes: RelInsertInputTypes = new Map();
 
   for (const table of tables) {
     const key = tableKey(table.schema, table.name);
     const objectType = typeRegistry.get(key)!;
     const filterType = filterTypes.get(key);
     const mutInputs = buildMutationInputTypes(
-      table, objectType, enumTypes, enumNames, filterType, orderByTypes, tables, functions, insertInputTypes,
+      table, objectType, enumTypes, enumNames, filterType, orderByTypes, tables, functions, insertInputTypes, relInsertInputTypes,
     );
     mutationInputsByTable.set(key, mutInputs);
     // Register orderBy types for use in array relationship args
@@ -444,6 +445,12 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       if (mutInputs.incInput) {
         updateArgs['_inc'] = { type: mutInputs.incInput };
       }
+      // JSONB mutation operators
+      if (mutInputs.appendInput) updateArgs['_append'] = { type: mutInputs.appendInput };
+      if (mutInputs.prependInput) updateArgs['_prepend'] = { type: mutInputs.prependInput };
+      if (mutInputs.deleteAtPathInput) updateArgs['_deleteAtPath'] = { type: mutInputs.deleteAtPathInput };
+      if (mutInputs.deleteElemInput) updateArgs['_deleteElem'] = { type: mutInputs.deleteElemInput };
+      if (mutInputs.deleteKeyInput) updateArgs['_deleteKey'] = { type: mutInputs.deleteKeyInput };
 
       mutationFields[names.update] = {
         type: mutInputs.mutationResponse,
@@ -462,6 +469,13 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       if (mutInputs.incInput) {
         updateByPkArgs['_inc'] = { type: mutInputs.incInput };
       }
+      // JSONB mutation operators
+      if (mutInputs.appendInput) updateByPkArgs['_append'] = { type: mutInputs.appendInput };
+      if (mutInputs.prependInput) updateByPkArgs['_prepend'] = { type: mutInputs.prependInput };
+      if (mutInputs.deleteAtPathInput) updateByPkArgs['_deleteAtPath'] = { type: mutInputs.deleteAtPathInput };
+      if (mutInputs.deleteElemInput) updateByPkArgs['_deleteElem'] = { type: mutInputs.deleteElemInput };
+      if (mutInputs.deleteKeyInput) updateByPkArgs['_deleteKey'] = { type: mutInputs.deleteKeyInput };
+
       mutationFields[names.updateByPk] = {
         type: objectType,
         args: updateByPkArgs,

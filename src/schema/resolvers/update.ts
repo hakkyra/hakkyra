@@ -8,6 +8,7 @@ import type {
   BoolExp,
 } from '../../types.js';
 import { compileUpdateByPk, compileUpdate, compileUpdateMany } from '../../sql/update.js';
+import type { JsonbOperators } from '../../sql/update.js';
 import { parseResolveInfo, parseReturningInfo } from '../resolve-info.js';
 import {
   type ResolverContext,
@@ -20,6 +21,44 @@ import {
   remapRowToCamel,
   remapRowsToCamel,
 } from './helpers.js';
+
+// ─── JSONB Operator Extraction ───────────────────────────────────────────────
+
+/**
+ * Extract JSONB mutation operator args from the GraphQL args and remap
+ * camelCase field names to PG column names. Returns undefined if no
+ * JSONB operators are present.
+ */
+function extractJsonbOps(
+  args: Record<string, unknown>,
+  columnMap: Map<string, string>,
+): JsonbOperators | undefined {
+  const ops: JsonbOperators = {};
+  let hasAny = false;
+
+  if (args._append) {
+    ops._append = remapKeys(args._append as Record<string, unknown>, columnMap);
+    if (ops._append && Object.keys(ops._append).length > 0) hasAny = true;
+  }
+  if (args._prepend) {
+    ops._prepend = remapKeys(args._prepend as Record<string, unknown>, columnMap);
+    if (ops._prepend && Object.keys(ops._prepend).length > 0) hasAny = true;
+  }
+  if (args._deleteAtPath) {
+    ops._deleteAtPath = remapKeys(args._deleteAtPath as Record<string, unknown>, columnMap) as Record<string, string[]> | undefined;
+    if (ops._deleteAtPath && Object.keys(ops._deleteAtPath).length > 0) hasAny = true;
+  }
+  if (args._deleteElem) {
+    ops._deleteElem = remapKeys(args._deleteElem as Record<string, unknown>, columnMap) as Record<string, number> | undefined;
+    if (ops._deleteElem && Object.keys(ops._deleteElem).length > 0) hasAny = true;
+  }
+  if (args._deleteKey) {
+    ops._deleteKey = remapKeys(args._deleteKey as Record<string, unknown>, columnMap) as Record<string, string> | undefined;
+    if (ops._deleteKey && Object.keys(ops._deleteKey).length > 0) hasAny = true;
+  }
+
+  return hasAny ? ops : undefined;
+}
 
 // ─── Update Resolver ────────────────────────────────────────────────────────
 
@@ -44,7 +83,10 @@ export function makeUpdateResolver(
 
     const setValues = remapKeys(args._set as Record<string, unknown> | undefined, columnMap);
     const incValues = remapKeys(args._inc as Record<string, unknown> | undefined, columnMap);
-    if ((!setValues || Object.keys(setValues).length === 0) && (!incValues || Object.keys(incValues).length === 0)) {
+    const jsonbOps = extractJsonbOps(args, columnMap);
+
+    // If no _set values, no _inc values, and no JSONB operators, nothing to update
+    if ((!setValues || Object.keys(setValues).length === 0) && (!incValues || Object.keys(incValues).length === 0) && !jsonbOps) {
       return { affectedRows: 0, returning: [] };
     }
 
@@ -72,6 +114,7 @@ export function makeUpdateResolver(
       where,
       _set: setValues ?? {},
       _inc: incValues,
+      jsonbOps,
       returningColumns,
       returningRelationships,
       returningComputedFields: returningComputedFields.length > 0 ? returningComputedFields : undefined,
@@ -140,8 +183,10 @@ export function makeUpdateByPkResolver(
     const pkValues = remapKeys(args.pkColumns as Record<string, unknown>, columnMap) ?? {};
     const setValues = remapKeys(args._set as Record<string, unknown> | undefined, columnMap);
     const incValues = remapKeys(args._inc as Record<string, unknown> | undefined, columnMap);
+    const jsonbOps = extractJsonbOps(args, columnMap);
 
-    if ((!setValues || Object.keys(setValues).length === 0) && (!incValues || Object.keys(incValues).length === 0)) {
+    // If no _set values, no _inc values, and no JSONB operators, nothing to update
+    if ((!setValues || Object.keys(setValues).length === 0) && (!incValues || Object.keys(incValues).length === 0) && !jsonbOps) {
       return null;
     }
 
@@ -168,6 +213,7 @@ export function makeUpdateByPkResolver(
       pkValues,
       _set: setValues ?? {},
       _inc: incValues,
+      jsonbOps,
       returningColumns,
       returningRelationships,
       returningComputedFields: returningComputedFields.length > 0 ? returningComputedFields : undefined,

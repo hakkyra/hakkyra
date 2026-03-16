@@ -22,7 +22,7 @@ export type {
 export { compileInsertOne, compileInsert } from './insert.js';
 export type { InsertOneOptions, InsertOptions, OnConflictClause } from './insert.js';
 export { compileUpdateByPk, compileUpdate } from './update.js';
-export type { UpdateByPkOptions, UpdateOptions } from './update.js';
+export type { UpdateByPkOptions, UpdateOptions, JsonbOperators } from './update.js';
 export { compileDeleteByPk, compileDelete } from './delete.js';
 export type { DeleteByPkOptions, DeleteOptions } from './delete.js';
 export { createQueryCache, buildCacheKey, hashQuery } from './cache.js';

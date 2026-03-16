@@ -293,14 +293,16 @@ describe('GraphQL Schema Generation', () => {
       expect(fields['language'].type).not.toBeInstanceOf(GraphQLNonNull);
     });
 
-    it('should have non-null object relationship for composite FK with all NOT NULL columns (P9.7c)', () => {
+    it('should have nullable object relationship for manual_configuration even with NOT NULL FK columns (P12.9)', () => {
       const typeMap = schema.getTypeMap();
       const fiscalReportType = typeMap['FiscalReport'] as GraphQLObjectType | undefined;
       expect(fiscalReportType).toBeDefined();
       const fields = fiscalReportType!.getFields();
-      // fiscal_year and fiscal_quarter are both NOT NULL → fiscalPeriod should be non-null
+      // fiscal_year and fiscal_quarter are both NOT NULL and have a real FK,
+      // but the relationship is defined via manual_configuration in metadata.
+      // Hasura treats manual_configuration relationships as always nullable.
       expect(fields['fiscalPeriod']).toBeDefined();
-      expect(fields['fiscalPeriod'].type).toBeInstanceOf(GraphQLNonNull);
+      expect(fields['fiscalPeriod'].type).not.toBeInstanceOf(GraphQLNonNull);
     });
 
     it('should have nullable object relationship for manual config without FK localColumns (P9.7c)', () => {
@@ -311,6 +313,35 @@ describe('GraphQL Schema Generation', () => {
       // No FK constraint from client → account, so it should remain nullable
       expect(fields['primaryAccount']).toBeDefined();
       expect(fields['primaryAccount'].type).not.toBeInstanceOf(GraphQLNonNull);
+    });
+
+    it('should have nullable reverse-FK object relationship (P12.9)', () => {
+      const typeMap = schema.getTypeMap();
+      const playerType = typeMap['Player'] as GraphQLObjectType;
+      expect(playerType).toBeDefined();
+      const fields = playerType.getFields();
+      expect(fields['lock']).toBeDefined();
+      expect(fields['lock'].type).not.toBeInstanceOf(GraphQLNonNull);
+    });
+
+    it('should have non-null forward-FK object relationship even when sibling reverse-FK exists (P12.9)', () => {
+      const typeMap = schema.getTypeMap();
+      const playerLockType = typeMap['PlayerLock'] as GraphQLObjectType;
+      expect(playerLockType).toBeDefined();
+      const fields = playerLockType.getFields();
+      expect(fields['player']).toBeDefined();
+      expect(fields['player'].type).toBeInstanceOf(GraphQLNonNull);
+    });
+
+    it('should have nullable manual_configuration on views (P12.9)', () => {
+      const typeMap = schema.getTypeMap();
+      const clientSummaryType = typeMap['ClientSummary'] as GraphQLObjectType;
+      expect(clientSummaryType).toBeDefined();
+      const fields = clientSummaryType.getFields();
+      expect(fields['client']).toBeDefined();
+      expect(fields['client'].type).not.toBeInstanceOf(GraphQLNonNull);
+      expect(fields['branch']).toBeDefined();
+      expect(fields['branch'].type).not.toBeInstanceOf(GraphQLNonNull);
     });
   });
 
@@ -1013,6 +1044,35 @@ describe('GraphQL Schema Generation', () => {
       expect(table!.primaryKeyConstraintName).toBeDefined();
       expect(typeof table!.primaryKeyConstraintName).toBe('string');
       expect(table!.primaryKeyConstraintName!.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Unique index constraint names in Constraint enums (P12.17)', () => {
+    it('should not duplicate unique constraints that already have backing indexes', () => {
+      const typeMap = schema.getTypeMap();
+      const constraintEnum = typeMap['AccountConstraint'] as GraphQLEnumType | undefined;
+      expect(constraintEnum).toBeDefined();
+      const values = constraintEnum!.getValues();
+      const nameSet = new Set(values.map((v) => v.value));
+      expect(nameSet.size).toBe(values.length);
+    });
+
+    it('should not include non-unique indexes in Constraint enum', () => {
+      const typeMap = schema.getTypeMap();
+      const constraintEnum = typeMap['ClientConstraint'] as GraphQLEnumType | undefined;
+      expect(constraintEnum).toBeDefined();
+      const values = constraintEnum!.getValues();
+      expect(values.every((v) => v.value !== 'idx_client_branch')).toBe(true);
+      expect(values.every((v) => v.value !== 'idx_client_status')).toBe(true);
+      expect(values.every((v) => v.value !== 'idx_client_email')).toBe(true);
+    });
+
+    it('should introspect unique index on materialized view (idx_client_summary_id)', () => {
+      const table = schemaModel.tables.find((t) => t.name === 'client_summary');
+      expect(table).toBeDefined();
+      const uniqueIdx = table!.indexes.find((idx) => idx.name === 'idx_client_summary_id');
+      expect(uniqueIdx).toBeDefined();
+      expect(uniqueIdx!.isUnique).toBe(true);
     });
   });
 

@@ -1604,15 +1604,17 @@ Fourth-round comparison using full introspection queries against both services o
 
 **Note**: Hakkyra does NOT scope GraphQL introspection by role — always returns full schema. SDL/OpenAPI/LLM-doc endpoints now respect `x-hasura-role` header with admin key (fixed this session). Hasura scopes all endpoints by role.
 
-### P12.1 — Missing Mutation Input Infrastructure: ObjRelInsertInput / ArrRelInsertInput (Critical)
+### P12.1 — Missing Mutation Input Infrastructure: ObjRelInsertInput / ArrRelInsertInput (Critical) ✅
 
 Hasura wraps nested relationship inserts in `*ObjRelInsertInput` (64 types) and `*ArrRelInsertInput` (48 types) wrapper types containing `data` + `onConflict` fields. Hakkyra uses direct type references (e.g., `PlayerInsertInput` instead of `PlayerObjRelInsertInput`).
 
 This causes 112 types to be missing and ~200 input field type mismatches (every InsertInput field referencing a relationship uses the wrong type).
 
-- [ ] Generate `*ObjRelInsertInput` types for each object relationship on insert-enabled tables (fields: `data: *InsertInput!`, `onConflict: *OnConflict`)
-- [ ] Generate `*ArrRelInsertInput` types for each array relationship on insert-enabled tables (fields: `data: [*InsertInput!]!`, `onConflict: *OnConflict`)
-- [ ] Update InsertInput relationship fields to reference wrapper types instead of direct types
+- [x] Generate `*ObjRelInsertInput` types for each object relationship on insert-enabled tables (fields: `data: *InsertInput!`, `onConflict: *OnConflict`)
+- [x] Generate `*ArrRelInsertInput` types for each array relationship on insert-enabled tables (fields: `data: [*InsertInput!]!`, `onConflict: *OnConflict`)
+- [x] Update InsertInput relationship fields to reference wrapper types instead of direct types
+- [x] Updated insert resolver to unwrap `data` from wrapper types
+- [x] 17 tests
 
 ### P12.2 — Missing Mutation Input Infrastructure: IncInput (Critical) ✅
 
@@ -1630,18 +1632,20 @@ Hasura generates 127 `*Updates` types — batch update input types with `_set`, 
 - [ ] Generate `*Updates` types for each table with update permissions
 - [ ] Wire into `update_*_many` mutations
 
-### P12.4 — Missing JSONB Mutation Operators (High)
+### P12.4 — Missing JSONB Mutation Operators (High) ✅
 
 Hasura generates 135 JSONB mutation input types for tables with jsonb columns: `*AppendInput` (27), `*PrependInput` (27), `*DeleteAtPathInput` (27), `*DeleteElemInput` (27), `*DeleteKeyInput` (27). Hakkyra has 0.
 
 These allow jsonb-specific update operations (append to array, prepend, delete at path, delete element by index, delete key).
 
-- [ ] Generate `*AppendInput` types (fields: each jsonb column → `Jsonb`)
-- [ ] Generate `*PrependInput` types (same structure)
-- [ ] Generate `*DeleteAtPathInput` types (fields: each jsonb column → `[String!]`)
-- [ ] Generate `*DeleteElemInput` types (fields: each jsonb column → `Int`)
-- [ ] Generate `*DeleteKeyInput` types (fields: each jsonb column → `String`)
-- [ ] Wire into update mutations (`_append`, `_prepend`, `_deleteAtPath`, `_deleteElem`, `_deleteKey` args)
+- [x] Generate `*AppendInput` types (fields: each jsonb column → `Jsonb`)
+- [x] Generate `*PrependInput` types (same structure)
+- [x] Generate `*DeleteAtPathInput` types (fields: each jsonb column → `[String!]`)
+- [x] Generate `*DeleteElemInput` types (fields: each jsonb column → `Int`)
+- [x] Generate `*DeleteKeyInput` types (fields: each jsonb column → `String`)
+- [x] Wire into update mutations (`_append`, `_prepend`, `_deleteAtPath`, `_deleteElem`, `_deleteKey` args)
+- [x] SQL: `||`, `#-`, `-` operators with correct casts
+- [x] 27 tests
 
 ### P12.5 — Missing AggregateBoolExp Types (High)
 
@@ -1689,14 +1693,15 @@ Affected functions: `fnInsertReward`, `fnPlayerStartCounter`, `fnTriggerCampaign
 - [x] Updated resolver to read args by raw PG name
 - [x] 9 new tests
 
-### P12.9 — Object Relationship Nullability Regression (Medium)
+### P12.9 — Object Relationship Nullability Regression (Medium) ✅
 
 12 object relationship fields are `NON_NULL` in Hakkyra but nullable in Hasura. These appear to be reverse-FK or manual relationships that should be nullable per P11.3 rules, but the fix didn't catch all cases.
 
 Affected: `Balance.player`, `BigWin.currency`, `CurrentCampaignContent.campaignPlayer`, `Game.brands` (array!), `Player.data` (array!), `PlayerBonus.bonus`, `PlayerEvent.player`, `PlayerLimit.currentCounter` (array!), `PlayerReward.player`, `TransactionSummary.currency/game/payment`, `Wallet.balance/paymentMethod`.
 
-- [ ] Audit each field — some are array relationships (`Game.brands`, `Player.data`, `PlayerLimit.currentCounter`) that should have nullable list items? Or non-null lists?
-- [ ] Fix nullability to match Hasura exactly
+- [x] Root cause: `manual_configuration` relationships inherited `localColumns` from auto-detected FK rels during merge, then `isForwardFK` check incorrectly matched
+- [x] Fix: `manual_configuration` relationships (with `columnMapping`) are always nullable, bypassing `isForwardFK` check
+- [x] 13 unit tests + 5 integration tests
 
 ### P12.10 — Aggregate Stat Return Type: `Numeric` Source Columns Return `Float` (Medium) ✅
 
@@ -1742,14 +1747,15 @@ Hakkyra includes boolean columns in `*MaxOrderBy` / `*MinOrderBy` types (e.g., `
 - [x] Exclude boolean columns from `*MaxOrderBy` / `*MinOrderBy` input types
 - [x] 3 tests
 
-### P12.14 — `distinctOn` Arg Missing on Computed Field Array Relationships (Low)
+### P12.14 — `distinctOn` Arg Missing on Computed Field Array Relationships (Low) ✅
 
 3 computed field array relationships are missing the `distinctOn` argument:
 - `Game.brands(distinctOn: [BrandSelectColumn!])`
 - `Player.data(distinctOn: [JsonResultSelectColumn!])`
 - `PlayerLimit.currentCounter(distinctOn: [PlayerLimitCounterSelectColumn!])`
 
-- [ ] Add `distinctOn` arg to computed field array relationship fields
+- [x] Add `distinctOn` arg to computed field array relationship fields (both SETOF and non-SETOF paths)
+- [x] 3 tests
 
 ### P12.15 — Scalar Casing Mismatches: `Json`/`json`, `numeric`/`Numeric`, `jsonb`/`Jsonb` (Low)
 
@@ -1772,12 +1778,13 @@ These are needed for ordering parent rows by aggregate values of array relations
 - [ ] Generate `*AggregateOrderBy` types for array relationships that currently lack them
 - [ ] Investigate why Brand and PlayerLimitCounter are missing (possibly related to P11.13 DB mismatch)
 
-### P12.17 — Missing Constraint Enum Values (Low)
+### P12.17 — Missing Constraint Enum Values (Low) ✅
 
 Many `*Constraint` enums are missing unique index entries that Hasura includes. Examples: `BonusConstraint.bonusNameIdx`, `CampaignConstraint.campaignCheckingGroupIdx`, `GameConstraint.externalIdKey`, etc. (~30 missing values across ~20 enums).
 
-- [ ] Introspect unique indexes from PostgreSQL and include in Constraint enums
-- [ ] Verify these are real DB indexes vs Hasura metadata artifacts
+- [x] Include unique indexes (not backed by unique constraints) in Constraint enums
+- [x] Dedup against existing PK and unique constraint entries
+- [x] 6 unit tests + 3 integration tests
 
 ### P12.18 — Update Mutation `_set` Nullability (Medium) ✅
 
@@ -1789,14 +1796,15 @@ This means in Hasura you can call `updateFooByPk(pkColumns: ..., _inc: ...)` wit
 - [x] Make `_set` nullable on `updateByPk`, `update`, and `updateMany` mutations
 - [x] 1 test
 
-### P12.19 — Tracked Function Mutations Missing Query Args (Medium)
+### P12.19 — Tracked Function Mutations Missing Query Args (Medium) ✅
 
 Hasura tracked function mutations that return SETOF include query-style args: `distinctOn`, `limit`, `offset`, `orderBy`, `where`. Hakkyra only has `args`.
 
 Affected mutations: `acceptContract`, `contentEvent`, `rejectContract`, `backofficeSetContract`, `createPayment`.
 Affected queries: `getMarketingContracts`, `getPlayerMonthlySummary`, `getTournamentLeaderboard`, `getTournamentLeaderboardCount`.
 
-- [ ] Add `distinctOn`, `limit`, `offset`, `orderBy`, `where` args to tracked function fields returning SETOF (both queries and mutations)
+- [x] Verified: code already correctly adds query-style args to SETOF mutation fields
+- [x] Added 7 tests (4 schema + 3 E2E) confirming args present on mutation-exposed SETOF functions
 
 ### P12.19b — Tracked Function `args` Nullability Depends on Required Args (Medium) ✅
 

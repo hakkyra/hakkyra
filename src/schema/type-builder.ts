@@ -249,21 +249,34 @@ export function buildObjectType(
           // Object relationship — non-null ONLY when:
           // 1. It's a forward-FK (a real FK constraint on THIS table → remote table)
           // 2. All local FK columns are NOT NULL
+          // 3. It's NOT a manual_configuration relationship (has columnMapping)
           //
           // Reverse-FK relationships (FK on the remote table referencing this
           // table) and manual_configuration relationships are ALWAYS nullable,
           // matching Hasura behavior: the existence of a matching row in the
           // remote table cannot be guaranteed by a constraint on this table.
+          //
+          // manual_configuration relationships always have columnMapping and are
+          // always nullable in Hasura, even if the column mapping happens to
+          // match a real FK constraint. The merger may inherit localColumns from
+          // an auto-detected FK rel with the same name, but columnMapping takes
+          // precedence for nullability determination.
+
+          // manual_configuration relationships have columnMapping — always nullable
+          const isManualConfig = !!rel.columnMapping;
+
           const localCols = rel.localColumns ?? [];
 
           // Determine if a forward-FK constraint exists on the local table
           // that maps localColumns to the remote table.
-          const isForwardFK = localCols.length > 0 && table.foreignKeys.some((fk) =>
-            fk.referencedSchema === rel.remoteTable.schema &&
-            fk.referencedTable === rel.remoteTable.name &&
-            fk.columns.length === localCols.length &&
-            localCols.every((col) => fk.columns.includes(col)),
-          );
+          // Skip this check entirely for manual_configuration relationships.
+          const isForwardFK = !isManualConfig &&
+            localCols.length > 0 && table.foreignKeys.some((fk) =>
+              fk.referencedSchema === rel.remoteTable.schema &&
+              fk.referencedTable === rel.remoteTable.name &&
+              fk.columns.length === localCols.length &&
+              localCols.every((col) => fk.columns.includes(col)),
+            );
 
           const allFkColumnsRequired = isForwardFK && localCols.every((colName) => {
             const col = table.columns.find((c) => c.name === colName);
@@ -423,8 +436,17 @@ export function buildObjectType(
 
             const returnTableType = typeRegistry.get(returnTableKey)!;
 
-            // Build array-like arguments (where, orderBy, limit, offset)
+            // Build array-like arguments (distinctOn, where, orderBy, limit, offset)
             const args: GraphQLFieldConfigArgumentMap = {};
+
+            // distinctOn argument
+            const cfSelectColumnEnum = selectColumnEnums?.get(returnTableKey);
+            if (cfSelectColumnEnum) {
+              args['distinctOn'] = {
+                type: new GraphQLList(new GraphQLNonNull(cfSelectColumnEnum)),
+                description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
+              };
+            }
 
             const relFilterType = filterTypes?.get(returnTableKey);
             if (relFilterType) {
@@ -477,6 +499,15 @@ export function buildObjectType(
               const returnTableType = typeRegistry.get(returnTableKey)!;
 
               const args: GraphQLFieldConfigArgumentMap = {};
+
+              // distinctOn argument
+              const cfSelectColumnEnum2 = selectColumnEnums?.get(returnTableKey);
+              if (cfSelectColumnEnum2) {
+                args['distinctOn'] = {
+                  type: new GraphQLList(new GraphQLNonNull(cfSelectColumnEnum2)),
+                  description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
+                };
+              }
 
               const relFilterType = filterTypes?.get(returnTableKey);
               if (relFilterType) {

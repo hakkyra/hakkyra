@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { GraphQLObjectType, GraphQLInputObjectType, GraphQLSchema } from 'graphql';
+import { GraphQLObjectType, GraphQLInputObjectType, GraphQLSchema, GraphQLList, GraphQLNonNull, GraphQLEnumType } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
@@ -544,6 +544,52 @@ describe('Computed Fields — SETOF (P6.4c)', () => {
     for (const c of clients) {
       expect(Array.isArray(c.activeAccounts)).toBe(true);
     }
+  });
+});
+
+// ─── SETOF Computed Fields — distinctOn Argument (P12.14) ───────────────────
+
+describe('Computed Fields — SETOF distinctOn (P12.14)', () => {
+  it('SETOF computed field has distinctOn argument in schema', () => {
+    const typeMap = schema.getTypeMap();
+    const clientType = typeMap['Client'] as GraphQLObjectType | undefined;
+    expect(clientType).toBeDefined();
+    const activeAccountsField = clientType!.getFields()['activeAccounts'];
+    expect(activeAccountsField).toBeDefined();
+    const argNames = activeAccountsField.args.map((a) => a.name);
+    expect(argNames).toContain('distinctOn');
+  });
+
+  it('distinctOn argument is a list of SelectColumn enum values', () => {
+    const typeMap = schema.getTypeMap();
+    const clientType = typeMap['Client'] as GraphQLObjectType | undefined;
+    expect(clientType).toBeDefined();
+    const activeAccountsField = clientType!.getFields()['activeAccounts'];
+    const distinctOnArg = activeAccountsField.args.find((a) => a.name === 'distinctOn');
+    expect(distinctOnArg).toBeDefined();
+
+    // Should be [AccountSelectColumn!]
+    const argType = distinctOnArg!.type;
+    expect(argType).toBeInstanceOf(GraphQLList);
+    const innerType = (argType as GraphQLList<GraphQLNonNull<GraphQLEnumType>>).ofType;
+    expect(innerType).toBeInstanceOf(GraphQLNonNull);
+    const enumType = (innerType as GraphQLNonNull<GraphQLEnumType>).ofType;
+    expect(enumType).toBeInstanceOf(GraphQLEnumType);
+    expect(enumType.name).toBe('AccountSelectColumn');
+  });
+
+  it('distinctOn appears before where/orderBy in arg order', () => {
+    const typeMap = schema.getTypeMap();
+    const clientType = typeMap['Client'] as GraphQLObjectType | undefined;
+    expect(clientType).toBeDefined();
+    const activeAccountsField = clientType!.getFields()['activeAccounts'];
+    const argNames = activeAccountsField.args.map((a) => a.name);
+    const distinctIdx = argNames.indexOf('distinctOn');
+    const whereIdx = argNames.indexOf('where');
+    const orderByIdx = argNames.indexOf('orderBy');
+    expect(distinctIdx).toBeGreaterThanOrEqual(0);
+    expect(distinctIdx).toBeLessThan(whereIdx);
+    expect(distinctIdx).toBeLessThan(orderByIdx);
   });
 });
 

@@ -467,6 +467,10 @@ CREATE INDEX idx_client_service_client ON client_service(client_id);
 CREATE INDEX idx_client_data_client ON client_data(client_id);
 CREATE INDEX idx_account_client ON account(client_id);
 
+-- Unique indexes (standalone, not backing a constraint) for P12.17 testing
+CREATE UNIQUE INDEX idx_invoice_external ON invoice(provider, external_id) WHERE external_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_client_email_unique ON client(email);
+
 -- ─── Seed data ──────────────────────────────────────────────────────────────
 
 INSERT INTO branch (id, name, code) VALUES

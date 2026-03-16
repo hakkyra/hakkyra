@@ -5,6 +5,9 @@ import { loadConfig } from '../src/config/loader.js';
 import { configureStringifyNumericTypes } from '../src/introspection/type-map.js';
 import type { SchemaModel, TableInfo, FunctionInfo, TrackedFunctionConfig } from '../src/types.js';
 import { resolveTrackedFunctions } from '../src/schema/tracked-functions.js';
+import { generateSchema } from '../src/schema/generator.js';
+import { resetComparisonTypeCache } from '../src/schema/filters.js';
+import type { GraphQLSchema } from 'graphql';
 import {
   getPool, closePool, waitForDb, makeSession,
   startServer, stopServer, getServerAddress, graphqlRequest, tokens, createJWT,
@@ -59,6 +62,14 @@ beforeAll(async () => {
     "CREATE OR REPLACE FUNCTION public.deactivate_client(client_uuid uuid) " +
     "RETURNS client AS $fn$ " +
     "UPDATE client SET status = 'inactive' WHERE id = client_uuid RETURNING * " +
+    "$fn$ LANGUAGE SQL VOLATILE;"
+  );
+
+  // Create a SETOF volatile (mutation-exposed) function for P12.19 tests
+  await pool.query(
+    "CREATE OR REPLACE FUNCTION public.bulk_activate_clients(target_status text) " +
+    "RETURNS SETOF client AS $fn$ " +
+    "UPDATE client SET status = 'active' WHERE status = target_status::client_status RETURNING * " +
     "$fn$ LANGUAGE SQL VOLATILE;"
   );
 
@@ -1683,6 +1694,171 @@ describe('Tracked Function Subscriptions (P9.13)', () => {
       }
     } finally {
       await client.dispose();
+    }
+  });
+});
+// ─── P12.19 — SETOF Mutation Functions: Query-Style Args ────────────────
+
+describe('Tracked Functions — P12.19 SETOF Mutation Query-Style Args (Schema)', () => {
+  let schema: GraphQLSchema;
+
+  beforeAll(() => {
+    resetComparisonTypeCache();
+    schema = generateSchema(schemaModel);
+  });
+
+  it('should have query-style args on SETOF mutation field (bulkActivateClients)', () => {
+    const mutationType = schema.getMutationType();
+    expect(mutationType).toBeDefined();
+
+    const fields = mutationType!.getFields();
+    const bulkField = fields['bulkActivateClients'];
+    expect(bulkField).toBeDefined();
+
+    const argNames = bulkField.args.map((a) => a.name);
+    expect(argNames).toContain('args');
+    expect(argNames).toContain('where');
+    expect(argNames).toContain('orderBy');
+    expect(argNames).toContain('limit');
+    expect(argNames).toContain('offset');
+    expect(argNames).toContain('distinctOn');
+  });
+
+  it('should type query-style args correctly on SETOF mutation', () => {
+    const mutationType = schema.getMutationType();
+    const fields = mutationType!.getFields();
+    const bulkField = fields['bulkActivateClients'];
+    const argMap = new Map(bulkField.args.map((a) => [a.name, a.type.toString()]));
+
+    // limit: Int
+    expect(argMap.get('limit')).toBe('Int');
+
+    // offset: Int
+    expect(argMap.get('offset')).toBe('Int');
+
+    // where: ClientBoolExp
+    expect(argMap.get('where')).toBe('ClientBoolExp');
+
+    // orderBy: [ClientOrderBy!]
+    expect(argMap.get('orderBy')).toBe('[ClientOrderBy!]');
+
+    // distinctOn: [ClientSelectColumn!]
+    expect(argMap.get('distinctOn')).toBe('[ClientSelectColumn!]');
+
+    // args: BulkActivateClientsArgs! (non-null)
+    expect(argMap.get('args')).toBe('BulkActivateClientsArgs!');
+  });
+
+  it('should also have query-style args on SETOF query fields (searchClients)', () => {
+    const queryType = schema.getQueryType();
+    expect(queryType).toBeDefined();
+
+    const fields = queryType!.getFields();
+    const searchField = fields['searchClients'];
+    expect(searchField).toBeDefined();
+
+    const argNames = searchField.args.map((a) => a.name);
+    expect(argNames).toContain('args');
+    expect(argNames).toContain('where');
+    expect(argNames).toContain('orderBy');
+    expect(argNames).toContain('limit');
+    expect(argNames).toContain('offset');
+    expect(argNames).toContain('distinctOn');
+  });
+
+  it('should NOT have query-style args on non-SETOF mutation (deactivateClient)', () => {
+    const mutationType = schema.getMutationType();
+    const fields = mutationType!.getFields();
+    const deactivateField = fields['deactivateClient'];
+    expect(deactivateField).toBeDefined();
+
+    const argNames = deactivateField.args.map((a) => a.name);
+    // Non-SETOF mutation should only have 'args', not query-style args
+    expect(argNames).toContain('args');
+    expect(argNames).not.toContain('where');
+    expect(argNames).not.toContain('orderBy');
+    expect(argNames).not.toContain('limit');
+    expect(argNames).not.toContain('offset');
+    expect(argNames).not.toContain('distinctOn');
+  });
+});
+
+describe('Tracked Functions — P12.19 SETOF Mutation Query-Style Args (E2E)', () => {
+  it('should execute SETOF mutation with where filter', async () => {
+    const { body } = await graphqlRequest(
+      `mutation {
+        bulkActivateClients(
+          args: { target_status: "on_hold" }
+          where: { username: { _eq: "charlie" } }
+        ) {
+          id
+          username
+          status
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const results = body.data.bulkActivateClients;
+    expect(Array.isArray(results)).toBe(true);
+    // The where filters the returned rows, all should match the where condition
+    for (const row of results) {
+      expect(row.username).toBe('charlie');
+    }
+  });
+
+  it('should execute SETOF mutation with limit', async () => {
+    // Reset charlie back to on_hold first
+    const pool = getPool();
+    await pool.query(`UPDATE client SET status = 'on_hold' WHERE username = 'charlie'`);
+
+    const { body } = await graphqlRequest(
+      `mutation {
+        bulkActivateClients(
+          args: { target_status: "on_hold" }
+          limit: 1
+        ) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const results = body.data.bulkActivateClients;
+    expect(Array.isArray(results)).toBe(true);
+    expect(results.length).toBeLessThanOrEqual(1);
+  });
+
+  it('should execute SETOF mutation with orderBy', async () => {
+    // Reset charlie back to on_hold first
+    const pool = getPool();
+    await pool.query(`UPDATE client SET status = 'on_hold' WHERE username = 'charlie'`);
+
+    const { body } = await graphqlRequest(
+      `mutation {
+        bulkActivateClients(
+          args: { target_status: "on_hold" }
+          orderBy: [{ username: ASC }]
+        ) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const results = body.data.bulkActivateClients as Array<{ username: string }>;
+    expect(Array.isArray(results)).toBe(true);
+    // Verify ordering
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i].username.localeCompare(results[i - 1].username)).toBeGreaterThanOrEqual(0);
     }
   });
 });
