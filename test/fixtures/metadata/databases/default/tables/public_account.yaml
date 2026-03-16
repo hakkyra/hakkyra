@@ -42,6 +42,13 @@ array_relationships:
         table:
           schema: public
           name: ledger_entry
+  - name: transactions
+    using:
+      foreign_key_constraint_on:
+        column: account_id
+        table:
+          schema: public
+          name: transaction
 
 select_permissions:
   - role: client

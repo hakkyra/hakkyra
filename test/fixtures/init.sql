@@ -260,6 +260,18 @@ CREATE TABLE fiscal_report (
   FOREIGN KEY (fiscal_year, fiscal_quarter) REFERENCES fiscal_period(year, quarter)
 );
 
+-- ─── Transaction table (P10.12 Timestamp, P10.13 Smallint) ───────────────
+
+CREATE TABLE transaction (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id UUID NOT NULL REFERENCES account(id),
+  sequence SMALLINT NOT NULL DEFAULT 0,
+  amount NUMERIC(20,4) NOT NULL,
+  description TEXT,
+  local_time TIMESTAMP WITHOUT TIME ZONE DEFAULT now()::timestamp,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- ─── Materialized view ─────────────────────────────────────────────────────
 
 CREATE MATERIALIZED VIEW client_summary AS
@@ -509,6 +521,11 @@ INSERT INTO fiscal_period (year, quarter, name) VALUES
 INSERT INTO fiscal_report (id, fiscal_year, fiscal_quarter, title, amount) VALUES
   ('cd000000-0000-0000-0000-000000000001', 2025, 1, 'Revenue Report Q1', 50000.00),
   ('cd000000-0000-0000-0000-000000000002', 2025, 2, 'Revenue Report Q2', 65000.00);
+
+-- Transactions
+INSERT INTO transaction (id, account_id, sequence, amount, description, local_time) VALUES
+  ('dd000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 1, 100.00, 'Deposit', '2025-01-15 10:30:00'),
+  ('dd000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000001', 2, -50.00, 'Withdrawal', '2025-01-16 14:00:00');
 
 -- Refresh materialized view
 REFRESH MATERIALIZED VIEW client_summary;

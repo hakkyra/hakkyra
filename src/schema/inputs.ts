@@ -184,7 +184,7 @@ function resolveOutputScalarType(
 
 // ─── Numeric Check ──────────────────────────────────────────────────────────
 
-const NUMERIC_GRAPHQL_TYPES = new Set(['Int', 'Float', 'Bigint', 'Numeric']);
+const NUMERIC_GRAPHQL_TYPES = new Set(['Int', 'Smallint', 'Float', 'Bigint', 'Numeric']);
 
 function isNumericColumn(column: ColumnInfo, enumNames: Set<string>): boolean {
   const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
@@ -193,9 +193,9 @@ function isNumericColumn(column: ColumnInfo, enumNames: Set<string>): boolean {
 
 /** Orderable types: numeric + string-like + date/time (everything except arrays, json/jsonb, bytea, inet, interval) */
 const ORDERABLE_GRAPHQL_TYPES = new Set([
-  'Int', 'Float', 'Bigint', 'Numeric',
+  'Int', 'Smallint', 'Float', 'Bigint', 'Numeric',
   'String', 'Bpchar',
-  'Timestamptz', 'Date', 'Time',
+  'Timestamptz', 'Timestamp', 'Date', 'Time',
   'Uuid', 'Boolean',
 ]);
 
@@ -619,7 +619,7 @@ export function buildMutationInputTypes(
       if (NUMERIC_GRAPHQL_TYPES.has(mapping.name)) {
         numericComputedFields.push(info);
       }
-      if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
+      if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Timestamp', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
         orderableComputedFields.push(info);
       }
     }
@@ -681,7 +681,7 @@ export function buildMutationInputTypes(
         if (visibleColumns && !visibleColumns.has(column.name)) continue;
         // Min/Max work on any ordered type
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
-        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
+        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Timestamp', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
           const fieldName = getColumnFieldName(table, column.name);
           fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
         }
@@ -707,7 +707,7 @@ export function buildMutationInputTypes(
       for (const column of table.columns) {
         if (visibleColumns && !visibleColumns.has(column.name)) continue;
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
-        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
+        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Timestamp', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
           const fieldName = getColumnFieldName(table, column.name);
           fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
         }
