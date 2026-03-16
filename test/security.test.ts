@@ -665,11 +665,12 @@ describe('Security', () => {
 
   // ── 7. Async Action Status IDOR ──────────────────────────────────────
 
-  describe('async action status IDOR', () => {
-    let aliceActionId: string;
+  describe('async action status authorization', () => {
+    let actionId: string;
 
     beforeAll(async () => {
-      // Insert a fake async action row belonging to Alice
+      // Insert a fake async action row for a real action name (requestVerification)
+      // that has permissions: [client, backoffice]
       const pool = getPool();
       const result = await pool.query<{ id: string }>(
         `INSERT INTO hakkyra.async_action_log
@@ -677,47 +678,62 @@ describe('Security', () => {
          VALUES ($1, $2, $3, $4, 'completed', $5)
          RETURNING id`,
         [
-          'testAction',
-          JSON.stringify({ test: true }),
+          'requestVerification',
+          JSON.stringify({ documentType: 'passport', documentCountry: 'FI' }),
           JSON.stringify({ 'x-hasura-role': 'client', 'x-hasura-user-id': ALICE_ID }),
           ALICE_ID,
-          JSON.stringify({ result: 'secret-data' }),
+          JSON.stringify({ requestId: 'test-123', status: 'ok' }),
         ],
       );
-      aliceActionId = result.rows[0].id;
+      actionId = result.rows[0].id;
     });
 
-    it('user can see their own action', async () => {
+    it('user with permitted role can see action status', async () => {
+      // 'client' is in requestVerification permissions — should succeed
       const token = await tokens.client(ALICE_ID);
-      const { status, body } = await restRequest('GET', `/v1/actions/${aliceActionId}/status`, {
+      const { status, body } = await restRequest('GET', `/v1/actions/${actionId}/status`, {
         headers: { authorization: `Bearer ${token}` },
       });
 
       expect(status).toBe(200);
       const data = body as { id: string; status: string };
-      expect(data.id).toBe(aliceActionId);
+      expect(data.id).toBe(actionId);
       expect(data.status).toBe('completed');
     });
 
-    it('user cannot see another user\'s action', async () => {
+    it('different user with same permitted role can also see action status', async () => {
+      // Async actions are shared — any user with a permitted role can see them
       const token = await tokens.client(BOB_ID);
-      const { status, body } = await restRequest('GET', `/v1/actions/${aliceActionId}/status`, {
+      const { status, body } = await restRequest('GET', `/v1/actions/${actionId}/status`, {
         headers: { authorization: `Bearer ${token}` },
       });
 
-      expect(status).toBe(404);
-      const data = body as { error: string };
-      expect(data.error).toBe('not_found');
+      expect(status).toBe(200);
+      const data = body as { id: string; status: string };
+      expect(data.id).toBe(actionId);
     });
 
-    it('admin can see any user\'s action', async () => {
-      const { status, body } = await restRequest('GET', `/v1/actions/${aliceActionId}/status`, {
+    it('user without permitted role gets 403', async () => {
+      // 'function' role has allowedRoles: ['function'], which is NOT in
+      // requestVerification permissions (only 'client' and 'backoffice')
+      const token = await tokens.function_();
+      const { status, body } = await restRequest('GET', `/v1/actions/${actionId}/status`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(status).toBe(403);
+      const data = body as { error: string };
+      expect(data.error).toBe('forbidden');
+    });
+
+    it('admin can see any action status', async () => {
+      const { status, body } = await restRequest('GET', `/v1/actions/${actionId}/status`, {
         headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
       });
 
       expect(status).toBe(200);
       const data = body as { id: string; status: string };
-      expect(data.id).toBe(aliceActionId);
+      expect(data.id).toBe(actionId);
     });
   });
 
