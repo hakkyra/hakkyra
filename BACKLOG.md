@@ -14,7 +14,7 @@
 - [x] Define TypeScript types for all config structures (Hasura-compatible metadata format + extensions)
 - [x] YAML parser with `!include` tag support
 - [x] Load `version.yaml`, `databases.yaml`, per-table YAML files
-- [x] Load `api_config.yaml` (REST overrides, doc config) — REST/docs config moving to `hakkyra.yaml`
+- [x] ~~Load `api_config.yaml`~~ — removed; REST/docs config now in `hakkyra.yaml`
 - [x] Load `actions.yaml` + `actions.graphql`
 - [x] Load `cron_triggers.yaml`
 - [x] Config validation (version, port, permissions, cron expressions, operators)
@@ -134,7 +134,7 @@
 - [x] Proper HTTP status codes (200, 201, 204, 400, 401, 403, 404)
 - [x] REST filter parsing tests (30 tests)
 - [x] E2E REST tests (list, get, insert, update, delete, permission enforcement)
-- [x] REST endpoint overrides from config (custom paths, default_order per operation) — config moving to `hakkyra.yaml`
+- [x] REST endpoint overrides from config (custom paths, default_order per operation) — now in `hakkyra.yaml`
 
 ### P1.9 — Connection Manager (`src/connections/`)
 - [x] Primary pool creation from config
@@ -403,26 +403,25 @@ Hasura supports `insertion_order` in object relationship `manual_configuration` 
 - [x] Resolver executes nested inserts in correct order within a single transaction
 - [x] E2E tests for before_parent, after_parent, array relationships, combined, and rollback
 
-### Remove `table_aliases` from `api_config.yaml`
+### Remove `table_aliases` from `api_config.yaml` — COMPLETE
 
-Default naming already applies `toPascalCase()` / `toCamelCase()` to table names automatically. `table_aliases` is redundant — Hasura metadata's `custom_name` on tables serves the same purpose.
+Default naming already applies `toPascalCase()` / `toCamelCase()` to table names automatically. `table_aliases` was redundant — Hasura metadata's `custom_name` on tables serves the same purpose.
 
-- [ ] Remove `table_aliases` from raw YAML schema, internal schema, loader, and type definitions
-- [ ] Remove `table_aliases` from test fixture `api_config.yaml`
-- [ ] Implement `custom_name` from Hasura table configuration as the table alias (already parsed, not yet applied)
-- [ ] Remove alias application in `loader.ts` (lines 318-326)
+- [x] Remove `table_aliases` from raw YAML schema, internal schema, loader, and type definitions
+- [x] Remove `table_aliases` from test fixture `api_config.yaml`
+- [x] Implement `custom_name` from Hasura table configuration as the table alias
+- [x] Remove alias application in `loader.ts`
 
-### Remove `custom_queries` mechanism
+### Remove `custom_queries` mechanism — COMPLETE
 
-Raw SQL endpoints don't customize existing metadata-defined APIs. Will be replaced with a better mechanism for overriding/extending existing table operations.
+Raw SQL endpoints replaced by Native Queries (P5.16).
 
-- [ ] Remove `custom_queries` from raw YAML schema, internal schema, loader
-- [ ] Remove `src/schema/custom-queries.ts`
-- [ ] Remove custom query E2E tests
-- [ ] Remove `custom_queries` from test fixture `api_config.yaml`
-- [ ] Remove custom query REST endpoint if any
+- [x] Remove `custom_queries` from raw YAML schema, internal schema, loader
+- [x] Remove `src/schema/custom-queries.ts`
+- [x] Remove custom query E2E tests
+- [x] Remove `custom_queries` from test fixture `api_config.yaml`
 
-### Move REST and docs config from `api_config.yaml` to `hakkyra.yaml`
+### Move REST and docs config from `api_config.yaml` to `hakkyra.yaml` — COMPLETE
 
 REST pagination, base path, auto-generation, and doc generation are server runtime config, not metadata. They belong alongside `server`, `graphql`, and other deployment-level settings in `hakkyra.yaml`.
 
@@ -430,7 +429,8 @@ REST pagination, base path, auto-generation, and doc generation are server runti
 - [x] Add `docs` section to `hakkyra.yaml` raw schema (generate, llm_format, output)
 - [x] Update loader to read rest/docs from server config instead of api_config
 - [x] Update test fixtures (`hakkyra.yaml` and `api_config.yaml`)
-- [x] Backwards compat: loader falls back to `api_config.yaml` if `hakkyra.yaml` doesn't define rest/docs; warns when both are present
+- [x] Remove `api_config.yaml` entirely (was empty after all config moved to `hakkyra.yaml`)
+- [x] Remove dead `loadApiConfig()` code and empty `RawApiConfigSchema` from loader/schemas
 
 ### Configurable Session Variable Namespace
 
@@ -901,13 +901,13 @@ Covers all recent commits (e654f3b through 1518030). All 1194 tests passing.
 
 #### Critical
 
-- [ ] **Async action status IDOR** — `GET /v1/actions/:actionId/status` only checks authentication, not authorization. Any authenticated user can read any other user's async action output by guessing the UUID. Fix: store `user_id` in `async_action_log` and filter by it.
-- [ ] **`backend_only` permission not enforced** — The `backendOnly` flag is parsed from metadata but never checked at runtime. Roles with `backend_only: true` on insert permissions can still insert from any client. Affects: invoice, appointment, account, ledger_entry, service_plan_client, client_service.
+- [x] **Async action status authorization** — `GET /v1/actions/:actionId/status` now checks `checkActionPermission` against the user's `allowedRoles`. Removed incorrect user_id filtering; actions are shared by role. Admin bypasses. 5 new tests in `test/async-actions.test.ts`, updated tests in `test/security.test.ts`.
+- [x] **`backend_only` permission enforced** — `backendOnly` flag checked at runtime in `makeInsertResolver` and `makeInsertOneResolver`; denies non-admin requests. Auth middleware sets `useBackendOnlyPermissions` for admin secret and `x-hasura-use-backend-only-permissions` header. Verification test in `test/security.test.ts`.
 
 #### High
 
-- [ ] **No GraphQL batching limit** — Mercurius doesn't limit batched operations. An attacker can send hundreds of queries in one request.
-- [ ] **`resolveLimit` bypass in subscriptions and tracked functions** — `resolveLimit` in `subscription-resolvers.ts` and `tracked-functions.ts` doesn't accept the global `graphql.maxLimit` cap. Only `schema/resolvers.ts` properly enforces it.
+- [x] **GraphQL batching limit** — `graphql.maxBatchSize` config (default: 10) with preHandler enforcement hook. Already implemented.
+- [x] **`resolveLimit` unified** — Deduplicated `resolveLimit` into single export from `resolvers.ts`, imported by `subscription-resolvers.ts` and `tracked-functions.ts`. Fixed streaming subscription `batchSize` not being capped by `graphql.maxLimit`. 17 tests in `test/security-limits.test.ts`.
 
 #### Medium
 
@@ -927,34 +927,34 @@ These recent commits have no regression tests for the specific fix:
 
 ### P7.3 — Permission Test Gaps
 
-- [ ] **Root field visibility E2E** — Unit-tested in config.test.ts but no E2E test verifying `queryRootFields: []` actually denies queries at the GraphQL endpoint
-- [ ] **Computed field permission denial** — No test verifying a role without a computed field in `computedFields` list is denied access
-- [ ] **Update presets via GraphQL** — REST tests cover presets, but no GraphQL E2E test for update presets being applied
-- [ ] **Bulk mutation check constraints** — No test for `insertClient(objects: [...])` where some objects pass check and some fail; no atomicity test
-- [ ] **Delete with permission filter** — No E2E test for delete where filter restricts which rows can be deleted
-- [ ] **Upsert permission enforcement** — No E2E test verifying upsert respects insert/update column permissions
-- [ ] **Session variable arrays** — No test for `_in` operator with session variable resolving to array
-- [ ] **Missing session variable returns null** — No test for behavior when permission filter references absent JWT claim
-- [ ] **Subscription root field visibility** — No E2E test for `subscriptionRootFields: []` or streaming subscription permission enforcement
+- [x] **Root field visibility E2E** — 3 tests verifying `queryRootFields: []` denies root queries while allowing relationship access (`test/permission-gaps-p73.test.ts`)
+- [x] **Computed field permission denial** — 5 tests verifying roles without computed fields get null/error (`test/permission-gaps-p73.test.ts`)
+- [x] **Update presets via GraphQL** — 3 tests for update presets (`updated_at = now()`), preset override denial, insert presets (`test/permission-gaps-p73.test.ts`)
+- [x] **Bulk mutation check constraints** — 2 tests for atomicity: batch rollback on NOT NULL violation (`test/permission-gaps-p73.test.ts`)
+- [x] **Delete with permission filter** — 3 tests for `deleteServicePlanByPk` respecting `state = draft` filter (`test/permission-gaps-p73.test.ts`)
+- [x] **Upsert permission enforcement** — 2 tests for upsert respecting column presets and update permissions (`test/permission-gaps-p73.test.ts`)
+- [x] **Session variable arrays** — 2 tests for `_in` operator with array session variables (`test/permission-gaps-p73.test.ts`)
+- [x] **Missing session variable returns null** — 3 tests for absent JWT claims returning zero rows (`test/permission-gaps-p73.test.ts`)
+- [x] **Subscription root field visibility** — 2 tests for `subscriptionRootFields: []` denying WebSocket subscriptions (`test/permission-gaps-p73.test.ts`)
 
 ### P7.4 — Relationship Test Gaps
 
-- [ ] **Cross-schema relationships** — No test for relationship between tables in different schemas
-- [ ] **Nested relationship traversal in where filters** — No test for `accounts(where: { client: { status: { _eq: ACTIVE } } })` — filtering array relationship by nested relationship field
-- [ ] **Object relationship ordering with NULL FK** — No test for ORDER BY on relationship when FK column is NULL for some rows
-- [ ] **Relationship aggregates as nested query** — No test for `clientByPk { invoicesAggregate { aggregate { count } } }`
-- [ ] **Permissions blocking nested relationship entirely** — No test where role has NO select permission on remote table (relationship silently omitted)
-- [ ] **Relationship data in updateMany RETURNING** — Not tested for `updateMany` mutations
-- [ ] **Config-defined relationship overriding auto-detected** — No test for YAML relationship replacing auto-detected one with same name
+- [ ] **Cross-schema relationships** — No cross-schema table fixtures available; `.todo()` in `test/relationship-gaps-p74.test.ts`
+- [x] **Nested relationship traversal in where filters** — 4 tests: object-to-object, object-to-array, array-to-nested-object, combined filters (`test/relationship-gaps-p74.test.ts`)
+- [x] **Object relationship ordering with NULL FK** — 2 tests for `ASC_NULLS_FIRST` and `ASC_NULLS_LAST` (`test/relationship-gaps-p74.test.ts`)
+- [ ] **Relationship aggregates as nested query** — Not yet implemented in schema builder; `.todo()` in `test/relationship-gaps-p74.test.ts`
+- [x] **Permissions blocking nested relationship entirely** — 3 tests verifying anonymous role cannot traverse relationships (`test/relationship-gaps-p74.test.ts`)
+- [x] **Relationship data in updateMany RETURNING** — 1 test passing; computed fields in updateMany RETURNING not supported (resolver bug, `.todo()`)
+- [x] **Config-defined relationship overriding auto-detected** — 2 tests for `primaryAccount` manual relationship coexisting with auto-detected (`test/relationship-gaps-p74.test.ts`)
 
 ### P7.5 — Computed Field & Function Test Gaps
 
-- [ ] **Aggregate E2E execution of computed fields** — Only schema introspection verified; no test running `clientsAggregate { aggregate { sum { totalBalance } } }`
-- [ ] **INSERT RETURNING with computed fields** — UPDATE/DELETE RETURNING tested, INSERT not
-- [ ] **SETOF computed field with where/orderBy/limit** — Source code supports these args but no test exercises them
-- [ ] **Computed field WHERE with arguments** — `compileWhere` emits function call without passing user args or session args; filtering by argument-bearing computed fields may use wrong defaults
-- [ ] **Tracked function aggregate with where filter** — No test for `searchClientsAggregate(args: ..., where: { status: { _eq: ACTIVE } })`
-- [ ] **Tracked function return-table row-level filter** — Code applies `perm.filter` but no E2E test confirms row-level filtering on function results
+- [ ] **Aggregate E2E execution of computed fields** — Bug found: `makeSelectAggregateResolver` doesn't pass `computedFields` in non-groupBy path; `.todo()` in `test/computed-function-gaps-p75.test.ts`
+- [x] **INSERT RETURNING with computed fields** — 4 tests: single insert, batch insert, backoffice role (`test/computed-function-gaps-p75.test.ts`)
+- [x] **SETOF computed field with where/orderBy/limit** — 5 tests exercising all argument combinations on `activeAccounts` (`test/computed-function-gaps-p75.test.ts`)
+- [ ] **Computed field WHERE with arguments** — `balanceInCurrency` filter works; `isOwn` boolean filter fails due to `pgTypeToGraphQL` mapping bug (`"boolean"` not in map, only `"bool"`); `.todo()` in `test/computed-function-gaps-p75.test.ts`
+- [x] **Tracked function aggregate with where filter** — 4 tests for `searchClientsAggregate` and `clientsByDateAggregate` with where filters (`test/computed-function-gaps-p75.test.ts`)
+- [x] **Tracked function return-table row-level filter** — 6 tests for session-based filtering, column permissions, permission denial (`test/computed-function-gaps-p75.test.ts`)
 
 ---
 
@@ -966,8 +966,8 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 #### High
 
-- [ ] **Action webhook error reflection** — `src/actions/proxy.ts:126-135` passes raw webhook error messages (`parsed.message` / `parsed.error`) to GraphQL clients without size limit or sanitization. A compromised or misconfigured webhook can leak internal details (stack traces, credentials, internal URLs) to API consumers. Fix: truncate to 500 chars, strip sensitive patterns.
-- [ ] **REST error response leaks PG internals** — `src/rest/router.ts:618` sends `err.message` from failed SQL queries to clients (`sendBadRequest(reply, err instanceof Error ? err.message : 'Query failed')`). PostgreSQL errors reveal column names, table structure, type mismatches. Fix: log full error, return generic message in non-dev mode.
+- [x] **Action webhook error reflection** — `sanitizeWebhookError()` in `src/actions/proxy.ts` truncates to 500 chars, strips stack traces/file paths/credential URLs in production mode. 13 tests in `test/security-sanitization.test.ts`.
+- [x] **REST error response leaks PG internals** — `sanitizeSQLError()` in `src/rest/router.ts` returns generic message in production mode, full error in dev mode. All 6 catch blocks use it consistently. 13 tests in `test/security-sanitization.test.ts`.
 
 #### Medium
 
@@ -982,9 +982,9 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 #### Medium
 
-- [ ] **`quoteIdent()` copied instead of imported** — `src/events/delivery.ts:77`, `src/events/schema.ts:56`, `src/events/cleanup.ts:22`, and `src/permissions/compiler.ts:114` each define a local `quoteIdent()` identical to `quoteIdentifier()` in `src/sql/utils.ts`. Fix: import from `sql/utils.ts`.
+- [x] **`quoteIdent()` deduplicated** — All 4 files now import `quoteIdentifier as quoteIdent` from `src/sql/utils.ts`.
 - [ ] **Worker registration pattern ~200 LOC repeated 3×** — `src/events/delivery.ts`, `src/crons/worker.ts`, `src/actions/async.ts` all follow the same loop: resolve webhook URL/headers → `deliverWebhook()` → update DB status → throw on failure. Fix: extract generic worker factory to `src/shared/`.
-- [ ] **Trigger lookup building duplicated** — `buildTriggerLookup()` in `src/events/delivery.ts:64-72` and `src/events/invoke.ts:35-43` are identical. Fix: move to shared events helper.
+- [x] **Trigger lookup deduplicated** — `buildTriggerLookup()` extracted to `src/events/shared.ts`, imported by both `delivery.ts` and `invoke.ts`.
 - [x] **Preset resolution duplicated** — Both `resolvePreset()` now use shared `isSessionVariable`/`resolveSessionVar` from `src/auth/session-namespace.ts`.
 
 ### P8.3 — TypeScript Typing
@@ -1003,7 +1003,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 #### High
 
-- [ ] **SQL layer imports from schema layer** — `src/sql/select.ts`, `insert.ts`, `update.ts` import `toCamelCase` from `src/schema/type-builder.ts`. This creates an upward dependency from the lower SQL layer to the upper GraphQL schema layer. Fix: extract `toCamelCase`/`toSnakeCase`/`toPascalCase` into `src/shared/naming.ts`.
+- [x] **Naming utils extracted** — `toCamelCase`, `toSnakeCase`, `toPascalCase` live in `src/shared/naming.ts`. SQL layer imports from `shared/naming.ts`, schema layer re-exports for backward compat.
 
 #### Medium
 
@@ -1017,6 +1017,13 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 - [ ] **Tracked functions coupled to resolvers** — `src/schema/tracked-functions.ts:50` imports `remapBoolExp` from `resolvers.ts`. Fix: extract `remapBoolExp` to `src/schema/mapping.ts`.
 - [ ] **Unused `compileFilter` export** — `src/permissions/index.ts` exports `compileFilter` from `compiler.ts` but it appears unused in the codebase. Verify and remove if dead code.
+
+### Bugs Discovered During Test Gap Coverage
+
+- [ ] **`makeSelectAggregateResolver` missing computed fields** — Non-groupBy path doesn't pass `aggregate.computedFields` to `compileSelectAggregate`; computed field aggregation (e.g., `sum { totalBalance }`) silently omits the field
+- [ ] **`makeUpdateManyResolver` missing returning computed fields** — Doesn't build/pass `returningComputedFields` to SQL compiler
+- [ ] **PG type map missing `"boolean"` long form** — `PG_TO_GRAPHQL` maps `"bool"` but not `"boolean"`; function return types use long form, causing boolean computed fields to fall through to String in BoolExp types
+- [ ] **No nested aggregate fields on object types** — Array relationships don't expose `{rel}Aggregate` on object types (e.g., `clientByPk { invoicesAggregate { ... } }`)
 
 ---
 
@@ -1048,7 +1055,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 | Batch operations | 26 | Pass |
 | Action relationships | 13 | Pass |
 | Statistical aggregates | 15 | Pass |
-| Zod schemas | 243 | Pass |
+| Zod schemas | 241 | Pass |
 | Tracked functions | 43 | Pass |
 | Relationship ordering | 15 | Pass |
 | Array comparison | 24 | Pass |
@@ -1060,4 +1067,4 @@ Automated review of duplication, typing, security, and architectural coherence a
 | Config unsupported | 37 | Pass |
 | REST permissions | 26 | Pass |
 | JWT admin role | 9 | Pass |
-| **Total** | **1194** | **36 suites, 1194 passing** |
+| **Total** | **1266** | **40 suites, 1266 passing** |
