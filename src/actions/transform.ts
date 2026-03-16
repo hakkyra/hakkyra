@@ -196,7 +196,27 @@ export function interpolateUrlTemplate(
       return stringValue;
     }
 
-    return encodeURIComponent(stringValue);
+    // encodeURIComponent encodes most dangerous characters (/, ?, #, etc.)
+    // but does NOT encode dots. After encoding, split the result on encoded
+    // slashes (%2F) and check each logical path segment for traversal patterns.
+    // Per RFC 3986, percent-encoded dots (%2E) are equivalent to literal dots,
+    // so we must check the decoded form of each segment.
+    const encoded = encodeURIComponent(stringValue);
+
+    // The encoded value has literal "/" replaced with "%2F", so split on "%2F"
+    // to get the logical path segments the user intended.
+    const encodedSegments = encoded.split('%2F');
+    for (const seg of encodedSegments) {
+      // Decode to normalize %2E → "." before checking
+      const decoded = decodeURIComponent(seg);
+      if (decoded === '..' || decoded === '.') {
+        throw new Error(
+          `Path traversal detected in interpolated URL value: "${stringValue}"`,
+        );
+      }
+    }
+
+    return encoded;
   });
 }
 

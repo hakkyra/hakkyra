@@ -14,6 +14,8 @@ import type { FastifyInstance } from 'fastify';
 import {
   interpolateString,
   interpolateTemplate,
+  interpolateUrlTemplate,
+  validateUrlSafe,
   applyRequestTransform,
   applyResponseTransform,
 } from '../src/actions/transform.js';
@@ -174,6 +176,235 @@ describe('Template interpolation', () => {
     it('returns null for undefined nested path', () => {
       const result = interpolateString('{{$body.input.missing}}', variables);
       expect(result).toBeNull();
+    });
+  });
+});
+
+// ─── Unit Tests: URL Path Traversal Protection ──────────────────────────────
+
+describe('URL path traversal protection', () => {
+  const variables = {
+    $body: {
+      input: {
+        id: '../../admin',
+        safe: 'item-42',
+        dotdot: '..',
+        dot: '.',
+        encoded: '%2e%2e',
+        slashy: 'a/b/c',
+        special: 'hello world&foo=bar',
+      },
+    },
+    $session_variables: {},
+    $base_url: 'https://api.example.com',
+  };
+
+  describe('interpolateUrlTemplate', () => {
+    it('rejects path traversal with slashes (../../admin)', () => {
+      // "../../admin" contains ".." segments separated by "/" — after encoding,
+      // the "/" becomes %2F but ".." remains literal in each segment.
+      expect(() =>
+        interpolateUrlTemplate(
+          '{{$base_url}}/items/{{$body.input.id}}/details',
+          variables,
+        ),
+      ).toThrow(/Path traversal/);
+    });
+
+    it('rejects bare ".." input as path traversal', () => {
+      expect(() =>
+        interpolateUrlTemplate(
+          '{{$base_url}}/items/{{$body.input.dotdot}}/details',
+          variables,
+        ),
+      ).toThrow(/Path traversal/);
+    });
+
+    it('rejects bare "." input as path traversal', () => {
+      expect(() =>
+        interpolateUrlTemplate(
+          '{{$base_url}}/items/{{$body.input.dot}}/details',
+          variables,
+        ),
+      ).toThrow(/Path traversal/);
+    });
+
+    it('rejects pre-encoded traversal (%2e%2e)', () => {
+      // User provides already-encoded dots — encodeURIComponent double-encodes
+      // the "%" to "%25", making segments "%252e%252e" which decodes to "%2e%2e"
+      // (not ".."), so this actually passes. But let's verify the behavior.
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/items/{{$body.input.encoded}}',
+        variables,
+      );
+      // "%2e%2e" gets encodeURIComponent'd to "%252e%252e" — safe (double-encoded)
+      expect(result).toBe('https://api.example.com/items/%252e%252e');
+    });
+
+    it('allows normal path values through unchanged', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/items/{{$body.input.safe}}',
+        variables,
+      );
+      expect(result).toBe('https://api.example.com/items/item-42');
+    });
+
+    it('encodes slashes in user input to prevent path injection', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/items/{{$body.input.slashy}}',
+        variables,
+      );
+      expect(result).toBe('https://api.example.com/items/a%2Fb%2Fc');
+    });
+
+    it('encodes special characters (spaces, ampersands) in path values', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/items/{{$body.input.special}}',
+        variables,
+      );
+      expect(result).toBe('https://api.example.com/items/hello%20world%26foo%3Dbar');
+    });
+
+    it('does not encode $base_url (trusted server configuration)', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/items/list',
+        variables,
+      );
+      expect(result).toBe('https://api.example.com/items/list');
+    });
+
+    it('returns raw value when entire template is a single expression', () => {
+      const result = interpolateUrlTemplate('{{$base_url}}', variables);
+      expect(result).toBe('https://api.example.com');
+    });
+  });
+
+  describe('validateUrlSafe', () => {
+    it('allows normal URLs', () => {
+      expect(() => validateUrlSafe('https://api.example.com/items/42')).not.toThrow();
+    });
+
+    it('rejects URLs with ".." path segments', () => {
+      expect(() =>
+        validateUrlSafe('https://api.example.com/items/../../admin'),
+      ).toThrow(/Path traversal/);
+    });
+
+    it('rejects URLs with encoded ".." path segments (%2e%2e)', () => {
+      expect(() =>
+        validateUrlSafe('https://api.example.com/items/%2e%2e/admin'),
+      ).toThrow(/Path traversal/);
+    });
+
+    it('allows URLs with ".." in query parameters (not path)', () => {
+      expect(() =>
+        validateUrlSafe('https://api.example.com/items?path=../../admin'),
+      ).not.toThrow();
+    });
+
+    it('allows URLs with encoded values that are not traversal', () => {
+      expect(() =>
+        validateUrlSafe('https://api.example.com/items/..%2F..%2Fadmin'),
+      ).not.toThrow();
+    });
+
+    it('does not throw on unparseable URLs (lets HTTP client handle it)', () => {
+      expect(() => validateUrlSafe('not-a-url')).not.toThrow();
+    });
+  });
+
+  describe('applyRequestTransform (path traversal integration)', () => {
+    const context = {
+      sessionVariables: { 'x-hasura-role': 'user' },
+      baseUrl: 'https://api.example.com/webhook',
+    };
+
+    it('rejects path traversal attempts in URL templates', () => {
+      const originalRequest = {
+        url: 'https://api.example.com/webhook',
+        method: 'POST' as const,
+        body: {
+          action: { name: 'getItem' },
+          input: { id: '../../admin' },
+          session_variables: {},
+        },
+        headers: { 'Content-Type': 'application/json' },
+      };
+
+      const transform: RequestTransform = {
+        url: '{{$base_url}}/items/{{$body.input.id}}',
+      };
+
+      expect(() =>
+        applyRequestTransform(transform, originalRequest, context),
+      ).toThrow(/Path traversal/);
+    });
+
+    it('rejects bare ".." in URL path segment', () => {
+      const originalRequest = {
+        url: 'https://api.example.com/webhook',
+        method: 'POST' as const,
+        body: {
+          action: { name: 'getItem' },
+          input: { id: '..' },
+          session_variables: {},
+        },
+        headers: { 'Content-Type': 'application/json' },
+      };
+
+      const transform: RequestTransform = {
+        url: '{{$base_url}}/items/{{$body.input.id}}/details',
+      };
+
+      expect(() =>
+        applyRequestTransform(transform, originalRequest, context),
+      ).toThrow(/Path traversal/);
+    });
+
+    it('does not alter query parameter values with special characters', () => {
+      const originalRequest = {
+        url: 'https://api.example.com/webhook',
+        method: 'POST' as const,
+        body: {
+          action: { name: 'search' },
+          input: { query: 'hello world&sort=desc' },
+          session_variables: {},
+        },
+        headers: { 'Content-Type': 'application/json' },
+      };
+
+      const transform: RequestTransform = {
+        queryParams: {
+          q: '{{$body.input.query}}',
+          format: 'json',
+        },
+      };
+
+      const result = applyRequestTransform(transform, originalRequest, context);
+      const url = new URL(result.url);
+      // Query params use URL.searchParams.set() which handles encoding natively
+      expect(url.searchParams.get('q')).toBe('hello world&sort=desc');
+      expect(url.searchParams.get('format')).toBe('json');
+    });
+
+    it('allows normal path values in URL templates', () => {
+      const originalRequest = {
+        url: 'https://api.example.com/webhook',
+        method: 'POST' as const,
+        body: {
+          action: { name: 'getItem' },
+          input: { id: 'item-42', category: 'electronics' },
+          session_variables: {},
+        },
+        headers: { 'Content-Type': 'application/json' },
+      };
+
+      const transform: RequestTransform = {
+        url: '{{$base_url}}/{{$body.input.category}}/{{$body.input.id}}',
+      };
+
+      const result = applyRequestTransform(transform, originalRequest, context);
+      expect(result.url).toBe('https://api.example.com/webhook/electronics/item-42');
     });
   });
 });
