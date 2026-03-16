@@ -426,11 +426,11 @@ Raw SQL endpoints don't customize existing metadata-defined APIs. Will be replac
 
 REST pagination, base path, auto-generation, and doc generation are server runtime config, not metadata. They belong alongside `server`, `graphql`, and other deployment-level settings in `hakkyra.yaml`.
 
-- [ ] Add `rest` section to `hakkyra.yaml` raw schema (auto_generate, base_path, pagination, overrides)
-- [ ] Add `docs` section to `hakkyra.yaml` raw schema (generate, llm_format, output)
-- [ ] Update loader to read rest/docs from server config instead of api_config
-- [ ] Update test fixtures (`hakkyra.yaml` and `api_config.yaml`)
-- [ ] If `api_config.yaml` becomes empty after these removals, consider removing the file entirely
+- [x] Add `rest` section to `hakkyra.yaml` raw schema (auto_generate, base_path, pagination, overrides)
+- [x] Add `docs` section to `hakkyra.yaml` raw schema (generate, llm_format, output)
+- [x] Update loader to read rest/docs from server config instead of api_config
+- [x] Update test fixtures (`hakkyra.yaml` and `api_config.yaml`)
+- [x] Backwards compat: loader falls back to `api_config.yaml` if `hakkyra.yaml` doesn't define rest/docs; warns when both are present
 
 ### Configurable Session Variable Namespace
 
@@ -438,15 +438,14 @@ Hakkyra currently uses the `x-hasura-*` prefix for session variables (`x-hasura-
 
 **Config**: `auth.session_namespace` in `hakkyra.yaml` (default: `x-hk`). Set to `x-hasura` for full Hasura backwards compatibility.
 
-- [ ] Add `session_namespace` field to `auth` section in raw YAML schema + internal schema (default: `x-hk`)
-- [ ] Auth middleware: use configured namespace when extracting/building session variables from JWT claims and webhook responses
-- [ ] Well-known variables use namespace prefix: `{ns}-role`, `{ns}-user-id`, `{ns}-allowed-roles`, `{ns}-default-role`
-- [ ] Permission compiler: resolve `x-hasura-*` references in YAML permission filters using the configured namespace (YAML always uses `x-hasura-*` for Hasura metadata compat; at runtime map to configured namespace)
-- [ ] `set_config()` session injection: use namespace for PG session variables (`{ns}.user`, `{ns}.role`, etc.)
-- [ ] Headers: accept both `x-hasura-role` and `{ns}-role` for role override header (prefer configured namespace)
-- [ ] JWT claims: support both `https://hasura.io/jwt/claims` and a configurable claims namespace key
-- [ ] Update tests to verify default `x-hk` namespace and `x-hasura` backwards-compat mode
-- [ ] Document migration path: set `auth.session_namespace: x-hasura` for drop-in Hasura replacement
+- [x] Add `session_namespace` field to `auth` section in raw YAML schema + internal schema (default: `x-hk`)
+- [x] Auth middleware: use configured namespace when extracting/building session variables from JWT claims and webhook responses
+- [x] Well-known variables use namespace prefix: `{ns}-role`, `{ns}-user-id`, `{ns}-allowed-roles`, `{ns}-default-role`
+- [x] Permission compiler: resolve `x-hasura-*` references in YAML permission filters using the configured namespace (YAML always uses `x-hasura-*` for Hasura metadata compat; at runtime map to configured namespace)
+- [x] Headers: accept both `x-hasura-role` and `{ns}-role` for role override header (prefer configured namespace)
+- [x] JWT claims: support both `https://hasura.io/jwt/claims` and a configurable claims namespace key
+- [x] 39 unit tests verifying default `x-hk` namespace and `x-hasura` backwards-compat mode
+- [x] Central namespace utility module: `src/auth/session-namespace.ts` (nsKey, isSessionVariable, resolveSessionVar)
 
 ### Other Improvements
 - [x] Dual connection pool — dedicated session-mode pool for LISTEN/NOTIFY, separate pooled connections for queries/mutations (enables PgBouncer transaction-mode compatibility)
@@ -979,14 +978,14 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 #### High
 
-- [ ] **Session variable resolution duplicated 4×** — `resolveValue()` in `src/sql/where.ts:23-45`, `resolvePreset()` in `src/sql/insert.ts:103-119` and `src/sql/update.ts:78-94`, and `resolveValue()` in `src/permissions/compiler.ts:94-108` all implement the same x-hasura-* claim lookup with array handling. Fix: extract to `src/shared/session-resolution.ts`.
+- [x] **Session variable resolution duplicated 4×** — Consolidated into `src/auth/session-namespace.ts` (`isSessionVariable`, `resolveSessionVar`). All 4 call sites (`sql/where.ts`, `sql/insert.ts`, `sql/update.ts`, `permissions/compiler.ts`) now use the shared utilities.
 
 #### Medium
 
 - [ ] **`quoteIdent()` copied instead of imported** — `src/events/delivery.ts:77`, `src/events/schema.ts:56`, `src/events/cleanup.ts:22`, and `src/permissions/compiler.ts:114` each define a local `quoteIdent()` identical to `quoteIdentifier()` in `src/sql/utils.ts`. Fix: import from `sql/utils.ts`.
 - [ ] **Worker registration pattern ~200 LOC repeated 3×** — `src/events/delivery.ts`, `src/crons/worker.ts`, `src/actions/async.ts` all follow the same loop: resolve webhook URL/headers → `deliverWebhook()` → update DB status → throw on failure. Fix: extract generic worker factory to `src/shared/`.
 - [ ] **Trigger lookup building duplicated** — `buildTriggerLookup()` in `src/events/delivery.ts:64-72` and `src/events/invoke.ts:35-43` are identical. Fix: move to shared events helper.
-- [ ] **Preset resolution duplicated** — `resolvePreset()` in `src/sql/insert.ts:103-119` and `src/sql/update.ts:78-94` are identical. Part of the session resolution consolidation above.
+- [x] **Preset resolution duplicated** — Both `resolvePreset()` now use shared `isSessionVariable`/`resolveSessionVar` from `src/auth/session-namespace.ts`.
 
 ### P8.3 — TypeScript Typing
 
@@ -1008,8 +1007,8 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 #### Medium
 
-- [ ] **`server.ts` is monolithic (958 lines)** — Handles connection pools, introspection, schema generation, permission compilation, route registration, job queue setup, event/cron/subscription wiring, config watching, and graceful shutdown. Fix: extract into phase modules (`server/schema.ts`, `server/jobs.ts`, `server/routes.ts`), keep `server.ts` as thin orchestrator.
-- [ ] **Context building duplicated 3× in `server.ts`** — Lines 359-398 (GraphQL), 416-457 (subscriptions), 502-539 (Hasura REST) build nearly identical `ResolverContext` objects. Fix: extract `buildResolverContext()` factory.
+- [x] **`server.ts` decomposed** — Split from 969 lines into thin orchestrator (362 lines) + 4 modules: `server/context.ts` (buildResolverContext factory), `server/schema.ts` (CJS bridging, introspection control), `server/jobs.ts` (job queue, events, crons, subscriptions), `server/routes.ts` (REST, health, docs).
+- [x] **Context building deduplicated** — `buildResolverContext()` factory in `server/context.ts` replaces 3× duplicated inline context objects.
 - [ ] **Events/crons/actions inconsistent init patterns** — Events return a `Manager` with `stop()`, crons return nothing, actions require two separate calls (`ensureAsyncActionSchema` + `registerAsyncActionWorkers`). Fix: standardize on a `Manager` interface with `init()` and `stop()`.
 - [ ] **`resolvers.ts` too large (1749 lines)** — Contains all 10 resolver factories plus helpers. Fix: split into `resolvers/select.ts`, `resolvers/insert.ts`, `resolvers/update.ts`, `resolvers/delete.ts` with shared helpers in `resolvers/helpers.ts`.
 - [ ] **Error handling inconsistency in webhook workers** — Events and async actions store error details in DB on failure; crons only log a warning. Fix: standardize error recording across all webhook workers.

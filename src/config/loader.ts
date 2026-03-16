@@ -314,13 +314,6 @@ export async function loadConfig(
   const queryCollections = await loadQueryCollections(absMetadataDir);
   const hasuraRestEndpoints = await loadRestEndpoints(absMetadataDir, queryCollections);
 
-  // REST and docs config: prefer hakkyra.yaml (server config), fall back to api_config.yaml
-  if (serverConfig?.rest && apiConfig?.rest) {
-    log.warn('REST config found in both hakkyra.yaml and api_config.yaml; using hakkyra.yaml (server config)');
-  }
-  if (serverConfig?.docs && apiConfig?.docs) {
-    log.warn('Docs config found in both hakkyra.yaml and api_config.yaml; using hakkyra.yaml (server config)');
-  }
 
   const raw = {
     version,
@@ -339,12 +332,12 @@ export async function loadConfig(
     actions,
     actionsGraphql: actionsGraphql ?? undefined,
     cronTriggers,
-    rest: transformRESTConfig(serverConfig, apiConfig),
+    rest: transformRESTConfig(serverConfig),
     queryCollections,
     hasuraRestEndpoints,
     nativeQueries,
     logicalModels,
-    apiDocs: transformDocsConfig(serverConfig, apiConfig),
+    apiDocs: transformDocsConfig(serverConfig),
     inheritedRoles,
     jobQueue: transformJobQueueConfig(serverConfig),
     redis: transformRedisConfig(serverConfig),
@@ -1160,9 +1153,8 @@ async function loadApiConfig(metadataDir: string): Promise<RawApiConfig | null> 
   return config;
 }
 
-function transformRESTConfig(serverConfig: RawServerConfig | null, apiConfig: RawApiConfig | null): RESTConfig {
-  // Prefer hakkyra.yaml (server config), fall back to api_config.yaml
-  const rest = serverConfig?.rest ?? apiConfig?.rest;
+function transformRESTConfig(serverConfig: RawServerConfig | null): RESTConfig {
+  const rest = serverConfig?.rest;
   const raw = {
     ...stripUndefined({
       autoGenerate: rest?.auto_generate,
@@ -1177,9 +1169,8 @@ function transformRESTConfig(serverConfig: RawServerConfig | null, apiConfig: Ra
   return InternalRESTConfigSchema.parse(raw);
 }
 
-function transformDocsConfig(serverConfig: RawServerConfig | null, apiConfig: RawApiConfig | null): APIDocsConfig {
-  // Prefer hakkyra.yaml (server config), fall back to api_config.yaml
-  const docs = serverConfig?.docs ?? apiConfig?.docs;
+function transformDocsConfig(serverConfig: RawServerConfig | null): APIDocsConfig {
+  const docs = serverConfig?.docs;
   return {
     generate: docs?.generate ?? true,
     output: docs?.output,
@@ -1231,7 +1222,8 @@ function transformRedisConfig(serverConfig: RawServerConfig | null) {
   // Priority 1: explicit top-level redis config
   if (serverConfig?.redis) {
     return stripUndefined({
-      url: serverConfig.redis.url,
+      url: serverConfig.redis.url ?? resolveEnv(serverConfig.redis.url_from_env),
+      urlEnv: serverConfig.redis.url_from_env,
       host: serverConfig.redis.host,
       port: serverConfig.redis.port,
       password: serverConfig.redis.password,
@@ -1260,7 +1252,8 @@ function transformAuth(serverConfig: RawServerConfig | null): AuthConfig {
       type: auth.jwt.type,
       key: auth.jwt.key,
       keyEnv: auth.jwt.key_from_env,
-      jwkUrl: auth.jwt.jwk_url,
+      jwkUrl: auth.jwt.jwk_url ?? resolveEnv(auth.jwt.jwk_url_from_env),
+      jwkUrlEnv: auth.jwt.jwk_url_from_env,
       claimsNamespace: auth.jwt.claims_namespace,
       claimsMap: auth.jwt.claims_map,
       audience: auth.jwt.audience,
