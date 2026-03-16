@@ -582,7 +582,7 @@ export function buildActionFields(
     if (isAsync) {
       // ── Async action: mutation returns uuid! (Hasura-compatible) ───────
       const mutationFieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
-        type: new GraphQLNonNull(customScalars['Uuid']!),
+        type: new GraphQLNonNull(customScalars['uuid']!),
         args: argsConfig,
         description: actionConfig.comment
           ? `${actionConfig.comment} (async — returns action ID)`
@@ -596,7 +596,7 @@ export function buildActionFields(
       const resultQueryFieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
         type: returnType,
         args: {
-          id: { type: new GraphQLNonNull(customScalars['Uuid']!) },
+          id: { type: new GraphQLNonNull(customScalars['uuid']!) },
         },
         description: `Check the status and result of async action "${actionConfig.name}"`,
         resolve: makeAsyncActionResultResolver(actionConfig),
@@ -609,7 +609,7 @@ export function buildActionFields(
       subscriptionFields[parsed.name] = {
         type: returnType,
         args: {
-          id: { type: new GraphQLNonNull(customScalars['Uuid']!) },
+          id: { type: new GraphQLNonNull(customScalars['uuid']!) },
         },
         description: `Subscribe to the result of async action "${actionConfig.name}"`,
         resolve: (payload: unknown) => payload,

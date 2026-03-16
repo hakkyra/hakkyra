@@ -653,14 +653,19 @@ async function loadAllTables(
 
 function transformTable(raw: RawTableYaml): TableInfo {
   const relationships: RelationshipConfig[] = [];
+  const seenRelNames = new Set<string>();
 
   if (raw.object_relationships) {
     for (const rel of raw.object_relationships) {
       relationships.push(transformRelationship(rel, 'object'));
+      seenRelNames.add(rel.name);
     }
   }
   if (raw.array_relationships) {
     for (const rel of raw.array_relationships) {
+      // When the same name is used for both an object and array relationship,
+      // the object relationship takes precedence (Hasura behavior).
+      if (seenRelNames.has(rel.name)) continue;
       relationships.push(transformRelationship(rel, 'array'));
     }
   }

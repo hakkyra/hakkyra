@@ -261,6 +261,8 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     orderByTypes,
     selectColumnEnumsByTable,
     aggregateTypesByTable,
+    enumTypes,
+    enumNames,
   );
 
   // ── Step 6: Build Query type ───────────────────────────────────────────

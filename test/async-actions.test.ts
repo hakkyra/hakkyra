@@ -129,15 +129,16 @@ describe('Async Actions', () => {
       sdl = await res.text();
     });
 
-    it('registers async action mutation with uuid! return type (Hasura-compatible)', () => {
+    it('registers async action mutation with uuid! return type (Hasura-compatible lowercase)', () => {
       // requestVerification is configured as async in actions.yaml
-      // Hasura returns uuid! for async mutations, not a wrapper type
-      expect(sdl).toContain('requestVerification(input: RequestVerificationInput!): Uuid!');
+      // Hasura returns uuid! (lowercase) for async mutations, not a wrapper type
+      expect(sdl).toContain('requestVerification(input: RequestVerificationInput!): uuid!');
     });
 
     it('registers async action result query with handler return type (Hasura-compatible)', () => {
       // Hasura uses the action's handler return type directly, not a wrapper
-      expect(sdl).toContain('requestVerification(id: Uuid!): VerificationRequestResult');
+      // The id arg uses lowercase uuid to match Hasura
+      expect(sdl).toContain('requestVerification(id: uuid!): VerificationRequestResult');
     });
 
     it('does not generate AsyncActionId wrapper type', () => {
@@ -152,7 +153,7 @@ describe('Async Actions', () => {
       // createPayment is synchronous — should still have its normal return type
       expect(sdl).toContain('createPayment(input: CreatePaymentInput!): PaymentResult');
       // Should NOT have a result query for sync actions
-      expect(sdl).not.toContain('createPayment(id: Uuid!)');
+      expect(sdl).not.toContain('createPayment(id: uuid!)');
     });
 
     it('does not generate AsyncActionStatus enum', () => {
@@ -365,7 +366,7 @@ describe('Async Actions', () => {
 
       // Query the result — returns the action's output type directly (Hasura-compatible)
       const { body: queryBody } = await gql(
-        `query($id: Uuid!) {
+        `query($id: uuid!) {
           requestVerification(id: $id) {
             requestId
             status
@@ -390,7 +391,7 @@ describe('Async Actions', () => {
       const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
 
       const { body } = await gql(
-        `query($id: Uuid!) {
+        `query($id: uuid!) {
           requestVerification(id: $id) {
             requestId
             status
@@ -432,7 +433,7 @@ describe('Async Actions', () => {
       const token = await createJWT({ role: 'administrator', allowedRoles: ['administrator'] });
 
       const { body } = await gql(
-        `query($id: Uuid!) {
+        `query($id: uuid!) {
           requestVerification(id: $id) {
             requestId
             status
@@ -477,7 +478,7 @@ describe('Async Actions', () => {
 
       // Query result as admin — returns the action's output type directly
       const { body: queryBody } = await gql(
-        `query($id: Uuid!) {
+        `query($id: uuid!) {
           requestVerification(id: $id) {
             requestId
             status

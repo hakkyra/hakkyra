@@ -198,19 +198,10 @@ function resolveOutputType(
 }
 
 /**
- * PG source types that should return Numeric (instead of Float) in avg/stddev/variance aggregates.
- * Matches Hasura behavior: numeric and bigint columns → Numeric return type.
- */
-const NUMERIC_AGG_RETURN_TYPES = new Set(['Numeric', 'Bigint']);
-
-/**
  * Resolve the return type for statistical aggregate fields (avg, stddev, variance).
- * Hasura returns Numeric for numeric/bigint source columns, Float for others.
+ * Hasura always returns Float for avg/stddev/variance regardless of source column type.
  */
-function resolveStatAggReturnType(graphqlName: string): GraphQLOutputType {
-  if (NUMERIC_AGG_RETURN_TYPES.has(graphqlName)) {
-    return resolveOutputScalarType('Numeric');
-  }
+function resolveStatAggReturnType(_graphqlName: string): GraphQLOutputType {
   return GraphQLFloat;
 }
 
@@ -697,7 +688,7 @@ export function buildMutationInputTypes(
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of numericColumns) {
         const fieldName = getColumnFieldName(table, column.name);
-        // Hasura: numeric/bigint → Numeric, others → Float
+        // Hasura: avg always returns Float regardless of source column type
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
         fields[fieldName] = { type: resolveStatAggReturnType(mapping.name) };
       }
@@ -771,7 +762,7 @@ export function buildMutationInputTypes(
 
   // ── Statistical Aggregate Sub-Fields (Stddev, Variance family) ──────
   // Helper: build numeric fields (columns + computed fields) for statistical agg types
-  // Hasura returns Numeric for numeric/bigint source columns, Float for others.
+  // Hasura always returns Float for stddev/variance regardless of source column type.
   function buildStatAggFields(): GraphQLFieldConfigMap<unknown, unknown> {
     const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
     for (const column of numericColumns) {

@@ -29,6 +29,7 @@ import {
   GraphQLString,
   GraphQLBoolean,
   GraphQLInputObjectType,
+  GraphQLEnumType,
 } from 'graphql';
 import type {
   GraphQLFieldConfig,
@@ -45,7 +46,7 @@ import type {
   BoolExp,
 } from '../types.js';
 import { customScalars, asScalar, asOutputType } from './scalars.js';
-import { pgTypeToGraphQL } from '../introspection/type-map.js';
+import { pgTypeToGraphQL, pgEnumToGraphQLName, isKnownPgScalarType } from '../introspection/type-map.js';
 import { toCamelCase, toPascalCase, tableKey } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import type { ResolverContext, ResolverPermissionLookup } from './resolvers/index.js';
@@ -74,30 +75,32 @@ const BUILTIN_SCALARS: Record<string, GraphQLScalarType> = {
 
 /**
  * Map from PG type name to GraphQL input type name.
+ * Names must match the keys in the customScalars registry (scalars.ts)
+ * or the built-in GraphQL scalar names (Int, Float, String, Boolean).
  */
 const PG_ARG_TYPE_MAP: Record<string, string> = {
   text: 'String',
   varchar: 'String',
   char: 'String',
-  bpchar: 'String',
+  bpchar: 'Bpchar',
   name: 'String',
   int2: 'Smallint',
   smallint: 'Smallint',
   int4: 'Int',
   serial: 'Int',
   serial4: 'Int',
-  int8: 'BigInt',
-  bigserial: 'BigInt',
-  serial8: 'BigInt',
+  int8: 'Bigint',
+  bigserial: 'Bigint',
+  serial8: 'Bigint',
   float4: 'Float',
   float8: 'Float',
-  numeric: 'BigDecimal',
-  money: 'BigDecimal',
+  numeric: 'Numeric',
+  money: 'Numeric',
   bool: 'Boolean',
   boolean: 'Boolean',
-  uuid: 'UUID',
-  json: 'JSON',
-  jsonb: 'JSON',
+  uuid: 'Uuid',
+  json: 'json',
+  jsonb: 'Jsonb',
   timestamp: 'Timestamp',
   'timestamp without time zone': 'Timestamp',
   timestamptz: 'Timestamptz',
@@ -110,15 +113,27 @@ const PG_ARG_TYPE_MAP: Record<string, string> = {
   inet: 'Inet',
   cidr: 'Inet',
   integer: 'Int',
-  bigint: 'BigInt',
+  bigint: 'Bigint',
   'double precision': 'Float',
   real: 'Float',
   'character varying': 'String',
-  character: 'String',
+  character: 'Bpchar',
 };
 
-export function pgArgTypeToGraphQL(pgType: string): GraphQLInputType {
+export function pgArgTypeToGraphQL(
+  pgType: string,
+  enumTypes?: Map<string, GraphQLEnumType>,
+  enumNames?: Set<string>,
+): GraphQLInputType {
   const normalized = pgType.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  // Check if the type is a known PG enum — resolve to GraphQL enum type
+  if (enumNames?.has(pgType)) {
+    const gqlEnumName = pgEnumToGraphQLName(pgType);
+    const enumType = enumTypes?.get(gqlEnumName);
+    if (enumType) return enumType;
+  }
+
   const graphqlName = PG_ARG_TYPE_MAP[normalized] ?? 'String';
 
   const builtin = BUILTIN_SCALARS[graphqlName];
@@ -218,14 +233,13 @@ export function resolveTrackedFunctions(
       );
       // If it returns a non-table type (e.g., jsonb, text, int), treat as scalar return
       if (!returnTable) {
-        const gqlType = pgTypeToGraphQL(fn.returnType, false);
-        // If it maps to a known GraphQL type (not just the fallback 'String' for unknown composite types),
-        // treat it as a scalar-returning function
-        if (gqlType.name) {
+        // Check if the return type is a known PG scalar (not an untracked table/composite)
+        if (isKnownPgScalarType(fn.returnType)) {
           scalarReturnType = fn.returnType;
         } else {
+          // Return type looks like a table/composite that isn't tracked — skip with warning
           console.warn(
-            `[hakkyra:tracked-functions] Return type "${fn.returnType}" for function "${config.name}" is not a tracked table or known scalar — skipping`,
+            `[hakkyra:tracked-functions] Return table "${fn.returnType}" for function "${config.name}" is not tracked — skipping (track the table to expose this function correctly)`,
           );
           continue;
         }
@@ -283,6 +297,8 @@ export function buildTrackedFunctionFields(
   orderByTypes: Map<string, GraphQLInputObjectType>,
   selectColumnEnums: Map<string, import('graphql').GraphQLEnumType>,
   aggregateTypes: Map<string, GraphQLObjectType>,
+  enumTypes?: Map<string, GraphQLEnumType>,
+  enumNames?: Set<string>,
 ): TrackedFunctionFields {
   const queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
   const mutationFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
@@ -300,7 +316,7 @@ export function buildTrackedFunctionFields(
       const argsFields: Record<string, { type: GraphQLInputType }> = {};
       for (const arg of userArgs) {
         argsFields[toCamelCase(arg.name)] = {
-          type: pgArgTypeToGraphQL(arg.pgType),
+          type: pgArgTypeToGraphQL(arg.pgType, enumTypes, enumNames),
         };
       }
       argsInputType = new GraphQLInputObjectType({
@@ -314,8 +330,8 @@ export function buildTrackedFunctionFields(
     const fieldArgs: GraphQLFieldConfigArgumentMap = {};
 
     if (argsInputType) {
-      // Hasura makes args optional even when there are user arguments
-      fieldArgs['args'] = { type: argsInputType };
+      // Hasura makes tracked function args non-null
+      fieldArgs['args'] = { type: new GraphQLNonNull(argsInputType) };
     }
 
     // ── Scalar-returning functions (jsonb, json, text, int, etc.) ──────
@@ -390,7 +406,7 @@ export function buildTrackedFunctionFields(
         if (aggType) {
           const aggArgs: GraphQLFieldConfigArgumentMap = {};
           if (argsInputType) {
-            aggArgs['args'] = { type: argsInputType };
+            aggArgs['args'] = { type: new GraphQLNonNull(argsInputType) };
           }
           const filterType2 = filterTypes.get(key);
           if (filterType2) {
