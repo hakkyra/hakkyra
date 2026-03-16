@@ -1,0 +1,6 @@
+function:
+  name: latest_clients
+  schema: public
+permissions:
+  - role: backoffice
+  - role: administrator

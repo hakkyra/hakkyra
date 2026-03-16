@@ -114,11 +114,11 @@ const COMPARISON_FACTORIES: Record<string, ComparisonFieldsFactory> = {
   Timestamp: orderedComparisonFields,
   Date: orderedComparisonFields,
   Time: orderedComparisonFields,
-  Interval: baseComparisonFields,
+  Interval: orderedComparisonFields,
   json: jsonbComparisonFields,
   Jsonb: jsonbComparisonFields,
   Bytea: baseComparisonFields,
-  Inet: baseComparisonFields,
+  Inet: orderedComparisonFields,
   Bpchar: stringComparisonFields,
 };
 
@@ -153,20 +153,24 @@ function getComparisonType(scalarName: string): GraphQLInputObjectType {
 
 /**
  * Get the comparison input type for an enum type.
- * Uses orderedComparisonFields because PostgreSQL enums have a natural
- * ordering based on their declaration order, supporting >, >=, <, <=.
+ * PG native enums use orderedComparisonFields because PostgreSQL enums have a
+ * natural ordering based on their declaration order, supporting >, >=, <, <=.
+ * Table-based enums (is_enum: true) only get baseComparisonFields — Hasura does
+ * not expose ordering operators for table-based enum comparison types.
  */
 function getEnumComparisonType(
   enumType: GraphQLEnumType,
+  isTableEnum?: boolean,
 ): GraphQLInputObjectType {
   const name = `${enumType.name}ComparisonExp`;
   const cached = comparisonTypeCache.get(name);
   if (cached) return cached;
 
+  const factory = isTableEnum ? baseComparisonFields : orderedComparisonFields;
   const compType = new GraphQLInputObjectType({
     name,
     description: `Comparison operators for the ${enumType.name} enum.`,
-    fields: orderedComparisonFields(enumType),
+    fields: factory(enumType),
   });
 
   comparisonTypeCache.set(name, compType);
@@ -236,6 +240,7 @@ function columnComparisonType(
   column: ColumnInfo,
   enumTypes: Map<string, GraphQLEnumType>,
   enumNames: Set<string>,
+  tableEnumGraphQLNames?: Set<string>,
 ): GraphQLInputObjectType {
   const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
 
@@ -252,7 +257,8 @@ function columnComparisonType(
   // Check if it's an enum
   const enumType = enumTypes.get(mapping.name);
   if (enumType) {
-    return getEnumComparisonType(enumType);
+    const isTableEnum = tableEnumGraphQLNames?.has(enumType.name) ?? false;
+    return getEnumComparisonType(enumType, isTableEnum);
   }
 
   return getComparisonType(mapping.name);
@@ -284,6 +290,7 @@ export function buildFilterTypes(
   enumNames: Set<string>,
   selectColumnEnums?: Map<string, GraphQLEnumType>,
   functions?: FunctionInfo[],
+  tableEnumGraphQLNames?: Set<string>,
 ): Map<string, GraphQLInputObjectType> {
   const filterTypes = new Map<string, GraphQLInputObjectType>();
   const aggregateBoolExpTypes = new Map<string, GraphQLInputObjectType>();
@@ -372,7 +379,7 @@ export function buildFilterTypes(
         // Column comparison fields (camelCase per graphql-default naming convention)
         for (const column of table.columns) {
           if (visibleColumns && !visibleColumns.has(column.name)) continue;
-          const compType = columnComparisonType(column, enumTypes, enumNames);
+          const compType = columnComparisonType(column, enumTypes, enumNames, tableEnumGraphQLNames);
           const fieldName = getColumnFieldName(table, column.name);
           fields[fieldName] = { type: compType };
         }

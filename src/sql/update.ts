@@ -35,6 +35,8 @@ export interface UpdateByPkOptions {
   pkValues: Record<string, unknown>;
   /** Fields to update: { column: newValue } */
   _set: Record<string, unknown>;
+  /** Numeric column increments: { column: incrementValue } */
+  _inc?: Record<string, unknown>;
   /** Columns to return in the response */
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
@@ -58,6 +60,8 @@ export interface UpdateOptions {
   where: BoolExp;
   /** Fields to update: { column: newValue } */
   _set: Record<string, unknown>;
+  /** Numeric column increments: { column: incrementValue } */
+  _inc?: Record<string, unknown>;
   /** Columns to return in the response */
   returningColumns: string[];
   /** Relationships to include in the RETURNING clause */
@@ -88,6 +92,7 @@ function resolvePreset(value: string, session: SessionVariables): unknown {
 
 /**
  * Build the SET clause: validate columns, apply presets, parameterize values.
+ * Supports both _set (direct assignment) and _inc (increment) operations.
  */
 function buildSetClause(
   _set: Record<string, unknown>,
@@ -95,10 +100,13 @@ function buildSetClause(
   params: ParamCollector,
   permission: UpdateByPkOptions['permission'],
   session: SessionVariables,
+  _inc?: Record<string, unknown>,
 ): string {
   const tableColumnNames = new Set(table.columns.map((c) => c.name));
   const allowedColumns = permission?.columns;
   const assignments: string[] = [];
+  // Track columns already assigned by _set so _inc doesn't overwrite
+  const assignedColumns = new Set<string>();
 
   const presets = permission?.presets;
 
@@ -117,6 +125,27 @@ function buildSetClause(
       );
     }
     assignments.push(`${quoteIdentifier(col)} = ${params.add(val)}`);
+    assignedColumns.add(col);
+  }
+
+  // User-provided _inc (increment) values: column = column + $N
+  if (_inc) {
+    for (const [col, val] of Object.entries(_inc)) {
+      if (!tableColumnNames.has(col)) continue;
+      if (assignedColumns.has(col)) continue; // _set takes precedence
+      if (presets && col in presets) {
+        throw new Error(
+          `Column "${col}" has a preset and cannot be provided for update on table "${table.schema}"."${table.name}"`,
+        );
+      }
+      if (allowedColumns && allowedColumns !== '*' && !allowedColumns.includes(col)) {
+        throw new Error(
+          `Column "${col}" is not allowed for update on table "${table.schema}"."${table.name}"`,
+        );
+      }
+      assignments.push(`${quoteIdentifier(col)} = ${quoteIdentifier(col)} + ${params.add(val)}`);
+      assignedColumns.add(col);
+    }
   }
 
   // Apply presets
@@ -191,6 +220,7 @@ export function compileUpdateByPk(opts: UpdateByPkOptions): CompiledQuery {
     params,
     opts.permission,
     opts.session,
+    opts._inc,
   );
 
   // Build WHERE for PK
@@ -298,6 +328,7 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
     params,
     opts.permission,
     opts.session,
+    opts._inc,
   );
 
   // Build WHERE clause
@@ -395,6 +426,7 @@ export function compileUpdate(opts: UpdateOptions): CompiledQuery {
 export interface UpdateManyEntry {
   where: BoolExp;
   _set: Record<string, unknown>;
+  _inc?: Record<string, unknown>;
 }
 
 export interface UpdateManyOptions {
@@ -438,6 +470,7 @@ export function compileUpdateMany(opts: UpdateManyOptions): CompiledQuery[] {
       table: opts.table,
       where: entry.where,
       _set: entry._set,
+      _inc: entry._inc,
       returningColumns: opts.returningColumns,
       returningRelationships: opts.returningRelationships,
       returningComputedFields: opts.returningComputedFields,

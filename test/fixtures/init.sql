@@ -394,6 +394,13 @@ RETURNS SETOF client AS $$
   SELECT * FROM client WHERE trust_level >= min_level AND trust_level <= max_level
 $$ LANGUAGE SQL STABLE;
 
+-- ─── Tracked function: all args have defaults (P12.19b) ─────────────────
+
+CREATE OR REPLACE FUNCTION latest_clients(cutoff timestamptz DEFAULT now() - interval '1 year')
+RETURNS SETOF client AS $$
+  SELECT * FROM client WHERE created_at >= cutoff
+$$ LANGUAGE SQL STABLE;
+
 -- ─── Tracked function: session variable injection (P6.5d) ───────────────
 
 CREATE OR REPLACE FUNCTION my_clients(hasura_session json)

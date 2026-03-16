@@ -618,7 +618,7 @@ describe('Tracked function aggregate with where filter', () => {
     const { status, body } = await graphqlRequest(
       `query {
         searchClientsAggregate(
-          args: { searchTerm: "" }
+          args: { search_term: "" }
           where: { status: { _eq: ACTIVE } }
         ) {
           aggregate {
@@ -641,7 +641,7 @@ describe('Tracked function aggregate with where filter', () => {
     const { status, body } = await graphqlRequest(
       `query {
         searchClientsAggregate(
-          args: { searchTerm: "" }
+          args: { search_term: "" }
           where: { trustLevel: { _gte: 2 } }
         ) {
           aggregate {
@@ -666,7 +666,7 @@ describe('Tracked function aggregate with where filter', () => {
     const { status, body } = await graphqlRequest(
       `query {
         searchClientsAggregate(
-          args: { searchTerm: "a" }
+          args: { search_term: "a" }
           where: { status: { _eq: ACTIVE } }
         ) {
           aggregate {
@@ -716,7 +716,7 @@ describe('Tracked function return-table row-level filter', () => {
     const token = await tokens.backoffice();
     const { status, body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "" }) {
+        searchClients(args: { search_term: "" }) {
           id
           username
           status
@@ -780,7 +780,7 @@ describe('Tracked function return-table row-level filter', () => {
     const token = await tokens.backoffice();
     const { status, body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "alice" }) {
+        searchClients(args: { search_term: "alice" }) {
           id
           username
           email
@@ -807,7 +807,7 @@ describe('Tracked function return-table row-level filter', () => {
     const token = await tokens.client(ALICE_ID);
     const { status, body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "alice" }) {
+        searchClients(args: { search_term: "alice" }) {
           id
           username
         }
@@ -824,7 +824,7 @@ describe('Tracked function return-table row-level filter', () => {
     const { status, body } = await graphqlRequest(
       `query {
         searchClientsByTrust(
-          args: { minLevel: 1 }
+          args: { min_level: 1 }
           where: { status: { _eq: ACTIVE } }
         ) {
           id

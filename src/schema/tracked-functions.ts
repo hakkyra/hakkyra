@@ -315,7 +315,8 @@ export function buildTrackedFunctionFields(
     if (userArgs.length > 0) {
       const argsFields: Record<string, { type: GraphQLInputType }> = {};
       for (const arg of userArgs) {
-        argsFields[toCamelCase(arg.name)] = {
+        // P12.8: Use the PG parameter name directly (Hasura convention)
+        argsFields[arg.name] = {
           type: pgArgTypeToGraphQL(arg.pgType, enumTypes, enumNames),
         };
       }
@@ -330,8 +331,15 @@ export function buildTrackedFunctionFields(
     const fieldArgs: GraphQLFieldConfigArgumentMap = {};
 
     if (argsInputType) {
-      // Hasura makes tracked function args non-null
-      fieldArgs['args'] = { type: new GraphQLNonNull(argsInputType) };
+      // P12.19b: Determine if args should be nullable.
+      // If ALL user-facing args have PG defaults, args is nullable.
+      // Otherwise, args is non-null.
+      const allUserArgsHaveDefaults = userArgsAllHaveDefaults(trackedFn);
+      if (allUserArgsHaveDefaults) {
+        fieldArgs['args'] = { type: argsInputType };
+      } else {
+        fieldArgs['args'] = { type: new GraphQLNonNull(argsInputType) };
+      }
     }
 
     // ── Scalar-returning functions (jsonb, json, text, int, etc.) ──────
@@ -406,7 +414,11 @@ export function buildTrackedFunctionFields(
         if (aggType) {
           const aggArgs: GraphQLFieldConfigArgumentMap = {};
           if (argsInputType) {
-            aggArgs['args'] = { type: new GraphQLNonNull(argsInputType) };
+            // P12.19b: match same nullability as the main field
+            const allDefaults = userArgsAllHaveDefaults(trackedFn);
+            aggArgs['args'] = allDefaults
+              ? { type: argsInputType }
+              : { type: new GraphQLNonNull(argsInputType) };
           }
           const filterType2 = filterTypes.get(key);
           if (filterType2) {
@@ -447,6 +459,31 @@ export function buildTrackedFunctionFields(
   }
 
   return { queryFields, mutationFields, inputTypes };
+}
+
+// ─── Utility: check if all user-facing args have PG defaults ─────────────
+
+/**
+ * Determine whether ALL user-facing args of a tracked function have
+ * PostgreSQL DEFAULT values.
+ *
+ * PG stores `pronargdefaults` = number of trailing input args with defaults.
+ * We check each user arg's position in the full arg list and see if it falls
+ * within the default-covered range.
+ */
+export function userArgsAllHaveDefaults(trackedFn: TrackedFunctionInfo): boolean {
+  const { functionInfo: fn, userArgs } = trackedFn;
+  if (userArgs.length === 0) return true;
+
+  const totalArgs = fn.argTypes.length;
+  const firstDefaultIdx = totalArgs - fn.numArgsWithDefaults;
+
+  // For each user arg, find its position in the full arg list
+  for (const ua of userArgs) {
+    const idx = fn.argNames.indexOf(ua.name);
+    if (idx < 0 || idx < firstDefaultIdx) return false;
+  }
+  return true;
 }
 
 // ─── SQL Compiler for Tracked Functions ──────────────────────────────────
@@ -701,9 +738,8 @@ export function extractFuncArgs(
       continue;
     }
 
-    // User argument: get from args input
-    const camelName = toCamelCase(argName);
-    const value = fnArgs?.[camelName];
+    // User argument: get from args input (P12.8: use raw PG arg name)
+    const value = fnArgs?.[argName];
 
     // If not provided and this arg has a PG DEFAULT, omit it
     if (value === undefined && i >= firstDefaultIdx) continue;

@@ -1561,11 +1561,12 @@ Hasura uses lowercase `numeric` scalar for some action args.
 
 Missing tables: `AuthenticationMethodProvider`, `BrandAuthenticationProvider`, `BrandCurrency`, `CampaignContentQueue`, `CampaignEventType`, `CampaignPlayerPayment`, `CampaignPlayerStateType`, `CampaignRewardTriggerType`, `CampaignSelectionType`, `CampaignState`, `ContentType`, `ExchangeRate`, `GameIntegrationBrand`, `GameProfile`, `GameProviderReference`, `GameSessionSummary`, `Jurisdiction`, `KycLevel`, `PlayerAuthentication`, `PlayerAuthenticationFactor`, `PlayerBonus`, `PlayerCoinBalance`, `PlayerDailyAmountPerType`, `PlayerDailyAmountPerTypeRt`, `PlayerDailyNetRevenue`, `PlayerEventGrouped`, `PlayerEventRemoved`, `PlayerLimitCounter`, `PlayerQuestionnaire`, `PlayerQuestionnaireFile`, `PlayerRisk`, `PlayerTask`, `PlayerTopGames`, `Promotion`, `Questionnaire`, `Risk`, `RiskCategory`, `Role`, `Setting`, `Task`, `TaskType`, `TempFile`, `TinyUrl`, `TransactionSummary`, `TransactionWithGameRound`, `UserEvent`, `VPlayer`, `VPlayerDaily`, `WageringRequirementResult`, `gameSession`.
 
-**Investigation result**: NOT a code bug. All 50 tables have valid Hasura metadata YAML in `server/hasura/metadata/databases/default/tables/`. Hakkyra reads the same metadata directory (confirmed in Dockerfile). The merger (`src/introspection/merger.ts:337-339`) correctly drops tables that exist in metadata but not in the connected PostgreSQL database (emitting `missing_table` warnings). The 50 tables were absent from the DB that hakkyra connected to during the comparison, while Hasura was likely connected to a different/fuller DB instance (or generates types from metadata alone without requiring DB presence).
+**Investigation result (updated 2026-03-16)**: Previous conclusion of "DB mismatch" was WRONG. Both services connect to the same DB (`postgresql://...@localhost:5432/neofix`), all 50 tables and all columns exist. Re-verified via direct DB queries and introspection debug logging.
 
-- [x] Investigate: root cause is DB mismatch, not code or metadata bug
-- [ ] Re-run comparison with both services connected to the same fully-migrated database
-- [ ] If Hasura generates types for metadata-only tables (no DB presence required), consider doing the same in hakkyra
+All 50 tables now appear in hakkyra's schema (confirmed via introspection query — 461 query root fields vs Hasura's 467, the 6 difference being tracked function aggregate variants per P12.6).
+
+- [x] Investigate: all 50 tables confirmed present in both DB and hakkyra schema
+- [x] Re-run comparison: tables are present, remaining differences are column-level (see P12.11)
 
 ### P11.14 — `groupedAggregates` Extension (Low)
 
@@ -1574,6 +1575,283 @@ Hakkyra exposes `groupedAggregates` fields on all `*Aggregate` types (~61 fields
 Not a bug — but for strict SDL compatibility, consider making this opt-in or removing it.
 
 - [ ] Decide: keep as extension (document divergence) or make configurable?
+
+---
+
+## Phase 12: API Parity IV (Live Introspection Comparison 2026-03-16)
+
+Fourth-round comparison using full introspection queries against both services on the same neofix DB (`localhost:5432/neofix`). Admin-level comparison plus **backoffice role** comparison (eliminates admin-only column noise).
+
+**Admin comparison**: 590 types only in Hasura, 621 only in Hakkyra, 56 field type mismatches, 796 input field diffs.
+
+**Backoffice role comparison** (cleaner — shows real client-facing gaps):
+- 188 types only in Hasura: IncInput, Updates, ObjRel/ArrRelInsertInput, JSONB mutation inputs, AggregateBoolExp bool_and/bool_or, AggregateOrderBy.
+- 1 missing query root field (`getGameSessionSummaryAggregate`), 0 missing mutation root fields.
+- 33 field type mismatches: 10 relationship nullability, 23 aggregate stat types (Numeric vs Float).
+- 54 fields missing: enum/UUID columns in Max/Min fields, aggregate relationship fields.
+- 78 input fields missing: AggregateBoolExp bool_and/bool_or, enum columns in Max/MinOrderBy, tracked function args, InetComparisonExp ops.
+- 627 input fields extra in hakkyra: admin-only columns in InsertInput/SetInput, boolean columns in Max/MinOrderBy, enum comparison _gt/_lt/_gte/_lte.
+- 196 arg diffs: missing _inc/_append/_prepend/_deleteAtPath/_deleteElem/_deleteKey on updates, _set nullability (Hasura nullable, hakkyra non-null), updateMany type name, tracked function mutation missing query args.
+
+**Player role comparison** (tightest — minimal permissions):
+- 32 types only in Hasura: Updates (5), JSONB mutation inputs (5), AggregateBoolExp (2), AggregateOrderBy (12), scalars (2), misc (6).
+- 0 missing root fields (query, mutation, subscription all match).
+- 23 field type mismatches: 8 relationship nullability, 14 ReferralLink aggregate stat Int vs Float, 1 Wallet nullability.
+- 17 fields missing: enum/UUID in Max/Min fields, `Reward.playerRewardsAggregate`, `WithdrawalWallet.wallet`, `AuthenticationProvider.method`.
+- 23 input fields missing: AggregateBoolExp bool_and/bool_or, enum columns in Max/MinOrderBy, AggregateOrderBy refs.
+- 1492 input fields extra in hakkyra: admin-only columns leaking into BoolExp/OrderBy/StreamCursor/InsertInput/SetInput.
+- 90 arg diffs: tracked function query args missing, `args` nullability, JSONB update ops, `_set` nullability, `numeric` scalar casing, updateMany type name.
+
+**Note**: Hakkyra does NOT scope GraphQL introspection by role — always returns full schema. SDL/OpenAPI/LLM-doc endpoints now respect `x-hasura-role` header with admin key (fixed this session). Hasura scopes all endpoints by role.
+
+### P12.1 — Missing Mutation Input Infrastructure: ObjRelInsertInput / ArrRelInsertInput (Critical)
+
+Hasura wraps nested relationship inserts in `*ObjRelInsertInput` (64 types) and `*ArrRelInsertInput` (48 types) wrapper types containing `data` + `onConflict` fields. Hakkyra uses direct type references (e.g., `PlayerInsertInput` instead of `PlayerObjRelInsertInput`).
+
+This causes 112 types to be missing and ~200 input field type mismatches (every InsertInput field referencing a relationship uses the wrong type).
+
+- [ ] Generate `*ObjRelInsertInput` types for each object relationship on insert-enabled tables (fields: `data: *InsertInput!`, `onConflict: *OnConflict`)
+- [ ] Generate `*ArrRelInsertInput` types for each array relationship on insert-enabled tables (fields: `data: [*InsertInput!]!`, `onConflict: *OnConflict`)
+- [ ] Update InsertInput relationship fields to reference wrapper types instead of direct types
+
+### P12.2 — Missing Mutation Input Infrastructure: IncInput (Critical) ✅
+
+Hasura generates 103 `*IncInput` types for numeric column increments during updates. Hakkyra has 0.
+
+- [x] Generate `*IncInput` types for each table with numeric columns (int, bigint, numeric, float)
+- [x] Wire into update mutations (update, update_by_pk, update_many)
+- [x] SQL compiler: `column = column + $N` for increment, `_set` takes precedence on collision
+- [x] 16 tests (schema, SQL compilation, E2E)
+
+### P12.3 — Missing Mutation Input Infrastructure: Updates (Critical)
+
+Hasura generates 127 `*Updates` types — batch update input types with `_set`, `_inc`, `where` fields. Used by `update_*_many` mutations. Hakkyra has 0.
+
+- [ ] Generate `*Updates` types for each table with update permissions
+- [ ] Wire into `update_*_many` mutations
+
+### P12.4 — Missing JSONB Mutation Operators (High)
+
+Hasura generates 135 JSONB mutation input types for tables with jsonb columns: `*AppendInput` (27), `*PrependInput` (27), `*DeleteAtPathInput` (27), `*DeleteElemInput` (27), `*DeleteKeyInput` (27). Hakkyra has 0.
+
+These allow jsonb-specific update operations (append to array, prepend, delete at path, delete element by index, delete key).
+
+- [ ] Generate `*AppendInput` types (fields: each jsonb column → `Jsonb`)
+- [ ] Generate `*PrependInput` types (same structure)
+- [ ] Generate `*DeleteAtPathInput` types (fields: each jsonb column → `[String!]`)
+- [ ] Generate `*DeleteElemInput` types (fields: each jsonb column → `Int`)
+- [ ] Generate `*DeleteKeyInput` types (fields: each jsonb column → `String`)
+- [ ] Wire into update mutations (`_append`, `_prepend`, `_deleteAtPath`, `_deleteElem`, `_deleteKey` args)
+
+### P12.5 — Missing AggregateBoolExp Types (High)
+
+Hasura has 176 `AggregateBoolExp` types, Hakkyra has 96. The missing 80 types are `bool_and`/`bool_or` aggregate boolean expressions and their associated `SelectColumn*AggregateBoolExp*` enum types. These allow filtering parent rows based on boolean aggregate conditions on array relationships (e.g., "campaigns where ALL rewards are active").
+
+- [ ] Generate `*AggregateBoolExpBool_and` / `*AggregateBoolExpBool_or` input types for each array relationship with boolean columns
+- [ ] Generate associated `*SelectColumn*AggregateBoolExpBool_and/orArgumentsColumns` enum types
+- [ ] Add `bool_and` / `bool_or` fields to existing `*AggregateBoolExp` types
+
+### P12.6 — Tracked Function Aggregate Root Fields Missing (High)
+
+6 tracked functions are missing `*Aggregate` query root fields and their subscription equivalents. These are functions that return SETOF rows and should have aggregate variants.
+
+Missing query root fields:
+- `gameSessionTransactionCountAggregate`
+- `getGameSessionSummaryAggregate`
+- `getMarketingContractsAggregate`
+- `getPlayerMonthlySummaryAggregate`
+- `getTournamentLeaderboardAggregate`
+- `getTournamentLeaderboardCountAggregate`
+
+- [ ] Generate aggregate root fields for tracked functions returning SETOF table types
+- [ ] Add matching subscription root fields
+
+### P12.7 — Missing Subscription Root Fields (Medium)
+
+3 subscription root fields present in Hasura are missing in Hakkyra (beyond the 6 tracked function aggregates in P12.6):
+
+- `counterProgressAverageBet → [CounterProgressAverageBetResult!]!`
+- `counterProgressRtp → [CounterProgressRtp!]!`
+- `playersWithMatchingData → [PlayersWithMatchingData!]!`
+
+These appear to be native queries or tracked functions exposed as subscriptions. Their associated types (BoolExp, SelectColumn, OrderBy, StreamCursor) also need generation.
+
+- [ ] Investigate source of these 3 subscription fields (native queries? tracked functions?)
+- [ ] Generate types and root fields to match
+
+### P12.8 — Tracked Function Arg Naming Convention (Medium) ✅
+
+Hasura uses underscore-prefixed args for tracked function parameters: `_key`, `_externalId`, `_initialAmount`, `_code`, `_properties`, `_uniqKey`, `_channel`, `_destination`, `_parameters`, `_targetAmount`. Hakkyra uses PascalCase: `Key`, `ExternalId`, `InitialAmount`, `Code`, `Properties`, `UniqKey`, `Channel`, `Destination`, `Parameters`, `TargetAmount`.
+
+Affected functions: `fnInsertReward`, `fnPlayerStartCounter`, `fnTriggerCampaign`, `fnTriggerContent`.
+
+- [x] Use raw PG parameter names directly in args input types (no camelCase conversion)
+- [x] Updated resolver to read args by raw PG name
+- [x] 9 new tests
+
+### P12.9 — Object Relationship Nullability Regression (Medium)
+
+12 object relationship fields are `NON_NULL` in Hakkyra but nullable in Hasura. These appear to be reverse-FK or manual relationships that should be nullable per P11.3 rules, but the fix didn't catch all cases.
+
+Affected: `Balance.player`, `BigWin.currency`, `CurrentCampaignContent.campaignPlayer`, `Game.brands` (array!), `Player.data` (array!), `PlayerBonus.bonus`, `PlayerEvent.player`, `PlayerLimit.currentCounter` (array!), `PlayerReward.player`, `TransactionSummary.currency/game/payment`, `Wallet.balance/paymentMethod`.
+
+- [ ] Audit each field — some are array relationships (`Game.brands`, `Player.data`, `PlayerLimit.currentCounter`) that should have nullable list items? Or non-null lists?
+- [ ] Fix nullability to match Hasura exactly
+
+### P12.10 — Aggregate Stat Return Type: `Numeric` Source Columns Return `Float` (Medium) ✅
+
+P11.1 changed ALL avg/stddev/variance fields to return `Float`. This is wrong for `numeric` source columns — Hasura returns `Numeric` for those.
+
+**Hasura's actual rule**: `numeric` source → `Numeric` for avg/stddev/variance. `int`/`bigint` source → `Float`. Hakkyra currently returns `Float` for everything.
+
+Affected (confirmed from backoffice comparison): `BalanceAvgFields.{nativeTotal,total}`, `BalanceStddevFields.{nativeTotal,total}`, `BalanceVarianceFields.{nativeTotal,total}`, `PlayerRewardAvgFields.outcome`, `PlayerRewardStddevFields.outcome`, `PlayerRewardVarianceFields.outcome`. All are computed fields returning `numeric`.
+
+(The ReferralLink integer fields from admin comparison are admin-only and don't show in backoffice — those use `Float` correctly.)
+
+- [x] Fix `resolveStatAggReturnType()`: return `Numeric` for `numeric` source type, `Float` for `int`/`bigint`
+- [x] Updated 6 test assertions
+
+### P12.11 — Admin-Only Columns Not Exposed in Schema (Design Decision)
+
+413 fields missing in Hakkyra across many tables. **Root cause found**: NOT a DB mismatch. Both services connect to the same DB (`localhost:5432/neofix`). All columns verified present via direct DB query and introspection debug logging (all 12 `big_win` columns introspected correctly).
+
+The real cause is `getVisibleColumns()` in `type-builder.ts:81-103`: it unions columns from all role select permissions to determine schema visibility. Columns not listed in ANY role's select permission are excluded from the GraphQL schema. Hasura's admin role always sees ALL columns regardless of select permission config.
+
+Example: `big_win` has `anonymous` and `player` permissions listing only `{amount, brand_id, created_at, currency_id, id, multiplier}`. The FK columns (`player_id`, `game_id`, `game_round_id`, `transaction_id`, `game_integration_id`) and `created_at_date` are admin-only — no role lists them. Hakkyra excludes them; Hasura includes them for admin.
+
+Affected: `Affiliate.internal`, `Authentication.referralToken`, `Balance.createdAtDate`, `BigWin.{createdAtDate,gameId,gameIntegrationId,gameRoundId,playerId,transactionId}`, `Brand.{active,createdAt,defaultJurisdiction,updatedAt}`, `BrandLanguage.{active,createdAt,updatedAt}`, `Campaign.createdAtDate`, `CampaignContent.active`, `CampaignPlayer.instanceId`, plus many more timestamp/audit/FK columns across ~50 tables.
+
+All corresponding BoolExp, OrderBy, StreamCursorValueInput, SelectColumn, Constraint enum values, and aggregate fields are also missing.
+
+**Decision**: Hakkyra's approach (schema only shows columns accessible to at least one role) is arguably better — it keeps the schema clean and doesn't leak admin-only column names. For Hasura compat, could add an option to expose all columns.
+
+- [ ] Decide: keep current behavior (cleaner schema) or add `expose_all_columns: true` config option for Hasura compat?
+- [ ] If keeping current behavior, document this as intentional divergence
+
+### P12.12 — Enum Comparison Exp Extra Operators (Low) ✅
+
+Hakkyra adds `_gt`, `_lt`, `_gte`, `_lte` operators on enum comparison expressions (e.g., `AuthenticationMethodEnumComparisonExp`, `CampaignEventTypeEnumComparisonExp`, `CampaignPlayerStateTypeEnumComparisonExp`, `CampaignStateEnumComparisonExp`). Hasura does not have these — it only supports `_eq`, `_neq`, `_in`, `_nin`, `_is_null` for enums.
+
+- [x] Remove `_gt`/`_lt`/`_gte`/`_lte` from table-based enum comparison types only (PG native enums keep them per P10.9)
+- [x] 15 tests
+
+### P12.13 — Boolean Columns in Max/Min OrderBy (Low) ✅
+
+Hakkyra includes boolean columns in `*MaxOrderBy` / `*MinOrderBy` types (e.g., `BrandCurrencyMaxOrderBy.active`, `CounterMaxOrderBy.autostart`, `GameMaxOrderBy.freespins`, `FileMaxOrderBy.isUploaded`, etc.). Hasura excludes booleans from min/max ordering.
+
+- [x] Exclude boolean columns from `*MaxOrderBy` / `*MinOrderBy` input types
+- [x] 3 tests
+
+### P12.14 — `distinctOn` Arg Missing on Computed Field Array Relationships (Low)
+
+3 computed field array relationships are missing the `distinctOn` argument:
+- `Game.brands(distinctOn: [BrandSelectColumn!])`
+- `Player.data(distinctOn: [JsonResultSelectColumn!])`
+- `PlayerLimit.currentCounter(distinctOn: [PlayerLimitCounterSelectColumn!])`
+
+- [ ] Add `distinctOn` arg to computed field array relationship fields
+
+### P12.15 — Scalar Casing Mismatches: `Json`/`json`, `numeric`/`Numeric`, `jsonb`/`Jsonb` (Low)
+
+Hasura uses lowercase scalars in some contexts: `numeric` for action args (e.g., `requestWithdrawal(amount: numeric!)`), `Json` (PascalCase) for tracked function args, `jsonb` (lowercase) in some types. Hakkyra consistently uses PascalCase (`Numeric`, `json`, `Jsonb`).
+
+Player role examples: `startDeposit(amount: numeric!)` → hakkyra has `Numeric!`, `updateLimit(amount: numeric)` → hakkyra has `Numeric`.
+
+- [ ] Investigate Hasura's scalar casing rules — when does it use lowercase vs PascalCase?
+- [ ] Match Hasura's casing for each scalar context
+
+### P12.16 — Missing Aggregate OrderBy Types (Low)
+
+15 `*AggregateOrderBy` types present in Hasura are missing in Hakkyra:
+- `BrandAggregateOrderBy`, `BrandMaxOrderBy`, `BrandMinOrderBy`
+- `JsonResultAggregateOrderBy`
+- `PlayerLimitCounter{Aggregate,Avg,Max,Min,Stddev,StddevPop,StddevSamp,Sum,VarPop,VarSamp,Variance}OrderBy`
+
+These are needed for ordering parent rows by aggregate values of array relationships.
+
+- [ ] Generate `*AggregateOrderBy` types for array relationships that currently lack them
+- [ ] Investigate why Brand and PlayerLimitCounter are missing (possibly related to P11.13 DB mismatch)
+
+### P12.17 — Missing Constraint Enum Values (Low)
+
+Many `*Constraint` enums are missing unique index entries that Hasura includes. Examples: `BonusConstraint.bonusNameIdx`, `CampaignConstraint.campaignCheckingGroupIdx`, `GameConstraint.externalIdKey`, etc. (~30 missing values across ~20 enums).
+
+- [ ] Introspect unique indexes from PostgreSQL and include in Constraint enums
+- [ ] Verify these are real DB indexes vs Hasura metadata artifacts
+
+### P12.18 — Update Mutation `_set` Nullability (Medium) ✅
+
+Hasura: `updateFooByPk(_set: FooSetInput)` — `_set` is nullable (optional).
+Hakkyra: `updateFooByPk(_set: FooSetInput!)` — `_set` is non-null (required).
+
+This means in Hasura you can call `updateFooByPk(pkColumns: ..., _inc: ...)` without `_set`. In hakkyra, `_set` is always required.
+
+- [x] Make `_set` nullable on `updateByPk`, `update`, and `updateMany` mutations
+- [x] 1 test
+
+### P12.19 — Tracked Function Mutations Missing Query Args (Medium)
+
+Hasura tracked function mutations that return SETOF include query-style args: `distinctOn`, `limit`, `offset`, `orderBy`, `where`. Hakkyra only has `args`.
+
+Affected mutations: `acceptContract`, `contentEvent`, `rejectContract`, `backofficeSetContract`, `createPayment`.
+Affected queries: `getMarketingContracts`, `getPlayerMonthlySummary`, `getTournamentLeaderboard`, `getTournamentLeaderboardCount`.
+
+- [ ] Add `distinctOn`, `limit`, `offset`, `orderBy`, `where` args to tracked function fields returning SETOF (both queries and mutations)
+
+### P12.19b — Tracked Function `args` Nullability Depends on Required Args (Medium) ✅
+
+P11.6 made all tracked function `args` non-null. But Hasura makes `args` nullable when ALL user-facing args (excluding `hasura_session`) have defaults. If any user-facing arg is required, `args` is non-null.
+
+Examples: `latestWins(args: LatestWinsArgs)` — nullable because `cutoff` has a default. `acceptContract(args: AcceptContractArgs!)` — non-null because it has required args.
+
+- [x] Make `args` nullable when all user-facing function parameters have defaults
+- [x] Keep `args` non-null when any parameter lacks a default
+- [x] `userArgsAllHaveDefaults()` helper using PG `numArgsWithDefaults` metadata
+
+### P12.20 — Enum/UUID Columns Missing from Max/Min Aggregate Fields (Medium) ✅
+
+Hasura includes enum-typed and UUID columns in `*MaxFields`/`*MinFields` (e.g., `PaymentMaxFields.paymentType`, `PlayerMaxFields.token`, `WalletMaxFields.status`). Hakkyra excludes them.
+
+54 fields affected across ~25 types. These are useful — enums have ordering (alphabetic), UUIDs have ordering (lexicographic).
+
+- [x] Include enum-typed columns in Max/Min aggregate fields (with correct enum type)
+- [x] Include UUID columns in Max/Min aggregate fields
+- [x] 5 tests
+
+### P12.21 — Inet/Interval Comparison Exp Missing Order Operators (Low) ✅
+
+`InetComparisonExp` and `IntervalComparisonExp` are missing `_gt`, `_gte`, `_lt`, `_lte` operators in Hakkyra. Hasura includes them.
+
+- [x] Add ordering operators to Inet and Interval comparison expression types
+- [x] Tests in comparison-expression-fixes.test.ts
+
+### P12.22 — Role-Scoped Introspection (Medium)
+
+Hakkyra returns the full schema (4602 types) regardless of the requesting role. Hasura scopes introspection by role (e.g., 2810 types for backoffice). When using admin key with `x-hasura-role` header, hakkyra should return the role-specific schema.
+
+- [ ] Support `x-hasura-role` header with admin secret for role-scoped introspection/SDL
+- [ ] Filter schema types, fields, and root operations by the role's permissions
+
+### P12.23 — InsertInput/SetInput Expose Admin-Only Columns to Non-Admin Roles (Medium)
+
+Hakkyra's InsertInput and SetInput types include ALL introspected columns regardless of role permissions. Hasura scopes these by role — backoffice InsertInput/SetInput only include columns that role has insert/update permission for.
+
+627 extra input fields found in backoffice comparison. Example: `CurrencyInsertInput` in hakkyra includes `createdAt`, `updatedAt`, `bigWinThreshold` which backoffice shouldn't see.
+
+- [ ] Scope InsertInput columns by insert permission column list
+- [ ] Scope SetInput columns by update permission column list
+
+### P12.24 — Extra Types Only in Hakkyra (Cleanup)
+
+621 types exist only in Hakkyra. Most are intentional extensions:
+- 342 `*GroupByAggregate` types (P11.14 extension)
+- 273 `*GroupByKeys` + `*UpdateManyInput` types (Hakkyra-specific mutation approach)
+- 3 extra BoolExp/SelectColumn types for native queries
+- Extra scalars: `Bytea`, `Time`, `NumericComparisonExpLm`, `BigintComparisonExpLm`
+
+- [ ] Decide on GroupBy extension: keep (document as extension) or make opt-in?
+- [ ] Decide on UpdateManyInput: replace with Hasura's `*Updates` approach (P12.3) or keep both?
+- [ ] Audit extra scalars — remove if unused
 
 ---
 

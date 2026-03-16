@@ -111,6 +111,34 @@ describe('GraphQL Schema Generation', () => {
       expect(fields['updateClientByPk']).toBeDefined();
     });
 
+    it('should have nullable _set arg on all update mutations (P12.18)', () => {
+      const mutationType = schema.getMutationType()!;
+      const fields = mutationType.getFields();
+
+      // update (bulk) — _set should be nullable
+      const updateField = fields['updateClients'];
+      const updateSetArg = updateField.args.find((a) => a.name === '_set');
+      expect(updateSetArg).toBeDefined();
+      expect(updateSetArg!.type).not.toBeInstanceOf(GraphQLNonNull);
+
+      // updateByPk — _set should be nullable
+      const updateByPkField = fields['updateClientByPk'];
+      const updateByPkSetArg = updateByPkField.args.find((a) => a.name === '_set');
+      expect(updateByPkSetArg).toBeDefined();
+      expect(updateByPkSetArg!.type).not.toBeInstanceOf(GraphQLNonNull);
+
+      // updateMany — _set inside the UpdateManyInput type should be nullable
+      const updateManyField = fields['updateClientMany'];
+      const updatesArg = updateManyField.args.find((a) => a.name === 'updates');
+      expect(updatesArg).toBeDefined();
+      // Unwrap NonNull > List > NonNull to get the UpdateManyInput type
+      const listType = (updatesArg!.type as GraphQLNonNull<any>).ofType as GraphQLList<any>;
+      const inputType = (listType.ofType as GraphQLNonNull<any>).ofType as GraphQLInputObjectType;
+      const setField = inputType.getFields()['_set'];
+      expect(setField).toBeDefined();
+      expect(setField.type).not.toBeInstanceOf(GraphQLNonNull);
+    });
+
     it('should have updateMany field with array return type [MutationResponse]', () => {
       const mutationType = schema.getMutationType()!;
       const fields = mutationType.getFields();
@@ -546,14 +574,14 @@ describe('GraphQL Schema Generation', () => {
   });
 
   describe('Aggregate return types — stat return types (P10.11)', () => {
-    it('should return Float for numeric source columns in AvgFields', () => {
+    it('should return Numeric for numeric source columns in AvgFields', () => {
       const typeMap = schema.getTypeMap();
       const avgType = typeMap['AccountAvgFields'] as GraphQLObjectType | undefined;
       expect(avgType).toBeDefined();
       const fields = avgType!.getFields();
-      // account.balance is NUMERIC → avg should still return Float (Hasura behavior)
+      // account.balance is NUMERIC → avg returns Numeric (Hasura behavior)
       expect(fields['balance']).toBeDefined();
-      expect(fields['balance'].type.toString()).toBe('Float');
+      expect(fields['balance'].type.toString()).toBe('Numeric');
     });
 
     it('should return Float for integer source columns in AvgFields', () => {
@@ -566,13 +594,13 @@ describe('GraphQL Schema Generation', () => {
       expect(fields['trustLevel'].type.toString()).toBe('Float');
     });
 
-    it('should return Float for numeric source columns in StddevFields', () => {
+    it('should return Numeric for numeric source columns in StddevFields', () => {
       const typeMap = schema.getTypeMap();
       const stddevType = typeMap['AccountStddevFields'] as GraphQLObjectType | undefined;
       expect(stddevType).toBeDefined();
       const fields = stddevType!.getFields();
       expect(fields['balance']).toBeDefined();
-      expect(fields['balance'].type.toString()).toBe('Float');
+      expect(fields['balance'].type.toString()).toBe('Numeric');
     });
 
     it('should return Float for integer source columns in StddevFields', () => {
@@ -584,40 +612,40 @@ describe('GraphQL Schema Generation', () => {
       expect(fields['trustLevel'].type.toString()).toBe('Float');
     });
 
-    it('should return Float for numeric source columns in VarianceFields', () => {
+    it('should return Numeric for numeric source columns in VarianceFields', () => {
       const typeMap = schema.getTypeMap();
       const varType = typeMap['AccountVarianceFields'] as GraphQLObjectType | undefined;
       expect(varType).toBeDefined();
       const fields = varType!.getFields();
       expect(fields['balance']).toBeDefined();
-      expect(fields['balance'].type.toString()).toBe('Float');
+      expect(fields['balance'].type.toString()).toBe('Numeric');
     });
 
-    it('should return Float for numeric source columns in VarPopFields', () => {
+    it('should return Numeric for numeric source columns in VarPopFields', () => {
       const typeMap = schema.getTypeMap();
       const varPopType = typeMap['AccountVarPopFields'] as GraphQLObjectType | undefined;
       expect(varPopType).toBeDefined();
       const fields = varPopType!.getFields();
       expect(fields['balance']).toBeDefined();
-      expect(fields['balance'].type.toString()).toBe('Float');
+      expect(fields['balance'].type.toString()).toBe('Numeric');
     });
 
-    it('should return Float for numeric source columns in StddevPopFields', () => {
+    it('should return Numeric for numeric source columns in StddevPopFields', () => {
       const typeMap = schema.getTypeMap();
       const stddevPopType = typeMap['AccountStddevPopFields'] as GraphQLObjectType | undefined;
       expect(stddevPopType).toBeDefined();
       const fields = stddevPopType!.getFields();
       expect(fields['balance']).toBeDefined();
-      expect(fields['balance'].type.toString()).toBe('Float');
+      expect(fields['balance'].type.toString()).toBe('Numeric');
     });
 
-    it('should return Float for numeric source columns in StddevSampFields', () => {
+    it('should return Numeric for numeric source columns in StddevSampFields', () => {
       const typeMap = schema.getTypeMap();
       const stddevSampType = typeMap['AccountStddevSampFields'] as GraphQLObjectType | undefined;
       expect(stddevSampType).toBeDefined();
       const fields = stddevSampType!.getFields();
       expect(fields['balance']).toBeDefined();
-      expect(fields['balance'].type.toString()).toBe('Float');
+      expect(fields['balance'].type.toString()).toBe('Numeric');
     });
 
     it('should return Int for integer source columns in SumFields', () => {
@@ -638,6 +666,98 @@ describe('GraphQL Schema Generation', () => {
       // account.balance is NUMERIC → sum should return Numeric
       expect(fields['balance']).toBeDefined();
       expect(fields['balance'].type.toString()).toBe('Numeric');
+    });
+  });
+
+  describe('P12.13 — Exclude boolean columns from MaxOrderBy/MinOrderBy', () => {
+    it('should not include boolean columns in MaxOrderBy', () => {
+      const typeMap = schema.getTypeMap();
+      const maxOrderBy = typeMap['AccountMaxOrderBy'] as GraphQLInputObjectType | undefined;
+      expect(maxOrderBy).toBeDefined();
+      const fields = maxOrderBy!.getFields();
+      // account.active is BOOLEAN — should be excluded from MaxOrderBy
+      expect(fields['active']).toBeUndefined();
+      // account.balance is NUMERIC — should be included
+      expect(fields['balance']).toBeDefined();
+    });
+
+    it('should not include boolean columns in MinOrderBy', () => {
+      const typeMap = schema.getTypeMap();
+      const minOrderBy = typeMap['AccountMinOrderBy'] as GraphQLInputObjectType | undefined;
+      expect(minOrderBy).toBeDefined();
+      const fields = minOrderBy!.getFields();
+      // account.active is BOOLEAN — should be excluded from MinOrderBy
+      expect(fields['active']).toBeUndefined();
+      // account.balance is NUMERIC — should be included
+      expect(fields['balance']).toBeDefined();
+    });
+
+    it('should still include boolean columns in the table OrderBy type', () => {
+      const typeMap = schema.getTypeMap();
+      const orderBy = typeMap['AccountOrderBy'] as GraphQLInputObjectType | undefined;
+      expect(orderBy).toBeDefined();
+      const fields = orderBy!.getFields();
+      // Boolean columns are still orderable in the main OrderBy type
+      expect(fields['active']).toBeDefined();
+    });
+  });
+
+  describe('P12.20 — Include enum and UUID columns in MaxFields/MinFields', () => {
+    it('should include UUID columns in MinFields', () => {
+      const typeMap = schema.getTypeMap();
+      const minType = typeMap['ClientMinFields'] as GraphQLObjectType | undefined;
+      expect(minType).toBeDefined();
+      const fields = minType!.getFields();
+      // client.id is UUID — should be included in MinFields
+      expect(fields['id']).toBeDefined();
+      expect(fields['id'].type.toString()).toBe('Uuid');
+    });
+
+    it('should include UUID columns in MaxFields', () => {
+      const typeMap = schema.getTypeMap();
+      const maxType = typeMap['ClientMaxFields'] as GraphQLObjectType | undefined;
+      expect(maxType).toBeDefined();
+      const fields = maxType!.getFields();
+      // client.id is UUID — should be included in MaxFields
+      expect(fields['id']).toBeDefined();
+      expect(fields['id'].type.toString()).toBe('Uuid');
+    });
+
+    it('should include enum-typed columns in MinFields', () => {
+      const typeMap = schema.getTypeMap();
+      const minType = typeMap['InvoiceMinFields'] as GraphQLObjectType | undefined;
+      expect(minType).toBeDefined();
+      const fields = minType!.getFields();
+      // invoice.state is invoice_state enum — should be included in MinFields
+      expect(fields['state']).toBeDefined();
+      expect(fields['state'].type.toString()).toBe('InvoiceState');
+      // invoice.type is ledger_type enum — should be included in MinFields
+      expect(fields['type']).toBeDefined();
+      expect(fields['type'].type.toString()).toBe('LedgerType');
+    });
+
+    it('should include enum-typed columns in MaxFields', () => {
+      const typeMap = schema.getTypeMap();
+      const maxType = typeMap['InvoiceMaxFields'] as GraphQLObjectType | undefined;
+      expect(maxType).toBeDefined();
+      const fields = maxType!.getFields();
+      // invoice.state is invoice_state enum — should be included in MaxFields
+      expect(fields['state']).toBeDefined();
+      expect(fields['state'].type.toString()).toBe('InvoiceState');
+      // invoice.type is ledger_type enum — should be included in MaxFields
+      expect(fields['type']).toBeDefined();
+      expect(fields['type'].type.toString()).toBe('LedgerType');
+    });
+
+    it('should still include numeric and string columns in MinFields/MaxFields', () => {
+      const typeMap = schema.getTypeMap();
+      const minType = typeMap['InvoiceMinFields'] as GraphQLObjectType | undefined;
+      expect(minType).toBeDefined();
+      const fields = minType!.getFields();
+      // invoice.amount is NUMERIC — should still be included
+      expect(fields['amount']).toBeDefined();
+      // invoice.provider is TEXT — should still be included
+      expect(fields['provider']).toBeDefined();
     });
   });
 
@@ -1066,7 +1186,7 @@ describe('GraphQL Schema Generation', () => {
       // The args input type should have a playerId field
       const argsType = (argsArg!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['playerId']).toBeDefined();
+      expect(argsFields['player_id']).toBeDefined();
     });
 
     it('should NOT have where/orderBy/limit/offset args on scalar-returning functions', () => {
@@ -1092,8 +1212,8 @@ describe('GraphQL Schema Generation', () => {
       // args is NonNull (P11.6), unwrap to get the InputObjectType
       const argsType = (argsArg!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['pId']).toBeDefined();
-      expect(argsFields['pId'].type.toString()).toBe('Uuid');
+      expect(argsFields['p_id']).toBeDefined();
+      expect(argsFields['p_id'].type.toString()).toBe('Uuid');
     });
 
     it('should use Numeric scalar for numeric-typed function args', () => {
@@ -1101,8 +1221,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['pMinBalance']).toBeDefined();
-      expect(argsFields['pMinBalance'].type.toString()).toBe('Numeric');
+      expect(argsFields['p_min_balance']).toBeDefined();
+      expect(argsFields['p_min_balance'].type.toString()).toBe('Numeric');
     });
 
     it('should use Jsonb scalar for jsonb-typed function args', () => {
@@ -1110,8 +1230,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['pMetadata']).toBeDefined();
-      expect(argsFields['pMetadata'].type.toString()).toBe('Jsonb');
+      expect(argsFields['p_metadata']).toBeDefined();
+      expect(argsFields['p_metadata'].type.toString()).toBe('Jsonb');
     });
 
     it('should use json scalar for json-typed function args', () => {
@@ -1119,8 +1239,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['pExtra']).toBeDefined();
-      expect(argsFields['pExtra'].type.toString()).toBe('json');
+      expect(argsFields['p_extra']).toBeDefined();
+      expect(argsFields['p_extra'].type.toString()).toBe('json');
     });
 
     it('should use Bigint scalar for bigint-typed function args', () => {
@@ -1128,8 +1248,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['pLimit']).toBeDefined();
-      expect(argsFields['pLimit'].type.toString()).toBe('Bigint');
+      expect(argsFields['p_limit']).toBeDefined();
+      expect(argsFields['p_limit'].type.toString()).toBe('Bigint');
     });
 
     it('should use Bpchar scalar for bpchar-typed function args', () => {
@@ -1137,8 +1257,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['pBrandCode']).toBeDefined();
-      expect(argsFields['pBrandCode'].type.toString()).toBe('Bpchar');
+      expect(argsFields['p_brand_code']).toBeDefined();
+      expect(argsFields['p_brand_code'].type.toString()).toBe('Bpchar');
     });
   });
 

@@ -62,6 +62,14 @@ beforeAll(async () => {
     "$fn$ LANGUAGE SQL VOLATILE;"
   );
 
+  // Create a function where ALL user args have PG defaults (P12.19b)
+  await pool.query(
+    "CREATE OR REPLACE FUNCTION public.latest_clients(cutoff timestamptz DEFAULT now() - interval '1 year') " +
+    "RETURNS SETOF client AS $fn$ " +
+    "SELECT * FROM client WHERE created_at >= cutoff " +
+    "$fn$ LANGUAGE SQL STABLE;"
+  );
+
   // Create the utils schema and a function in it for non-public schema tests
   await pool.query("CREATE SCHEMA IF NOT EXISTS utils");
   await pool.query(
@@ -187,7 +195,7 @@ describe('Tracked Functions — E2E Query Resolution', () => {
   it('should execute a SETOF function with admin secret', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "alice" }) {
+        searchClients(args: { search_term: "alice" }) {
           id
           username
           email
@@ -212,7 +220,7 @@ describe('Tracked Functions — E2E Query Resolution', () => {
     const { body } = await graphqlRequest(
       `query {
         searchClients(
-          args: { searchTerm: "" }
+          args: { search_term: "" }
           where: { status: { _eq: ACTIVE } }
         ) {
           id
@@ -237,7 +245,7 @@ describe('Tracked Functions — E2E Query Resolution', () => {
     const { body } = await graphqlRequest(
       `query {
         searchClients(
-          args: { searchTerm: "" }
+          args: { search_term: "" }
           limit: 2
         ) {
           id
@@ -257,7 +265,7 @@ describe('Tracked Functions — E2E Query Resolution', () => {
     const { body } = await graphqlRequest(
       `query {
         searchClients(
-          args: { searchTerm: "" }
+          args: { search_term: "" }
           orderBy: [{ username: ASC }]
         ) {
           username
@@ -281,7 +289,7 @@ describe('Tracked Functions — E2E Query Resolution', () => {
   it('should include relationships on SETOF function results', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "alice" }) {
+        searchClients(args: { search_term: "alice" }) {
           id
           username
           branch {
@@ -316,7 +324,7 @@ describe('Tracked Functions — E2E Mutation Resolution', () => {
     try {
       const { body } = await graphqlRequest(
         `mutation {
-          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          deactivateClient(args: { client_uuid: "${CHARLIE_ID}" }) {
             id
             username
             status
@@ -344,7 +352,7 @@ describe('Tracked Functions — Permissions', () => {
     const token = await tokens.backoffice();
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "" }) {
+        searchClients(args: { search_term: "" }) {
           id
           username
         }
@@ -362,7 +370,7 @@ describe('Tracked Functions — Permissions', () => {
     const token = await tokens.client();
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "alice" }) {
+        searchClients(args: { search_term: "alice" }) {
           id
           username
         }
@@ -379,7 +387,7 @@ describe('Tracked Functions — Permissions', () => {
     const token = await tokens.backoffice();
     const { body } = await graphqlRequest(
       `mutation {
-        deactivateClient(args: { clientUuid: "${ALICE_ID}" }) {
+        deactivateClient(args: { client_uuid: "${ALICE_ID}" }) {
           id
         }
       }`,
@@ -400,7 +408,7 @@ describe('Tracked Functions — Permissions', () => {
       const token = await tokens.administrator();
       const { body } = await graphqlRequest(
         `mutation {
-          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          deactivateClient(args: { client_uuid: "${CHARLIE_ID}" }) {
             id
             username
             status
@@ -423,7 +431,7 @@ describe('Tracked Functions — Permissions', () => {
     const token = await tokens.backoffice();
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "alice" }) {
+        searchClients(args: { search_term: "alice" }) {
           id
           username
           email
@@ -448,7 +456,7 @@ describe('Tracked Functions — camelCase remapping', () => {
     // Query multi-word columns (snake_case in PG → camelCase in GraphQL)
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "alice" }) {
+        searchClients(args: { search_term: "alice" }) {
           id
           username
           branchId
@@ -482,7 +490,7 @@ describe('Tracked Functions — camelCase remapping', () => {
     try {
       const { body } = await graphqlRequest(
         `mutation {
-          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          deactivateClient(args: { client_uuid: "${CHARLIE_ID}" }) {
             id
             username
             branchId
@@ -544,11 +552,173 @@ describe('Tracked Functions — Non-null args (P11.6)', () => {
   });
 });
 
+describe('Tracked Functions — args nullability (P12.19b)', () => {
+  it('latestClients has nullable args (all user args have PG defaults)', async () => {
+    // latestClients has cutoff with DEFAULT — args should be nullable
+    // Omitting args should succeed (PG uses the default cutoff)
+    const { body } = await graphqlRequest(
+      `query {
+        latestClients {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { latestClients: AnyRow[] };
+    expect(Array.isArray(data.latestClients)).toBe(true);
+    // All 4 seed clients were created within the last year
+    expect(data.latestClients.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('latestClients works with explicit args too', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        latestClients(args: { cutoff: "2000-01-01T00:00:00Z" }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { latestClients: AnyRow[] };
+    expect(Array.isArray(data.latestClients)).toBe(true);
+    expect(data.latestClients.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('searchClients still requires args (not all user args have defaults)', async () => {
+    // search_clients has search_term text (no default) — args must be non-null
+    const { body } = await graphqlRequest(
+      `query {
+        searchClients {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    // args is non-null — omitting it should be a validation error
+    expect(body.errors).toBeDefined();
+    expect(body.errors.length).toBeGreaterThan(0);
+  });
+
+  it('searchClientsByTrust still requires args (min_level has no default)', async () => {
+    // search_clients_by_trust has min_level (no default) + max_level (DEFAULT 10)
+    // Not all args have defaults → args is non-null
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsByTrust {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeDefined();
+    expect(body.errors.length).toBeGreaterThan(0);
+  });
+
+  it('latestClientsAggregate has nullable args too', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        latestClientsAggregate {
+          aggregate {
+            count
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { latestClientsAggregate: { aggregate: { count: number } } };
+    expect(data.latestClientsAggregate.aggregate.count).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('Tracked Functions — PG arg naming convention (P12.8)', () => {
+  it('uses PG parameter names directly in args (search_term, not searchTerm)', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClients(args: { search_term: "alice" }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClients: AnyRow[] };
+    expect(data.searchClients.length).toBeGreaterThan(0);
+    expect(data.searchClients.find((c) => c.username === 'alice')).toBeDefined();
+  });
+
+  it('uses PG parameter names for multi-word args (min_level, max_level)', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        searchClientsByTrust(args: { min_level: 2, max_level: 3 }) {
+          id
+          username
+          trustLevel
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { searchClientsByTrust: AnyRow[] };
+    expect(data.searchClientsByTrust.length).toBeGreaterThan(0);
+    const usernames = data.searchClientsByTrust.map((c) => c.username);
+    expect(usernames).toContain('alice');
+    expect(usernames).toContain('diana');
+  });
+
+  it('uses PG parameter name for mutation args (client_uuid, not clientUuid)', async () => {
+    const pool = getPool();
+    await pool.query(`UPDATE client SET status = 'active' WHERE id = $1`, [CHARLIE_ID]);
+
+    try {
+      const { body } = await graphqlRequest(
+        `mutation {
+          deactivateClient(args: { client_uuid: "${CHARLIE_ID}" }) {
+            id
+            username
+            status
+          }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = body.data as { deactivateClient: AnyRow };
+      expect(data.deactivateClient.username).toBe('charlie');
+      expect(data.deactivateClient.status).toBe('INACTIVE');
+    } finally {
+      await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
+    }
+  });
+});
+
 describe('Tracked Functions — Aggregate', () => {
   it('should execute aggregate on a SETOF function', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsAggregate(args: { searchTerm: "" }) {
+        searchClientsAggregate(args: { search_term: "" }) {
           aggregate {
             count
           }
@@ -568,7 +738,7 @@ describe('Tracked Functions — Aggregate', () => {
   it('should execute aggregate sum on a SETOF function', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsAggregate(args: { searchTerm: "" }) {
+        searchClientsAggregate(args: { search_term: "" }) {
           aggregate {
             sum { trustLevel }
           }
@@ -588,7 +758,7 @@ describe('Tracked Functions — Aggregate', () => {
   it('should execute aggregate avg on a SETOF function', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsAggregate(args: { searchTerm: "" }) {
+        searchClientsAggregate(args: { search_term: "" }) {
           aggregate {
             avg { trustLevel }
           }
@@ -608,7 +778,7 @@ describe('Tracked Functions — Aggregate', () => {
   it('should execute aggregate min on a SETOF function', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsAggregate(args: { searchTerm: "" }) {
+        searchClientsAggregate(args: { search_term: "" }) {
           aggregate {
             min { trustLevel }
           }
@@ -628,7 +798,7 @@ describe('Tracked Functions — Aggregate', () => {
   it('should execute aggregate max on a SETOF function', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsAggregate(args: { searchTerm: "" }) {
+        searchClientsAggregate(args: { search_term: "" }) {
           aggregate {
             max { trustLevel }
           }
@@ -648,7 +818,7 @@ describe('Tracked Functions — Aggregate', () => {
   it('should execute multiple aggregate functions together on a SETOF function', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsAggregate(args: { searchTerm: "" }) {
+        searchClientsAggregate(args: { search_term: "" }) {
           aggregate {
             count
             sum { trustLevel }
@@ -679,7 +849,7 @@ describe('Tracked Functions — Empty/Null Results', () => {
   it('SETOF function returns empty array when nothing matches', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "zzzzznonexistent" }) {
+        searchClients(args: { search_term: "zzzzznonexistent" }) {
           id
           username
         }
@@ -698,7 +868,7 @@ describe('Tracked Functions — Empty/Null Results', () => {
     const nonExistentId = '00000000-0000-0000-0000-000000000099';
     const { body } = await graphqlRequest(
       `mutation {
-        deactivateClient(args: { clientUuid: "${nonExistentId}" }) {
+        deactivateClient(args: { client_uuid: "${nonExistentId}" }) {
           id
           username
           status
@@ -726,7 +896,7 @@ describe('Tracked Functions — Mutation with Relationships', () => {
     try {
       const { body } = await graphqlRequest(
         `mutation {
-          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          deactivateClient(args: { client_uuid: "${CHARLIE_ID}" }) {
             id
             username
             status
@@ -761,7 +931,7 @@ describe('Tracked Functions — Mutation with Relationships', () => {
     try {
       const { body } = await graphqlRequest(
         `mutation {
-          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          deactivateClient(args: { client_uuid: "${CHARLIE_ID}" }) {
             id
             username
             accounts {
@@ -792,7 +962,7 @@ describe('Tracked Functions — Mutation with Relationships', () => {
   it('SETOF query function resolves nested relationships', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "alice" }) {
+        searchClients(args: { search_term: "alice" }) {
           id
           username
           branch {
@@ -854,7 +1024,7 @@ describe('Tracked Functions — Diverse Argument Types', () => {
   it('should call searchClientsByTrust with minLevel=2 and return alice and diana', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsByTrust(args: { minLevel: 2 }) {
+        searchClientsByTrust(args: { min_level: 2 }) {
           id
           username
           trustLevel
@@ -879,7 +1049,7 @@ describe('Tracked Functions — Diverse Argument Types', () => {
   it('should call searchClientsByTrust with minLevel=0, maxLevel=1 and return bob and charlie', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsByTrust(args: { minLevel: 0, maxLevel: 1 }) {
+        searchClientsByTrust(args: { min_level: 0, max_level: 1 }) {
           id
           username
           trustLevel
@@ -908,7 +1078,7 @@ describe('Tracked Functions — Default Parameter Values', () => {
   it('should use DEFAULT 10 for maxLevel when only minLevel is provided', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsByTrust(args: { minLevel: 2 }) {
+        searchClientsByTrust(args: { min_level: 2 }) {
           id
           username
           trustLevel
@@ -932,7 +1102,7 @@ describe('Tracked Functions — Default Parameter Values', () => {
   it('should use explicit maxLevel when both minLevel and maxLevel are provided', async () => {
     const { body } = await graphqlRequest(
       `query {
-        searchClientsByTrust(args: { minLevel: 0, maxLevel: 1 }) {
+        searchClientsByTrust(args: { min_level: 0, max_level: 1 }) {
           id
           username
           trustLevel
@@ -1162,7 +1332,7 @@ describe('Tracked Functions — Inherited Role Permissions', () => {
     });
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "" }) {
+        searchClients(args: { search_term: "" }) {
           id
           username
         }
@@ -1188,7 +1358,7 @@ describe('Tracked Functions — Inherited Role Permissions', () => {
       });
       const { body } = await graphqlRequest(
         `mutation {
-          deactivateClient(args: { clientUuid: "${CHARLIE_ID}" }) {
+          deactivateClient(args: { client_uuid: "${CHARLIE_ID}" }) {
             id
             username
             status
@@ -1216,7 +1386,7 @@ describe('Tracked Functions — Inherited Role Permissions', () => {
     });
     const { body } = await graphqlRequest(
       `query {
-        searchClients(args: { searchTerm: "" }) {
+        searchClients(args: { search_term: "" }) {
           id
           username
         }
@@ -1238,7 +1408,7 @@ describe('Tracked Functions — Inherited Role Permissions', () => {
     });
     const { body } = await graphqlRequest(
       `mutation {
-        deactivateClient(args: { clientUuid: "${ALICE_ID}" }) {
+        deactivateClient(args: { client_uuid: "${ALICE_ID}" }) {
           id
         }
       }`,
@@ -1307,7 +1477,7 @@ describe('Tracked Function Subscriptions (P9.13)', () => {
     try {
       const data = await firstResult<{ searchClients: AnyRow[] }>(client, `
         subscription {
-          searchClients(args: { searchTerm: "alice" }) {
+          searchClients(args: { search_term: "alice" }) {
             id
             username
           }
@@ -1329,7 +1499,7 @@ describe('Tracked Function Subscriptions (P9.13)', () => {
     try {
       const data = await firstResult<{ searchClientsAggregate: { aggregate: { count: number } } }>(client, `
         subscription {
-          searchClientsAggregate(args: { searchTerm: "" }) {
+          searchClientsAggregate(args: { search_term: "" }) {
             aggregate {
               count
             }
@@ -1393,7 +1563,7 @@ describe('Tracked Function Subscriptions (P9.13)', () => {
     try {
       const data = await firstResult<{ searchClients: AnyRow[] }>(client, `
         subscription {
-          searchClients(args: { searchTerm: "" }) {
+          searchClients(args: { search_term: "" }) {
             id
             username
           }
@@ -1416,7 +1586,7 @@ describe('Tracked Function Subscriptions (P9.13)', () => {
       await expect(
         firstResult(client, `
           subscription {
-            searchClients(args: { searchTerm: "alice" }) {
+            searchClients(args: { search_term: "alice" }) {
               id
             }
           }
@@ -1434,7 +1604,7 @@ describe('Tracked Function Subscriptions (P9.13)', () => {
       await expect(
         firstResult(client, `
           subscription {
-            deactivateClient(args: { clientUuid: "${ALICE_ID}" }) {
+            deactivateClient(args: { client_uuid: "${ALICE_ID}" }) {
               id
             }
           }
@@ -1452,7 +1622,7 @@ describe('Tracked Function Subscriptions (P9.13)', () => {
       const data = await firstResult<{ searchClients: AnyRow[] }>(client, `
         subscription {
           searchClients(
-            args: { searchTerm: "" },
+            args: { search_term: "" },
             where: { username: { _eq: "alice" } }
           ) {
             id
@@ -1476,7 +1646,7 @@ describe('Tracked Function Subscriptions (P9.13)', () => {
       const data = await firstResult<{ searchClients: AnyRow[] }>(client, `
         subscription {
           searchClients(
-            args: { searchTerm: "" },
+            args: { search_term: "" },
             limit: 2
           ) {
             id

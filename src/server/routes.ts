@@ -146,9 +146,13 @@ export function registerDocEndpoints(deps: DocEndpointsDeps): Map<string, string
 
   const getDocFilterContext = (request: FastifyRequest) => {
     const session = request.session;
-    const role = session?.role ?? config.auth.unauthorizedRole ?? 'anonymous';
     const isAdmin = session?.isAdmin ?? false;
-    return { role, isAdmin };
+    // When admin key is used with x-hasura-role header, use that role for filtering
+    // instead of showing the full admin schema
+    const roleHeader = (request.headers['x-hasura-role'] as string | undefined)?.toLowerCase();
+    const hasRoleOverride = isAdmin && roleHeader && roleHeader !== 'admin';
+    const role = hasRoleOverride ? roleHeader : (session?.role ?? config.auth.unauthorizedRole ?? 'anonymous');
+    return { role, isAdmin: isAdmin && !hasRoleOverride };
   };
 
   // OpenAPI spec endpoint
