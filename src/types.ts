@@ -40,6 +40,7 @@ import {
   QueryCollectionSchema,
   HasuraRestEndpointSchema,
   IntrospectionConfigSchema,
+  OperationsConfigSchema,
   HakkyraConfigSchema,
 } from './config/schemas-internal.js';
 
@@ -96,6 +97,7 @@ export interface TableInfo {
   columnComments?: Record<string, string>;
   isEnum?: boolean;
   isView?: boolean;
+  operations?: OperationsConfig;
 }
 
 // ─── Computed Fields ─────────────────────────────────────────────────────────
@@ -366,6 +368,8 @@ export type PoolConfig = z.infer<typeof PoolConfigSchema>;
 export type RedisConfig = z.infer<typeof RedisConfigSchema>;
 
 export type IntrospectionConfig = z.infer<typeof IntrospectionConfigSchema>;
+
+export type OperationsConfig = z.infer<typeof OperationsConfigSchema>;
 
 // ─── Utility types ──────────────────────────────────────────────────────────
 

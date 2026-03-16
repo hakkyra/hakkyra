@@ -26,7 +26,7 @@ import type {
   GraphQLFieldConfigMap,
   GraphQLFieldConfigArgumentMap,
 } from 'graphql';
-import type { SchemaModel, TableInfo, EnumInfo, ActionConfig } from '../types.js';
+import type { SchemaModel, TableInfo, EnumInfo, ActionConfig, OperationsConfig } from '../types.js';
 import { buildActionFields } from '../actions/schema.js';
 import { pgEnumToGraphQLName } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
@@ -100,6 +100,15 @@ function getRootFieldNames(table: TableInfo): RootFieldNames {
     delete: custom?.delete ?? `delete${typeName}`,
     deleteByPk: custom?.delete_by_pk ?? `delete${typeName}ByPk`,
   };
+}
+
+/**
+ * Check if a specific operation is enabled for a table.
+ * When no operations config exists, all operations default to enabled.
+ */
+function isOpEnabled(table: TableInfo, op: keyof OperationsConfig): boolean {
+  if (!table.operations) return true;
+  return table.operations[op] !== false;
 }
 
 // ─── Enum Builder ───────────────────────────────────────────────────────────
@@ -253,29 +262,31 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     const names = getRootFieldNames(table);
 
     // select (list)
-    const selectArgs: GraphQLFieldConfigArgumentMap = {};
-    selectArgs['distinctOn'] = {
-      type: new GraphQLList(new GraphQLNonNull(mutInputs.selectColumnEnum)),
-      description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
-    };
-    if (filterType) {
-      selectArgs['where'] = { type: filterType };
-    }
-    selectArgs['orderBy'] = {
-      type: new GraphQLList(new GraphQLNonNull(mutInputs.orderBy)),
-    };
-    selectArgs['limit'] = { type: GraphQLInt };
-    selectArgs['offset'] = { type: GraphQLInt };
+    if (isOpEnabled(table, 'select')) {
+      const selectArgs: GraphQLFieldConfigArgumentMap = {};
+      selectArgs['distinctOn'] = {
+        type: new GraphQLList(new GraphQLNonNull(mutInputs.selectColumnEnum)),
+        description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
+      };
+      if (filterType) {
+        selectArgs['where'] = { type: filterType };
+      }
+      selectArgs['orderBy'] = {
+        type: new GraphQLList(new GraphQLNonNull(mutInputs.orderBy)),
+      };
+      selectArgs['limit'] = { type: GraphQLInt };
+      selectArgs['offset'] = { type: GraphQLInt };
 
-    queryFields[names.select] = {
-      type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
-      args: selectArgs,
-      resolve: makeSelectResolver(table),
-      description: `Fetch rows from ${table.schema}.${table.name}`,
-    };
+      queryFields[names.select] = {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
+        args: selectArgs,
+        resolve: makeSelectResolver(table),
+        description: `Fetch rows from ${table.schema}.${table.name}`,
+      };
+    }
 
     // select_by_pk
-    if (table.primaryKey.length > 0 && mutInputs.pkColumnsInput) {
+    if (isOpEnabled(table, 'selectByPk') && table.primaryKey.length > 0 && mutInputs.pkColumnsInput) {
       const pkArgs: GraphQLFieldConfigArgumentMap = {};
       for (const pkColName of table.primaryKey) {
         const column = table.columns.find((c) => c.name === pkColName);
@@ -297,26 +308,28 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     }
 
     // select_aggregate
-    const aggArgs: GraphQLFieldConfigArgumentMap = {};
-    if (filterType) {
-      aggArgs['where'] = { type: filterType };
-    }
-    aggArgs['orderBy'] = {
-      type: new GraphQLList(new GraphQLNonNull(mutInputs.orderBy)),
-    };
-    aggArgs['limit'] = { type: GraphQLInt };
-    aggArgs['offset'] = { type: GraphQLInt };
-    aggArgs['groupBy'] = {
-      type: new GraphQLList(new GraphQLNonNull(mutInputs.selectColumnEnum)),
-      description: 'Group results by columns. When used, populates the groupedAggregates field.',
-    };
+    if (isOpEnabled(table, 'selectAggregate')) {
+      const aggArgs: GraphQLFieldConfigArgumentMap = {};
+      if (filterType) {
+        aggArgs['where'] = { type: filterType };
+      }
+      aggArgs['orderBy'] = {
+        type: new GraphQLList(new GraphQLNonNull(mutInputs.orderBy)),
+      };
+      aggArgs['limit'] = { type: GraphQLInt };
+      aggArgs['offset'] = { type: GraphQLInt };
+      aggArgs['groupBy'] = {
+        type: new GraphQLList(new GraphQLNonNull(mutInputs.selectColumnEnum)),
+        description: 'Group results by columns. When used, populates the groupedAggregates field.',
+      };
 
-    queryFields[names.selectAggregate] = {
-      type: new GraphQLNonNull(mutInputs.selectAggregateFields),
-      args: aggArgs,
-      resolve: makeSelectAggregateResolver(table),
-      description: `Aggregate rows from ${table.schema}.${table.name}`,
-    };
+      queryFields[names.selectAggregate] = {
+        type: new GraphQLNonNull(mutInputs.selectAggregateFields),
+        args: aggArgs,
+        resolve: makeSelectAggregateResolver(table),
+        description: `Aggregate rows from ${table.schema}.${table.name}`,
+      };
+    }
   }
 
   // Add native query fields to Query
@@ -359,57 +372,63 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     const names = getRootFieldNames(table);
 
     // insert (batch)
-    const insertArgs: GraphQLFieldConfigArgumentMap = {
-      objects: {
-        type: new GraphQLNonNull(
-          new GraphQLList(new GraphQLNonNull(mutInputs.insertInput)),
-        ),
-      },
-    };
-    if (mutInputs.onConflict) {
-      insertArgs['onConflict'] = { type: mutInputs.onConflict };
-    }
+    if (isOpEnabled(table, 'insert')) {
+      const insertArgs: GraphQLFieldConfigArgumentMap = {
+        objects: {
+          type: new GraphQLNonNull(
+            new GraphQLList(new GraphQLNonNull(mutInputs.insertInput)),
+          ),
+        },
+      };
+      if (mutInputs.onConflict) {
+        insertArgs['onConflict'] = { type: mutInputs.onConflict };
+      }
 
-    mutationFields[names.insert] = {
-      type: mutInputs.mutationResponse,
-      args: insertArgs,
-      resolve: makeInsertResolver(table),
-      description: `Insert rows into ${table.schema}.${table.name}`,
-    };
+      mutationFields[names.insert] = {
+        type: mutInputs.mutationResponse,
+        args: insertArgs,
+        resolve: makeInsertResolver(table),
+        description: `Insert rows into ${table.schema}.${table.name}`,
+      };
+    }
 
     // insert_one
-    const insertOneArgs: GraphQLFieldConfigArgumentMap = {
-      object: {
-        type: new GraphQLNonNull(mutInputs.insertInput),
-      },
-    };
-    if (mutInputs.onConflict) {
-      insertOneArgs['onConflict'] = { type: mutInputs.onConflict };
-    }
+    if (isOpEnabled(table, 'insertOne')) {
+      const insertOneArgs: GraphQLFieldConfigArgumentMap = {
+        object: {
+          type: new GraphQLNonNull(mutInputs.insertInput),
+        },
+      };
+      if (mutInputs.onConflict) {
+        insertOneArgs['onConflict'] = { type: mutInputs.onConflict };
+      }
 
-    mutationFields[names.insertOne] = {
-      type: objectType,
-      args: insertOneArgs,
-      resolve: makeInsertOneResolver(table),
-      description: `Insert a single row into ${table.schema}.${table.name}`,
-    };
+      mutationFields[names.insertOne] = {
+        type: objectType,
+        args: insertOneArgs,
+        resolve: makeInsertOneResolver(table),
+        description: `Insert a single row into ${table.schema}.${table.name}`,
+      };
+    }
 
     // update (batch)
-    const updateArgs: GraphQLFieldConfigArgumentMap = {};
-    if (filterType) {
-      updateArgs['where'] = { type: new GraphQLNonNull(filterType) };
-    }
-    updateArgs['_set'] = { type: mutInputs.setInput };
+    if (isOpEnabled(table, 'update')) {
+      const updateArgs: GraphQLFieldConfigArgumentMap = {};
+      if (filterType) {
+        updateArgs['where'] = { type: new GraphQLNonNull(filterType) };
+      }
+      updateArgs['_set'] = { type: mutInputs.setInput };
 
-    mutationFields[names.update] = {
-      type: mutInputs.mutationResponse,
-      args: updateArgs,
-      resolve: makeUpdateResolver(table),
-      description: `Update rows in ${table.schema}.${table.name}`,
-    };
+      mutationFields[names.update] = {
+        type: mutInputs.mutationResponse,
+        args: updateArgs,
+        resolve: makeUpdateResolver(table),
+        description: `Update rows in ${table.schema}.${table.name}`,
+      };
+    }
 
     // update_by_pk
-    if (table.primaryKey.length > 0 && mutInputs.pkColumnsInput) {
+    if (isOpEnabled(table, 'updateByPk') && table.primaryKey.length > 0 && mutInputs.pkColumnsInput) {
       mutationFields[names.updateByPk] = {
         type: objectType,
         args: {
@@ -422,7 +441,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     }
 
     // update_many — batch updates with different values per entry
-    if (mutInputs.updateManyInput) {
+    if (isOpEnabled(table, 'updateMany') && mutInputs.updateManyInput) {
       mutationFields[names.updateMany] = {
         type: mutInputs.mutationResponse,
         args: {
@@ -438,20 +457,22 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     }
 
     // delete (batch)
-    const deleteArgs: GraphQLFieldConfigArgumentMap = {};
-    if (filterType) {
-      deleteArgs['where'] = { type: new GraphQLNonNull(filterType) };
+    if (isOpEnabled(table, 'delete')) {
+      const deleteArgs: GraphQLFieldConfigArgumentMap = {};
+      if (filterType) {
+        deleteArgs['where'] = { type: new GraphQLNonNull(filterType) };
+      }
+
+      mutationFields[names.delete] = {
+        type: mutInputs.mutationResponse,
+        args: deleteArgs,
+        resolve: makeDeleteResolver(table),
+        description: `Delete rows from ${table.schema}.${table.name}`,
+      };
     }
 
-    mutationFields[names.delete] = {
-      type: mutInputs.mutationResponse,
-      args: deleteArgs,
-      resolve: makeDeleteResolver(table),
-      description: `Delete rows from ${table.schema}.${table.name}`,
-    };
-
     // delete_by_pk
-    if (table.primaryKey.length > 0 && mutInputs.pkColumnsInput) {
+    if (isOpEnabled(table, 'deleteByPk') && table.primaryKey.length > 0 && mutInputs.pkColumnsInput) {
       const pkArgs: GraphQLFieldConfigArgumentMap = {};
       for (const pkColName of table.primaryKey) {
         const column = table.columns.find((c) => c.name === pkColName);
@@ -499,27 +520,29 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     const names = getRootFieldNames(table);
 
     // subscribe to select (list)
-    const subSelectArgs: GraphQLFieldConfigArgumentMap = {};
-    if (filterType) {
-      subSelectArgs['where'] = { type: filterType };
-    }
-    subSelectArgs['orderBy'] = {
-      type: new GraphQLList(new GraphQLNonNull(mutInputs.orderBy)),
-    };
-    subSelectArgs['limit'] = { type: GraphQLInt };
-    subSelectArgs['offset'] = { type: GraphQLInt };
+    if (isOpEnabled(table, 'select')) {
+      const subSelectArgs: GraphQLFieldConfigArgumentMap = {};
+      if (filterType) {
+        subSelectArgs['where'] = { type: filterType };
+      }
+      subSelectArgs['orderBy'] = {
+        type: new GraphQLList(new GraphQLNonNull(mutInputs.orderBy)),
+      };
+      subSelectArgs['limit'] = { type: GraphQLInt };
+      subSelectArgs['offset'] = { type: GraphQLInt };
 
-    subscriptionFields[names.select] = {
-      type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
-      args: subSelectArgs,
-      description: `Subscribe to rows from ${table.schema}.${table.name}`,
-      // The resolve function returns the yielded payload as-is
-      resolve: (payload: unknown) => payload,
-      subscribe: makeSubscriptionSelectSubscribe(table),
-    };
+      subscriptionFields[names.select] = {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(objectType))),
+        args: subSelectArgs,
+        description: `Subscribe to rows from ${table.schema}.${table.name}`,
+        // The resolve function returns the yielded payload as-is
+        resolve: (payload: unknown) => payload,
+        subscribe: makeSubscriptionSelectSubscribe(table),
+      };
+    }
 
     // subscribe to select_by_pk
-    if (table.primaryKey.length > 0 && mutInputs.pkColumnsInput) {
+    if (isOpEnabled(table, 'selectByPk') && table.primaryKey.length > 0 && mutInputs.pkColumnsInput) {
       const pkArgs: GraphQLFieldConfigArgumentMap = {};
       for (const pkColName of table.primaryKey) {
         const column = table.columns.find((c) => c.name === pkColName);

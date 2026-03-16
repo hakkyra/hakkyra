@@ -28,6 +28,7 @@ import type {
   LogicalModel,
   QueryCollection,
   HasuraRestEndpoint,
+  OperationsConfig,
 } from '../types.js';
 import type {
   RawTableYaml,
@@ -65,6 +66,7 @@ import {
   RESTConfigSchema as InternalRESTConfigSchema,
   AuthConfigSchema as InternalAuthConfigSchema,
   JobQueueConfigSchema as InternalJobQueueConfigSchema,
+  OperationsConfigSchema,
 } from './schemas-internal.js';
 
 const log = pino({ name: 'hakkyra:config' });
@@ -292,7 +294,7 @@ export async function loadConfig(
 
   const version = await loadVersion(absMetadataDir);
   const { databases, nativeQueries, logicalModels, unsupported: dbUnsupported } = await loadDatabases(absMetadataDir);
-  const { tables, unsupported: tableUnsupported } = await loadAllTables(absMetadataDir);
+  const { tables, tableOperationsOverrides, unsupported: tableUnsupported } = await loadAllTables(absMetadataDir);
   unsupported.push(...dbUnsupported, ...tableUnsupported);
 
   if (unsupported.length > 0) {
@@ -377,9 +379,20 @@ export async function loadConfig(
       batchChunkSize: serverConfig?.sql?.batch_chunk_size,
     }),
     introspection: introspectionConfig,
+    schema: transformSchemaConfig(serverConfig),
   };
 
-  return HakkyraConfigSchema.parse(raw);
+  const config = HakkyraConfigSchema.parse(raw);
+
+  // Merge global default operations + per-table overrides into each TableInfo
+  const globalOps = config.schema.defaultOperations;
+  for (const table of config.tables) {
+    const tableKey = `${table.schema}.${table.name}`;
+    const overrides = tableOperationsOverrides.get(tableKey);
+    table.operations = mergeOperations(globalOps, overrides);
+  }
+
+  return config;
 }
 
 // ─── Version ────────────────────────────────────────────────────────────────
@@ -570,18 +583,19 @@ function transformDatabases(
 
 async function loadAllTables(
   metadataDir: string,
-): Promise<{ tables: TableInfo[]; unsupported: string[] }> {
+): Promise<{ tables: TableInfo[]; tableOperationsOverrides: Map<string, Partial<OperationsConfig>>; unsupported: string[] }> {
   const tables: TableInfo[] = [];
+  const tableOperationsOverrides = new Map<string, Partial<OperationsConfig>>();
   const unsupported: string[] = [];
 
   const databasesDir = path.join(metadataDir, 'databases');
-  if (!(await fileExists(databasesDir))) return { tables, unsupported };
+  if (!(await fileExists(databasesDir))) return { tables, tableOperationsOverrides, unsupported };
 
   let entries: string[];
   try {
     entries = await fs.readdir(databasesDir);
   } catch {
-    return { tables, unsupported };
+    return { tables, tableOperationsOverrides, unsupported };
   }
 
   for (const dbName of entries) {
@@ -622,10 +636,19 @@ async function loadAllTables(
       const tableConfig = RawTableYamlSchema.parse(cleanedTable);
       if (!tableConfig.table) continue;
       tables.push(transformTable(tableConfig));
+
+      // Extract per-table operations overrides (if any)
+      const rawOps = transformTableOperations(
+        tableConfig.configuration?.operations as Record<string, boolean | undefined> | undefined,
+      );
+      if (rawOps) {
+        const key = `${tableConfig.table.schema}.${tableConfig.table.name}`;
+        tableOperationsOverrides.set(key, rawOps);
+      }
     }
   }
 
-  return { tables, unsupported };
+  return { tables, tableOperationsOverrides, unsupported };
 }
 
 function transformTable(raw: RawTableYaml): TableInfo {
@@ -1158,6 +1181,61 @@ function transformDocsConfig(serverConfig: RawServerConfig | null): APIDocsConfi
     output: docs?.output,
     llmFormat: docs?.llm_format,
   };
+}
+
+// ─── Schema / Operations config ─────────────────────────────────────────────
+
+function transformSchemaConfig(serverConfig: RawServerConfig | null) {
+  const schemaConf = serverConfig?.schema;
+  if (!schemaConf?.default_operations) return undefined;
+  const ops = schemaConf.default_operations;
+  return {
+    defaultOperations: stripUndefined({
+      select: ops.select,
+      selectByPk: ops.select_by_pk,
+      selectAggregate: ops.select_aggregate,
+      insert: ops.insert,
+      insertOne: ops.insert_one,
+      update: ops.update,
+      updateByPk: ops.update_by_pk,
+      updateMany: ops.update_many,
+      delete: ops.delete,
+      deleteByPk: ops.delete_by_pk,
+    }),
+  };
+}
+
+/**
+ * Transform raw per-table operations (snake_case) into internal camelCase format.
+ */
+function transformTableOperations(
+  raw: Record<string, boolean | undefined> | undefined,
+): Partial<OperationsConfig> | undefined {
+  if (!raw) return undefined;
+  return stripUndefined({
+    select: raw.select,
+    selectByPk: raw.select_by_pk,
+    selectAggregate: raw.select_aggregate,
+    insert: raw.insert,
+    insertOne: raw.insert_one,
+    update: raw.update,
+    updateByPk: raw.update_by_pk,
+    updateMany: raw.update_many,
+    delete: raw.delete,
+    deleteByPk: raw.delete_by_pk,
+  }) as Partial<OperationsConfig> | undefined;
+}
+
+/**
+ * Merge global default operations with per-table overrides.
+ * Per-table values take precedence over global defaults.
+ */
+function mergeOperations(
+  global: OperationsConfig,
+  tableOverrides?: Partial<OperationsConfig>,
+): OperationsConfig {
+  if (!tableOverrides) return { ...global };
+  return { ...global, ...tableOverrides };
 }
 
 // ─── Server config ──────────────────────────────────────────────────────────
