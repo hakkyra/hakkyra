@@ -736,5 +736,29 @@ export const RawServerConfigSchema = z
       })
       .strict()
       .optional(),
+    rest: z
+      .object({
+        auto_generate: z.boolean().optional(),
+        base_path: z.string().optional(),
+        pagination: z
+          .object({
+            default_limit: z.number().optional(),
+            max_limit: z.number().optional(),
+          })
+          .strict()
+          .optional(),
+        overrides: z.record(z.string(), z.array(RawRESTOverrideSchema)).optional(),
+      })
+      .strict()
+      .optional(),
+    docs: z
+      .object({
+        generate: z.boolean().optional(),
+        output: z.string().optional(),
+        llm_format: z.boolean().optional(),
+        include_examples: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
