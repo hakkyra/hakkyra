@@ -1876,7 +1876,7 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
       const result = expectValid(HakkyraConfigSchema, minimalConfig);
       expect(result.queryCache).toEqual({ maxSize: 1000 });
       expect(result.subscriptions).toEqual({ debounceMs: 50, keepAliveMs: 30000 });
-      expect(result.eventDelivery).toEqual({ batchSize: 100 });
+      expect(result.eventDelivery).toEqual({ batchSize: 100, httpConcurrency: 1 });
       expect(result.eventCleanup).toEqual({ schedule: '0 3 * * *' });
       expect(result.webhook).toEqual({ timeoutMs: 30000, backoffCapSeconds: 3600, allowPrivateUrls: false, maxResponseBytes: 1048576 });
       expect(result.actionDefaults).toEqual({

@@ -284,8 +284,8 @@ describe('Actions', () => {
     });
 
     it('denies non-permitted roles', async () => {
-      // createPayment only allows 'client' role; 'backoffice' should be denied
-      const token = await createJWT({ role: 'backoffice', allowedRoles: ['backoffice', 'client'] });
+      // createPayment only allows 'client' role; backoffice-only JWT should be denied
+      const token = await createJWT({ role: 'backoffice', allowedRoles: ['backoffice'] });
 
       const { body } = await gql(
         `mutation($input: CreatePaymentInput!) {
