@@ -53,9 +53,9 @@ export function registerAsyncActionStatusRoute(
         return;
       }
 
-      // ── 3. Query action status ────────────────────────────────────────
+      // ── 3. Query action status (with authorization) ──────────────────
       try {
-        const result = await getAsyncActionResult(deps.pool, actionId);
+        const result = await getAsyncActionResult(deps.pool, actionId, session);
 
         if (!result) {
           void reply.code(404).send({

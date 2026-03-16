@@ -100,6 +100,7 @@ function compileInsertPermission(
     check: compileFilter(perm.check, computedFields, relationships),
     columns: perm.columns,
     presets: perm.set ?? {},
+    backendOnly: perm.backendOnly,
   };
 }
 

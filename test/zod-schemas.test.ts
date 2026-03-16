@@ -1893,6 +1893,7 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
       expect(result.graphql).toEqual({
         queryDepth: 10,
         maxLimit: 100,
+        maxBatchSize: 10,
       });
     });
 
