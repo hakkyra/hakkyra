@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { GraphQLSchema, GraphQLObjectType, GraphQLInputObjectType, GraphQLNonNull, GraphQLList } from 'graphql';
+import { GraphQLSchema, GraphQLObjectType, GraphQLInputObjectType, GraphQLEnumType, GraphQLNonNull, GraphQLList } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel, resolveTableEnums } from '../src/introspection/merger.js';
@@ -516,6 +516,67 @@ describe('GraphQL Schema Generation', () => {
       expect(typeMap['Client']).toBeDefined();
       // "account" table has no custom_name, so type should be PascalCase "Account"
       expect(typeMap['Account']).toBeDefined();
+    });
+  });
+
+  describe('Constraint enum types (P10.5)', () => {
+    it('should populate constraint enum with real PK constraint name', () => {
+      const typeMap = schema.getTypeMap();
+      const constraintEnum = typeMap['AccountConstraint'] as GraphQLEnumType | undefined;
+      expect(constraintEnum).toBeDefined();
+      const values = constraintEnum!.getValues();
+      // Should have at least the PK constraint
+      expect(values.length).toBeGreaterThanOrEqual(1);
+      // PK constraint should be camelCased from the real PG constraint name
+      const pkValue = values.find((v) => v.name.includes('Pkey'));
+      expect(pkValue).toBeDefined();
+      // Internal value should be the raw PG constraint name (contains underscores)
+      expect(pkValue!.value).toContain('pkey');
+      expect(pkValue!.value).toContain('_');
+    });
+
+    it('should camelCase constraint enum value names', () => {
+      const typeMap = schema.getTypeMap();
+      const constraintEnum = typeMap['CurrencyConstraint'] as GraphQLEnumType | undefined;
+      expect(constraintEnum).toBeDefined();
+      const values = constraintEnum!.getValues();
+      for (const v of values) {
+        // Enum keys should be camelCase (no underscores)
+        expect(v.name).not.toContain('_');
+        // Internal values should be the raw PG constraint names
+        expect(typeof v.value).toBe('string');
+      }
+    });
+
+    it('should include both PK and unique constraints in the enum', () => {
+      const typeMap = schema.getTypeMap();
+      const constraintEnum = typeMap['ClientDataConstraint'] as GraphQLEnumType | undefined;
+      expect(constraintEnum).toBeDefined();
+      const values = constraintEnum!.getValues();
+      // client_data has PK + unique(client_id, key) constraint
+      expect(values.length).toBeGreaterThanOrEqual(2);
+      // One should be the PK
+      expect(values.some((v) => v.name.includes('Pkey'))).toBe(true);
+    });
+
+    it('should not generate empty constraint enums', () => {
+      const typeMap = schema.getTypeMap();
+      // All Constraint types in the schema should have at least one value
+      for (const [name, type] of Object.entries(typeMap)) {
+        if (name.endsWith('Constraint') && type instanceof GraphQLEnumType) {
+          const values = type.getValues();
+          expect(values.length).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it('should use real introspected constraint names, not fabricated ones', () => {
+      // Verify the PK constraint name comes from the actual DB, not a convention guess
+      const table = schemaModel.tables.find((t) => t.name === 'client');
+      expect(table).toBeDefined();
+      expect(table!.primaryKeyConstraintName).toBeDefined();
+      expect(typeof table!.primaryKeyConstraintName).toBe('string');
+      expect(table!.primaryKeyConstraintName!.length).toBeGreaterThan(0);
     });
   });
 });

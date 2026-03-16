@@ -70,16 +70,17 @@ export const OrderByDirection = new GraphQLEnumType({
 function buildConstraintEnum(table: TableInfo, typeName: string): GraphQLEnumType | null {
   const values: Record<string, { value: string }> = {};
 
-  // Primary key constraint
-  if (table.primaryKey.length > 0) {
-    // Convention: use pk_<table>
-    const pkName = `${table.name}_pkey`;
-    values[pkName] = { value: pkName };
+  // Primary key constraint — use the real introspected constraint name
+  if (table.primaryKey.length > 0 && table.primaryKeyConstraintName) {
+    const pgName = table.primaryKeyConstraintName;
+    const enumKey = toCamelCase(pgName);
+    values[enumKey] = { value: pgName };
   }
 
-  // Unique constraints
+  // Unique constraints — camelCase the real PG constraint names
   for (const uc of table.uniqueConstraints) {
-    values[uc.constraintName] = { value: uc.constraintName };
+    const enumKey = toCamelCase(uc.constraintName);
+    values[enumKey] = { value: uc.constraintName };
   }
 
   if (Object.keys(values).length === 0) {
