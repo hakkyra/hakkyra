@@ -38,7 +38,7 @@ import type {
 } from 'graphql';
 import type { ActionConfig, ActionRelationship, TableInfo, BoolExp } from '../types.js';
 import { customScalars } from '../schema/scalars.js';
-import type { ResolverContext } from '../schema/resolvers.js';
+import type { ResolverContext } from '../schema/resolvers/index.js';
 import { checkActionPermission } from './permissions.js';
 import { executeAction } from './proxy.js';
 import { enqueueAsyncAction, getAsyncActionResult } from './async.js';

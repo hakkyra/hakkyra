@@ -34,7 +34,7 @@ import type {
   BoolExp,
 } from '../types.js';
 import { customScalars } from './scalars.js';
-import type { ResolverContext } from './resolvers.js';
+import type { ResolverContext } from './resolvers/index.js';
 import {
   isSessionVariable,
   resolveSessionVar,
