@@ -297,6 +297,21 @@ describe('DISTINCT ON — Schema', () => {
     // groupBy should no longer exist
     expect(argNames).not.toContain('groupBy');
   });
+
+  it('should have distinctOn argument on subscription aggregate fields', () => {
+    const subscriptionType = schema.getSubscriptionType()!;
+    expect(subscriptionType).toBeDefined();
+    const clientsAggField = subscriptionType.getFields()['clientsAggregate'];
+    expect(clientsAggField).toBeDefined();
+    const argNames = clientsAggField.args.map((a) => a.name);
+    expect(argNames).toContain('distinctOn');
+
+    // Should be [ClientSelectColumn!]
+    const distinctOnArg = clientsAggField.args.find((a) => a.name === 'distinctOn');
+    expect(distinctOnArg).toBeDefined();
+    const argType = distinctOnArg!.type;
+    expect(argType).toBeInstanceOf(GraphQLList);
+  });
 });
 
 // ─── REST API Filter Tests ────────────────────────────────────────────────────
