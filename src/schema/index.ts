@@ -58,13 +58,6 @@ export {
 } from './resolvers.js';
 export type { ResolverContext, ResolverPermissionLookup } from './resolvers.js';
 
-// Custom queries
-export {
-  buildCustomQueryFields,
-  resetCustomOutputTypeCache,
-} from './custom-queries.js';
-export type { CustomQueryFields } from './custom-queries.js';
-
 // Native queries
 export {
   buildNativeQueryFields,

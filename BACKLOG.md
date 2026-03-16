@@ -14,7 +14,7 @@
 - [x] Define TypeScript types for all config structures (Hasura-compatible metadata format + extensions)
 - [x] YAML parser with `!include` tag support
 - [x] Load `version.yaml`, `databases.yaml`, per-table YAML files
-- [x] Load `api_config.yaml` (table aliases, custom queries, REST overrides, doc config)
+- [x] Load `api_config.yaml` (table aliases, REST overrides, doc config)
 - [x] Load `actions.yaml` + `actions.graphql`
 - [x] Load `cron_triggers.yaml`
 - [x] Config validation (version, port, permissions, cron expressions, operators)
@@ -94,12 +94,7 @@
 - [x] Relationship selection from GraphQL resolve info → SQL subqueries
   - [x] Recursive nested relationship parsing with argument extraction
   - [x] Permission lookup per remote table at each nesting level
-- [x] Custom query override support (`src/schema/custom-queries.ts`)
-  - [x] Register custom queries/mutations in GraphQL schema from api_config.yaml
-  - [x] Session variable injection into SQL parameters
-  - [x] Role-based permission enforcement
-  - [x] Auto-generate or reuse output types from SQL column parsing
-  - [x] E2E tests (8 tests: custom query resolution, parameterized queries, mutations)
+- ~~Custom query override support~~ (removed — use Native Queries instead)
 - [x] Query caching: LRU cache for compiled SQL templates by (queryHash, role) (`src/sql/cache.ts`)
 
 ### P1.7 — GraphQL Schema Generator (`src/schema/`)

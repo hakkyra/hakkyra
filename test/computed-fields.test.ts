@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { GraphQLObjectType, GraphQLInputObjectType, GraphQLSchema } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
-import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
@@ -44,7 +43,7 @@ function buildCFSelection(table: TableInfo, cfName: string): ComputedFieldSelect
 beforeAll(async () => {
   process.env['DATABASE_URL'] = TEST_DB_URL;
   process.env['HAKKYRA_ADMIN_SECRET'] = ADMIN_SECRET;
-  resetCustomOutputTypeCache();
+
   await waitForDb();
   // Start the server first (it calls generateSchema internally).
   // This also creates the schemaModel for us.
@@ -56,7 +55,7 @@ beforeAll(async () => {
   const result = mergeSchemaModel(introspection, config);
   schemaModel = result.model;
   resetComparisonTypeCache();
-  resetCustomOutputTypeCache();
+
   schema = generateSchema(schemaModel);
 }, 30_000);
 

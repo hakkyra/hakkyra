@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
@@ -32,7 +31,6 @@ function findFunction(name: string, fnSchema = 'public'): FunctionInfo {
 beforeAll(async () => {
   process.env['DATABASE_URL'] = TEST_DB_URL;
   process.env['HAKKYRA_ADMIN_SECRET'] = ADMIN_SECRET;
-  resetCustomOutputTypeCache();
   configureStringifyNumericTypes(false);
   await waitForDb();
 
