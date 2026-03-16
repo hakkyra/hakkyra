@@ -29,10 +29,6 @@ CREATE TABLE IF NOT EXISTS hakkyra.async_action_log (
 )
 `;
 
-const ADD_USER_ID_COLUMN_SQL = `
-ALTER TABLE hakkyra.async_action_log ADD COLUMN IF NOT EXISTS user_id TEXT
-`;
-
 const CREATE_INDEXES_SQL = `
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_async_action_log_status') THEN
@@ -53,7 +49,5 @@ END $$
 export async function ensureAsyncActionSchema(pool: Pool): Promise<void> {
   await pool.query(CREATE_SCHEMA_SQL);
   await pool.query(CREATE_ASYNC_ACTION_LOG_SQL);
-  // Add user_id column if table already existed without it
-  await pool.query(ADD_USER_ID_COLUMN_SQL);
   await pool.query(CREATE_INDEXES_SQL);
 }
