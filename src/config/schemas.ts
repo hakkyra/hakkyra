@@ -300,6 +300,21 @@ export const RawTableYamlSchema = z
         }).strict()).optional(),
         custom_name: z.string().optional(),
         comment: z.string().optional(),
+        operations: z
+          .object({
+            select: z.boolean().optional(),
+            select_by_pk: z.boolean().optional(),
+            select_aggregate: z.boolean().optional(),
+            insert: z.boolean().optional(),
+            insert_one: z.boolean().optional(),
+            update: z.boolean().optional(),
+            update_by_pk: z.boolean().optional(),
+            update_many: z.boolean().optional(),
+            delete: z.boolean().optional(),
+            delete_by_pk: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
@@ -679,6 +694,26 @@ export const RawServerConfigSchema = z
         array_any_threshold: z.number().optional(),
         unnest_threshold: z.number().optional(),
         batch_chunk_size: z.number().optional(),
+      })
+      .strict()
+      .optional(),
+    schema: z
+      .object({
+        default_operations: z
+          .object({
+            select: z.boolean().optional(),
+            select_by_pk: z.boolean().optional(),
+            select_aggregate: z.boolean().optional(),
+            insert: z.boolean().optional(),
+            insert_one: z.boolean().optional(),
+            update: z.boolean().optional(),
+            update_by_pk: z.boolean().optional(),
+            update_many: z.boolean().optional(),
+            delete: z.boolean().optional(),
+            delete_by_pk: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
