@@ -36,6 +36,8 @@ select_permissions:
       filter:
         client_id:
           _eq: X-Hasura-Client-Id
+      query_root_fields: []
+      subscription_root_fields: []
 
   - role: administrator
     permission:
