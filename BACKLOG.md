@@ -384,12 +384,12 @@ Hasura's table `configuration` block supports `column_config` (per-column settin
 - [x] Config loader: apply table-level `custom_name` as table alias for type naming and root fields
 - [x] `column_config.comment`: surface as GraphQL field descriptions
 
-### Request Transform: `template_engine` and `version`
+### Request Transform: `template_engine` and `version` ✅
 
-Hasura v2 request transforms support `template_engine` (e.g. `"Kriti"`) and `version` fields. Schema validation accepts these fields; Hakkyra currently uses its own string interpolation engine.
+Hasura v2 request transforms support `template_engine` (e.g. `"Kriti"`) and `version` fields. Schema validation accepts these fields; Hakkyra uses Kriti via the kriti-lang package (`src/actions/kriti.ts`).
 
 - [x] Accept `template_engine` and `version` in request transform Zod schema
-- [ ] Transform engine: support Kriti template syntax (Hasura's default template engine)
+- [x] Transform engine: support Kriti template syntax (Hasura's default template engine)
 
 ### Nested Insert Ordering (`insertion_order`)
 
@@ -1132,12 +1132,12 @@ Schema comparison (hakkyra vs Hasura on neofix DB) found missing comparison oper
 - [x] `BigWin.currency` — nullable in Hasura, non-null in Hakkyra
   - **Resolved**: Object relationship nullability is determined by FK column NOT NULL status. NOT NULL FK → non-null relationship, nullable FK → nullable relationship. Implemented in `type-builder.ts` lines 248-259 with tests in `schema.test.ts`.
 
-### P9.7 — Tracked Function Aggregate Variants for Non-SETOF Functions (Low)
+### P9.7 — Tracked Function Aggregate Variants for Non-SETOF Functions (Low) ✅
 
 Hasura generates `{function}Aggregate` query variants for all tracked functions including those returning single JSON objects. 6 missing aggregate queries. Low priority since these return `JsonResult` (opaque JSON) where aggregation is meaningless.
 
-- [ ] Generate aggregate query fields for all tracked SETOF functions (verify coverage)
-- [ ] Consider generating aggregate stubs for non-SETOF functions for schema parity
+- [x] Generate aggregate query fields for all tracked SETOF functions (verify coverage)
+- [x] Consider generating aggregate stubs for non-SETOF functions for schema parity — skipped: non-SETOF functions return single rows where aggregation is meaningless; Hasura's stubs for these are non-functional
 
 ### P9.8 — Global CRUD Operation Controls ✅
 
@@ -1180,16 +1180,16 @@ configuration:
 - [x] Test: per-table override re-enables globally disabled operations
 - [x] Test: admin role bypasses operation restrictions (configurable)
 
-### P9.9 — Action Type Parity (High)
+### P9.9 — Action Type Parity (High) ✅
 
 Hakkyra maps action output/input types differently than Hasura. Action types defined in `actions.graphql` should use the exact scalar types from the GraphQL definitions.
 
-- [ ] Add `ID` scalar type — Hasura uses `ID` for some action output fields (e.g., `AuthenticationInfoResponse.playerToken`); Hakkyra maps them to `String`
-- [ ] Action input args using `ID!` should remain `ID!`, not become `String!` (`cancelLimit.token`, `triggerTask.token`, `authenticationInfo.token`)
-- [ ] `AcceptContractWithTokenArgs.contractToken` — Hasura types as `Uuid`, Hakkyra as `String`
-- [ ] `authenticate.amount` — Hasura types as `numeric` (lowercase scalar), Hakkyra as `String`
-- [ ] `LatestWinsArgs.cutoff` — Hasura types as `Numeric`, Hakkyra as `String`
-- [ ] `acceptContractWithToken.args` — Hasura requires `AcceptContractWithTokenArgs!` (non-null), Hakkyra makes it nullable; Hasura also adds `distinctOn`, `limit`, `offset`, `orderBy`, `where` args
+- [x] Add `ID` scalar type — Hasura uses `ID` for some action output fields (e.g., `AuthenticationInfoResponse.playerToken`); Hakkyra maps them to `String`
+- [x] Action input args using `ID!` should remain `ID!`, not become `String!` (`cancelLimit.token`, `triggerTask.token`, `authenticationInfo.token`)
+- [x] `AcceptContractWithTokenArgs.contractToken` — Hasura types as `Uuid`, Hakkyra as `String`
+- [x] `authenticate.amount` — Hasura types as `numeric` (lowercase scalar), Hakkyra as `String`
+- [x] `LatestWinsArgs.cutoff` — Hasura types as `Numeric`, Hakkyra as `String`
+- [x] `acceptContractWithToken.args` — Hasura requires `AcceptContractWithTokenArgs!` (non-null), Hakkyra makes it nullable; Hasura also adds `distinctOn`, `limit`, `offset`, `orderBy`, `where` args
 
 ### P9.10 — BpcharComparisonExp Operator Types (Medium)
 
@@ -1214,9 +1214,9 @@ Hasura's `*AggregateFields.count` field accepts `columns` (select column enum) a
 - [x] Affects 7+ aggregate types (all tracked tables with aggregation permissions)
 - [x] SQL compiler: emit `COUNT(DISTINCT col1, col2)` when both args provided
 
-### P9.13 — Missing Subscription Fields (Low)
+### P9.13 — Missing Subscription Fields (Low) ✅
 
-- [ ] `latestWins` and `latestWinsAggregate` exist as query fields but not subscription fields — expose tracked function query fields as subscriptions
+- [x] `latestWins` and `latestWinsAggregate` exist as query fields but not subscription fields — expose tracked function query fields as subscriptions
 
 ### P9.14 — Missing Table Fields (Low)
 
