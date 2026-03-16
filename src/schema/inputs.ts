@@ -182,6 +182,47 @@ function resolveOutputScalarType(
   return BUILTIN_OUTPUT_SCALARS[graphqlName] ?? customScalars[graphqlName] ?? asScalar(GraphQLString);
 }
 
+/**
+ * Resolve a GraphQL output type with optional list wrapping.
+ * Used for min/max aggregate fields where array columns should return [ScalarType!].
+ */
+function resolveOutputType(
+  graphqlName: string,
+  isList: boolean,
+): GraphQLOutputType {
+  const baseType = resolveOutputScalarType(graphqlName);
+  if (isList) {
+    return new GraphQLList(new GraphQLNonNull(baseType));
+  }
+  return baseType;
+}
+
+/**
+ * PG source types that should return Numeric (instead of Float) in avg/stddev/variance aggregates.
+ * Matches Hasura behavior: numeric and bigint columns → Numeric return type.
+ */
+const NUMERIC_AGG_RETURN_TYPES = new Set(['Numeric', 'Bigint']);
+
+/**
+ * Resolve the return type for statistical aggregate fields (avg, stddev, variance).
+ * Hasura returns Numeric for numeric/bigint source columns, Float for others.
+ */
+function resolveStatAggReturnType(graphqlName: string): GraphQLOutputType {
+  if (NUMERIC_AGG_RETURN_TYPES.has(graphqlName)) {
+    return resolveOutputScalarType('Numeric');
+  }
+  return GraphQLFloat;
+}
+
+/**
+ * Resolve the return type for sum aggregate fields.
+ * Hasura returns Int for integer/smallint source columns, preserves original type otherwise.
+ */
+function resolveSumReturnType(graphqlName: string): GraphQLOutputType {
+  // Int (int2/int4) columns → Int for sum; Bigint/Numeric/Float → their own type
+  return resolveOutputScalarType(graphqlName);
+}
+
 // ─── Numeric Check ──────────────────────────────────────────────────────────
 
 const NUMERIC_GRAPHQL_TYPES = new Set(['Int', 'Smallint', 'Float', 'Bigint', 'Numeric']);
@@ -656,13 +697,14 @@ export function buildMutationInputTypes(
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of numericColumns) {
         const fieldName = getColumnFieldName(table, column.name);
-        // AVG always returns float/numeric
-        fields[fieldName] = { type: GraphQLFloat };
+        // Hasura: numeric/bigint → Numeric, others → Float
+        const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
+        fields[fieldName] = { type: resolveStatAggReturnType(mapping.name) };
       }
       for (const cf of numericComputedFields) {
         const fieldName = toCamelCase(cf.name);
         if (!(fieldName in fields)) {
-          fields[fieldName] = { type: GraphQLFloat };
+          fields[fieldName] = { type: resolveStatAggReturnType(cf.graphqlTypeName) };
         }
       }
       if (Object.keys(fields).length === 0) {
@@ -679,11 +721,12 @@ export function buildMutationInputTypes(
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of table.columns) {
         if (visibleColumns && !visibleColumns.has(column.name)) continue;
-        // Min/Max work on any ordered type
-        const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
-        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Timestamp', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
+        // Min/Max work on any ordered type (including array columns — Hasura returns [ScalarType!])
+        const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
+        const baseName = pgTypeToGraphQL(column.udtName, false, enumNames).name;
+        if (NUMERIC_GRAPHQL_TYPES.has(baseName) || ['String', 'Timestamptz', 'Timestamp', 'Date', 'Time', 'Bpchar'].includes(baseName)) {
           const fieldName = getColumnFieldName(table, column.name);
-          fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
+          fields[fieldName] = { type: resolveOutputType(mapping.name, mapping.isList) };
         }
       }
       for (const cf of orderableComputedFields) {
@@ -706,10 +749,11 @@ export function buildMutationInputTypes(
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of table.columns) {
         if (visibleColumns && !visibleColumns.has(column.name)) continue;
-        const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
-        if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Timestamp', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
+        const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
+        const baseName = pgTypeToGraphQL(column.udtName, false, enumNames).name;
+        if (NUMERIC_GRAPHQL_TYPES.has(baseName) || ['String', 'Timestamptz', 'Timestamp', 'Date', 'Time', 'Bpchar'].includes(baseName)) {
           const fieldName = getColumnFieldName(table, column.name);
-          fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
+          fields[fieldName] = { type: resolveOutputType(mapping.name, mapping.isList) };
         }
       }
       for (const cf of orderableComputedFields) {
@@ -727,16 +771,18 @@ export function buildMutationInputTypes(
 
   // ── Statistical Aggregate Sub-Fields (Stddev, Variance family) ──────
   // Helper: build numeric fields (columns + computed fields) for statistical agg types
+  // Hasura returns Numeric for numeric/bigint source columns, Float for others.
   function buildStatAggFields(): GraphQLFieldConfigMap<unknown, unknown> {
     const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
     for (const column of numericColumns) {
       const fieldName = getColumnFieldName(table, column.name);
-      fields[fieldName] = { type: GraphQLFloat };
+      const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
+      fields[fieldName] = { type: resolveStatAggReturnType(mapping.name) };
     }
     for (const cf of numericComputedFields) {
       const fieldName = toCamelCase(cf.name);
       if (!(fieldName in fields)) {
-        fields[fieldName] = { type: GraphQLFloat };
+        fields[fieldName] = { type: resolveStatAggReturnType(cf.graphqlTypeName) };
       }
     }
     if (Object.keys(fields).length === 0) {
