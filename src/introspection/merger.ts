@@ -352,9 +352,9 @@ export function mergeSchemaModel(
 // ─── Relationship merging ───────────────────────────────────────────────────
 
 /**
- * Merge auto-detected relationships with config-defined ones.
- * Config-defined relationships override auto-detected ones with the same name.
- * Config-defined relationships are also appended if they have new names.
+ * Merge config-defined relationships with auto-detected FK data.
+ * Only relationships explicitly defined in metadata config are included.
+ * Auto-detected FK data is used to fill in missing column mappings.
  */
 function mergeRelationships(
   autoRels: RelationshipConfig[],
@@ -362,12 +362,6 @@ function mergeRelationships(
 ): RelationshipConfig[] {
   // Match by camelCase-normalized name so "limit_type" matches "limitType"
   const autoRelMap = new Map(autoRels.map((r) => [toCamelCase(r.name), r]));
-  const configRelNames = new Set(configRels.map((r) => toCamelCase(r.name)));
-
-  // Start with auto-detected rels that aren't overridden by config
-  const merged: RelationshipConfig[] = autoRels.filter(
-    (r) => !configRelNames.has(toCamelCase(r.name)),
-  );
 
   // Build a lookup from localColumns key to auto-detected rels for FK resolution
   const autoRelByColumns = new Map<string, RelationshipConfig>();
@@ -377,7 +371,9 @@ function mergeRelationships(
     }
   }
 
-  // Add config-defined rels, filling in missing fields from auto-detected
+  // Only include config-defined rels, using auto-detected data to fill gaps
+  const merged: RelationshipConfig[] = [];
+
   for (const configRel of configRels) {
     // Match by name first
     let autoRel = autoRelMap.get(toCamelCase(configRel.name));
