@@ -1023,7 +1023,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 - [ ] **`makeSelectAggregateResolver` missing computed fields** — Non-groupBy path doesn't pass `aggregate.computedFields` to `compileSelectAggregate`; computed field aggregation (e.g., `sum { totalBalance }`) silently omits the field
 - [ ] **`makeUpdateManyResolver` missing returning computed fields** — Doesn't build/pass `returningComputedFields` to SQL compiler
 - [ ] **PG type map missing `"boolean"` long form** — `PG_TO_GRAPHQL` maps `"bool"` but not `"boolean"`; function return types use long form, causing boolean computed fields to fall through to String in BoolExp types
-- [ ] **No nested aggregate fields on object types** — Array relationships don't expose `{rel}Aggregate` on object types (e.g., `clientByPk { invoicesAggregate { ... } }`)
+- [x] **No nested aggregate fields on object types** — Array relationships don't expose `{rel}Aggregate` on object types (e.g., `clientByPk { invoicesAggregate { ... } }`)
 
 ---
 

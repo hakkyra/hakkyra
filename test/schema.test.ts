@@ -158,6 +158,44 @@ describe('GraphQL Schema Generation', () => {
     });
   });
 
+  describe('Aggregate relationship fields on object types', () => {
+    it('should have {rel}Aggregate fields for each array relationship', () => {
+      const typeMap = schema.getTypeMap();
+      const clientType = typeMap['Client'] as GraphQLObjectType;
+      const fields = clientType.getFields();
+      // Client has array relationships: accounts, invoices, ledgerEntries, etc.
+      expect(fields['accountsAggregate']).toBeDefined();
+      expect(fields['invoicesAggregate']).toBeDefined();
+      expect(fields['ledgerEntriesAggregate']).toBeDefined();
+    });
+
+    it('should return the correct aggregate type for the related table', () => {
+      const typeMap = schema.getTypeMap();
+      const clientType = typeMap['Client'] as GraphQLObjectType;
+      const invoicesAggField = clientType.getFields()['invoicesAggregate'];
+      // Should be NonNull(InvoiceAggregate)
+      expect(invoicesAggField.type).toBeInstanceOf(GraphQLNonNull);
+      const innerType = (invoicesAggField.type as GraphQLNonNull<any>).ofType;
+      expect(innerType.name).toBe('InvoiceAggregate');
+    });
+
+    it('should have where argument on aggregate relationship fields', () => {
+      const typeMap = schema.getTypeMap();
+      const clientType = typeMap['Client'] as GraphQLObjectType;
+      const invoicesAggField = clientType.getFields()['invoicesAggregate'];
+      const argNames = invoicesAggField.args.map((a) => a.name);
+      expect(argNames).toContain('where');
+    });
+
+    it('should not have aggregate fields for object relationships', () => {
+      const typeMap = schema.getTypeMap();
+      const clientType = typeMap['Client'] as GraphQLObjectType;
+      const fields = clientType.getFields();
+      // branch is an object relationship — no branchAggregate should exist
+      expect(fields['branchAggregate']).toBeUndefined();
+    });
+  });
+
   describe('Custom scalars', () => {
     it('should register Uuid scalar type', () => {
       const typeMap = schema.getTypeMap();

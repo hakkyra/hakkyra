@@ -24,12 +24,12 @@ import type { QueryCache } from '../sql/cache.js';
 import type { SubscriptionManager } from '../subscriptions/manager.js';
 import type { JobQueue } from '../shared/job-queue/types.js';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../sql/select.js';
-import type { OrderByItem, AggregateSelection, AggregateComputedFieldRef, ComputedFieldSelection, SetReturningComputedFieldSelection } from '../sql/select.js';
+import type { OrderByItem, AggregateSelection, AggregateComputedFieldRef, AggregateRelationshipSelection, ComputedFieldSelection, SetReturningComputedFieldSelection } from '../sql/select.js';
 import { compileInsertOne, compileInsert } from '../sql/insert.js';
 import { compileUpdateByPk, compileUpdate, compileUpdateMany } from '../sql/update.js';
 import { compileDeleteByPk, compileDelete } from '../sql/delete.js';
 import { toCamelCase, getColumnFieldName } from './type-builder.js';
-import { parseResolveInfo, parseReturningInfo, parseAggregateNodesInfo, type SetReturningComputedFieldParsed } from './resolve-info.js';
+import { parseResolveInfo, parseReturningInfo, parseAggregateNodesInfo, type SetReturningComputedFieldParsed, type AggregateRelationshipParsed } from './resolve-info.js';
 
 // ─── Resolver Context ───────────────────────────────────────────────────────
 
@@ -716,6 +716,39 @@ export function buildSetReturningComputedFieldSelections(
 }
 
 /**
+ * Build AggregateRelationshipSelection[] from parsed aggregate relationship info.
+ *
+ * Converts the parse-time AggregateRelationshipParsed into the SQL compiler's
+ * AggregateRelationshipSelection format, adding the session and building
+ * the aggregate selection (count + numeric column aggregates).
+ */
+export function buildAggregateRelationshipSelections(
+  parsed: AggregateRelationshipParsed[] | undefined,
+  session: SessionVariables,
+): AggregateRelationshipSelection[] {
+  if (!parsed || parsed.length === 0) return [];
+
+  const result: AggregateRelationshipSelection[] = [];
+
+  for (const aggRel of parsed) {
+    // Build aggregate selection: always include count
+    const aggregate: AggregateSelection = { count: {} };
+
+    result.push({
+      relationship: aggRel.relationship,
+      fieldName: aggRel.fieldName,
+      remoteTable: aggRel.remoteTable,
+      aggregate,
+      where: aggRel.where,
+      permission: aggRel.permission,
+      session,
+    });
+  }
+
+  return result;
+}
+
+/**
  * Remap row keys from snake_case to camelCase for GraphQL response.
  */
 function remapRowToCamel(
@@ -798,6 +831,12 @@ export function makeSelectResolver(
       auth.isAdmin,
     );
 
+    // Build aggregate relationship selections
+    const aggregateRelationships = buildAggregateRelationshipSelections(
+      parsed.aggregateRelationships,
+      auth,
+    );
+
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap, table, context.tables);
     const orderBy = remapOrderBy(
       args.orderBy as Array<Record<string, unknown>> | undefined,
@@ -826,6 +865,7 @@ export function makeSelectResolver(
       limit,
       offset: args.offset as number | undefined,
       relationships: parsed.relationships,
+      aggregateRelationships: aggregateRelationships.length > 0 ? aggregateRelationships : undefined,
       computedFields: computedFields.length > 0 ? computedFields : undefined,
       setReturningComputedFields: setReturningComputedFields.length > 0 ? setReturningComputedFields : undefined,
       jsonbPaths: parsed.jsonbPaths,
@@ -901,11 +941,18 @@ export function makeSelectByPkResolver(
       auth.isAdmin,
     );
 
+    // Build aggregate relationship selections
+    const aggregateRelationships = buildAggregateRelationshipSelections(
+      parsed.aggregateRelationships,
+      auth,
+    );
+
     const compiled = compileSelectByPk({
       table,
       pkValues,
       columns,
       relationships: parsed.relationships,
+      aggregateRelationships: aggregateRelationships.length > 0 ? aggregateRelationships : undefined,
       computedFields: computedFields.length > 0 ? computedFields : undefined,
       setReturningComputedFields: setReturningComputedFields.length > 0 ? setReturningComputedFields : undefined,
       jsonbPaths: parsed.jsonbPaths,

@@ -164,6 +164,11 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   const orderByTypes = new Map<string, GraphQLInputObjectType>();
 
   // ── Step 4: Build GraphQLObjectType for each table ─────────────────────
+  // Pre-create the aggregate types map. It will be populated in Step 5 after
+  // mutation input types are built, but object type fields use thunks (lazy
+  // evaluation) so the map will be ready by the time fields are resolved.
+  const aggregateTypesByTable = new Map<string, GraphQLObjectType>();
+
   // First pass: create all object types and register them
   for (const table of tables) {
     const key = tableKey(table.schema, table.name);
@@ -175,6 +180,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       filterTypes,
       orderByTypes,
       functions,
+      aggregateTypesByTable,
     );
     typeRegistry.set(key, objectType);
   }
@@ -201,9 +207,9 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     selectColumnEnums.set(key, mutInputs.selectColumnEnum);
   }
 
-  // Collect selectColumnEnums and aggregate types for tracked functions
+  // Collect selectColumnEnums and populate the aggregate types map
+  // (aggregateTypesByTable was pre-created in Step 4 for use by object type thunks)
   const selectColumnEnumsByTable = new Map<string, import('graphql').GraphQLEnumType>();
-  const aggregateTypesByTable = new Map<string, GraphQLObjectType>();
 
   for (const table of tables) {
     const key = tableKey(table.schema, table.name);

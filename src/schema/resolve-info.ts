@@ -38,10 +38,33 @@ export interface ParsedSelection {
   computedFields?: string[];
   /** Set-returning computed field selections (array computed fields) */
   setReturningComputedFields?: SetReturningComputedFieldParsed[];
+  /** Aggregate relationship selections ({rel}Aggregate fields on object types) */
+  aggregateRelationships?: AggregateRelationshipParsed[];
   /** JSONB path arguments: snake_case column name → dot-separated path string */
   jsonbPaths?: Map<string, string>;
   /** User-provided arguments for scalar computed fields: snake_case cf name → { camelCaseArgName → value } */
   computedFieldArgs?: Map<string, Record<string, unknown>>;
+}
+
+export interface AggregateRelationshipParsed {
+  /** camelCase field name (e.g., "invoicesAggregate") */
+  fieldName: string;
+  /** The relationship config */
+  relationship: TableInfo['relationships'][number];
+  /** The remote table */
+  remoteTable: TableInfo;
+  /** Whether count was requested */
+  hasCount: boolean;
+  /** Aggregate functions requested with their columns */
+  aggregateFunctions: string[];
+  /** User-provided where filter */
+  where?: BoolExp;
+  /** Permissions on the remote table */
+  permission?: {
+    filter: CompiledFilter;
+    columns: string[] | '*';
+    limit?: number;
+  };
 }
 
 export interface SetReturningComputedFieldParsed {
@@ -428,8 +451,18 @@ function parseSelectionSet(
   const relationships: RelationshipSelection[] = [];
   const computedFieldSet = new Set<string>();
   const setReturningComputedFieldList: SetReturningComputedFieldParsed[] = [];
+  const aggregateRelationshipList: AggregateRelationshipParsed[] = [];
   const jsonbPaths = new Map<string, string>();
   const computedFieldArgsMap = new Map<string, Record<string, unknown>>();
+
+  // Build a map of aggregate relationship field names
+  // e.g., "invoicesAggregate" → invoices relationship config
+  const aggRelMap = new Map<string, TableInfo['relationships'][number]>();
+  for (const rel of table.relationships) {
+    if (rel.type === 'array') {
+      aggRelMap.set(`${toCamelCase(rel.name)}Aggregate`, rel);
+    }
+  }
 
   // Build a set of JSONB/JSON column camelCase names for path argument detection
   const jsonbColumnCamelNames = new Set<string>();
@@ -545,6 +578,45 @@ function parseSelectionSet(
             }
           }
         }
+        continue;
+      }
+
+      // Check if it's an aggregate relationship field (e.g., invoicesAggregate)
+      const aggRel = aggRelMap.get(fieldName);
+      if (aggRel) {
+        const remoteTable = allTables.find(
+          (t) => t.name === aggRel.remoteTable.name && t.schema === aggRel.remoteTable.schema,
+        );
+        if (!remoteTable) continue;
+
+        // Look up permissions for the remote table
+        const remotePerm = session.isAdmin
+          ? undefined
+          : permissionLookup.getSelect(remoteTable.schema, remoteTable.name, session.role);
+
+        // For non-admin, if there's no permission on the remote table, skip
+        if (!session.isAdmin && !remotePerm) continue;
+
+        // Parse the where argument
+        const remoteColMap = camelToColumnMap(remoteTable);
+        const whereArg = getArgumentValue(selection, 'where', variableValues);
+        const where = whereArg ? remapBoolExp(whereArg as BoolExp, remoteColMap) : undefined;
+
+        const aggRelParsed: AggregateRelationshipParsed = {
+          fieldName,
+          relationship: aggRel,
+          remoteTable,
+          hasCount: true, // Always include count
+          aggregateFunctions: [],
+          where,
+          permission: remotePerm ? {
+            filter: remotePerm.filter,
+            columns: remotePerm.columns,
+            limit: remotePerm.limit,
+          } : undefined,
+        };
+
+        aggregateRelationshipList.push(aggRelParsed);
         continue;
       }
 
@@ -676,6 +748,9 @@ function parseSelectionSet(
         if (fragmentResult.setReturningComputedFields) {
           setReturningComputedFieldList.push(...fragmentResult.setReturningComputedFields);
         }
+        if (fragmentResult.aggregateRelationships) {
+          aggregateRelationshipList.push(...fragmentResult.aggregateRelationships);
+        }
         if (fragmentResult.jsonbPaths) {
           for (const [col, path] of fragmentResult.jsonbPaths) {
             jsonbPaths.set(col, path);
@@ -713,6 +788,9 @@ function parseSelectionSet(
       if (fragmentResult.setReturningComputedFields) {
         setReturningComputedFieldList.push(...fragmentResult.setReturningComputedFields);
       }
+      if (fragmentResult.aggregateRelationships) {
+        aggregateRelationshipList.push(...fragmentResult.aggregateRelationships);
+      }
       if (fragmentResult.jsonbPaths) {
         for (const [col, path] of fragmentResult.jsonbPaths) {
           jsonbPaths.set(col, path);
@@ -736,6 +814,7 @@ function parseSelectionSet(
     relationships,
     computedFields: computedFieldSet.size > 0 ? Array.from(computedFieldSet) : undefined,
     setReturningComputedFields: setReturningComputedFieldList.length > 0 ? setReturningComputedFieldList : undefined,
+    aggregateRelationships: aggregateRelationshipList.length > 0 ? aggregateRelationshipList : undefined,
     jsonbPaths: jsonbPaths.size > 0 ? jsonbPaths : undefined,
     computedFieldArgs: computedFieldArgsMap.size > 0 ? computedFieldArgsMap : undefined,
   };
