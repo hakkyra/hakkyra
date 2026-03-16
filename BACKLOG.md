@@ -1252,6 +1252,179 @@ Examples:
 
 ---
 
+## Phase 10: API Parity II (Live Schema Comparison 2026-03-16)
+
+Second-round schema introspection comparison of Hakkyra (localhost:8081) vs Hasura (localhost:8080) against the neofix production database. Types: hakkyra=4647 vs hasura=4571. Identifies remaining differences after Phase 9 fixes.
+
+### P10.1 — Views Should Not Have Mutation Methods (Critical) ✅
+
+Hakkyra generates insert/update/delete mutations for views and materialized views. PostgreSQL views cannot be written to (without rules/triggers), so these mutations would fail at runtime. Affects `v_player`, `v_player_daily`, `connected_players`, `game_list_view`, `mv_player_affiliate_contract`, `player_daily_amount_per_type`, `player_daily_amount_per_type_rt`, `player_daily_net_revenue`, `player_event_grouped`, `player_lifetime_net_revenue`, `player_top_games`, `current_exchange_rate`, `authentication_provider`, `json_result`.
+
+**Root cause**: `isOpEnabled()` in `src/schema/generator.ts` only checked `table.operations` config, not `table.isView`.
+
+- [x] `isOpEnabled()` now returns `false` for mutation operations when `table.isView` is `true`
+- [x] 2 new tests in `test/schema.test.ts`: materialized view has query fields but no mutation fields
+
+### P10.2 — `updateMany` Return Type Should Be Array (High) ✅
+
+Hasura's `update{Table}Many` mutations return `[{Table}MutationResponse]` (array — one result per update entry). Hakkyra returns `{Table}MutationResponse` (singular). All 95+ `updateMany` mutations are affected.
+
+- [x] Change `updateMany` return type from `MutationResponse` to `[MutationResponse]`
+- [x] Update resolver to return array of results
+- [x] Test: `updateMany` returns an array
+
+### P10.3 — Action Argument Scalar Types (High) ✅
+
+Hakkyra uses `String` for all action input arguments. Hasura uses the specific scalar types from the action's GraphQL type definitions (`Bigint`, `Numeric`, `Uuid`, `Jsonb`, `Timestamptz`, `PaymentType`, `Json`, `_text`, `Bpchar`). 30 arguments affected.
+
+Examples: `AcceptPlayerContractArgs.playerid` (String→Bigint), `CreatePaymentArgs.amount` (String→Numeric), `ContentEventArgs.parameters` (String→Jsonb), `LatestWinsArgs.cutoff` (String→Numeric).
+
+- [x] Action type parser: resolve scalar types from `actions.graphql` definitions using the project's scalar type map
+- [x] Custom scalar types (`numeric`, `Json`, `_text`) should map to their corresponding GraphQL scalars
+- [x] SDL-defined enums and PG enum types resolve correctly in action types
+- [x] Test: action args use correct scalar types
+
+### P10.4 — Missing Table Columns (Medium)
+
+~40 tables have columns that Hasura exposes but Hakkyra doesn't. Most are `createdAt`/`updatedAt`/`createdAtDate` timestamps, but some are functional columns. This is likely caused by columns not appearing in any role's select permission (P9.16 column visibility filtering).
+
+Notable missing columns:
+- `Affiliate.internal` (Boolean)
+- `Authentication.referralToken` (String)
+- `BigWin`: `gameId`, `gameIntegrationId`, `gameRoundId`, `playerId`, `transactionId`, `createdAtDate`
+- `Brand`: `active`, `defaultJurisdiction`, `createdAt`, `updatedAt`
+- `Currency.bigWinThreshold` (Numeric)
+- `FunctionSource`: `builtin`, `compiled`
+- `FunctionTrigger.functionEventType`
+- `Game.raw` (Jsonb)
+- `Transaction`: `extra`, `gameId`, `gameIntegrationId`
+- `PlayerEvent`: `functionId`, `groupKey`
+- `PlayerData.token`
+
+- [ ] Investigate: are these columns missing from select permissions in the neofix metadata, or is there a bug in column visibility?
+- [ ] If metadata issue: update neofix metadata to include missing columns in select permissions
+- [ ] If code issue: fix column visibility logic
+
+### P10.5 — Constraint Enum Values for Upserts (High) ✅
+
+120 `*Constraint` enums are empty — missing their actual constraint names (e.g., `AffiliateConstraint` should have `affiliateExternalIdKey`, `affiliatePkey`). These values are needed for `on_conflict` upsert operations.
+
+- [x] Introspect real PK constraint names from PG catalog (not fabricated)
+- [x] Include both PK and unique constraint names in enums
+- [x] Use Hasura's camelCase naming convention for enum values
+- [x] Test: constraint enums contain correct constraint names
+
+### P10.6 — Missing Subscription Fields (Medium) ✅
+
+11 subscription fields present in Hasura but missing from Hakkyra:
+- `counterProgressAverageBet`, `counterProgressRtp` — computed field subscriptions
+- `generateTestData`, `updateGames` — async action result subscriptions
+- `playersWithMatchingData` — tracked function subscription
+- 6 `*Aggregate` subscriptions for tracked functions (`gameSessionTransactionCountAggregate`, `getGameSessionSummaryAggregate`, `getMarketingContractsAggregate`, `getPlayerMonthlySummaryAggregate`, `getTournamentLeaderboardAggregate`, `getTournamentLeaderboardCountAggregate`)
+
+- [x] Expose tracked function aggregate variants as subscription fields
+- [x] Expose async action result queries as subscription fields
+- [x] Test: tracked function aggregates available as subscriptions
+
+### P10.7 — Nullability Mismatches (Low) ✅
+
+14 relationship fields have different nullability between Hakkyra and Hasura. Hakkyra marks some as non-null (`!`) where Hasura allows null.
+
+Affected: `Balance.player`, `BigWin.currency`, `CurrentCampaignContent.campaignPlayer`, `Game.brands`, `Player.data`, `PlayerBonus.bonus`, `PlayerEvent.player`, `PlayerLimit.currentCounter`, `PlayerReward.player`, `TransactionSummary.currency`/`.game`/`.payment`, `Wallet.balance`/`.paymentMethod`.
+
+- [x] Array relationships changed from `[Type!]!` to `[Type!]` (nullable list)
+- [x] Object relationship nullability based on FK column NOT NULL status (already implemented in P9.7c)
+- [x] `Player.data` and `Game.brands` are array relationships — now nullable `[Type!]`
+
+### P10.8 — `Player.lock` Cardinality (Medium) ✅
+
+Hakkyra: `Player.lock: [PlayerLock!]!` (array relationship). Hasura: `Player.lock: PlayerLock` (object relationship). The metadata likely defines `lock` as an object relationship, but Hakkyra may be interpreting it as an array.
+
+- [x] Fixed reverse-FK object relationship column mapping in config loader
+- [x] Extended merger to infer localColumns for all relationship types with remoteColumns
+- [x] Test: `Player.lock` is an object relationship returning single value
+
+### P10.9 — Enum Comparison Operators `_gt`/`_gte`/`_lt`/`_lte` (Low) ✅
+
+17 enum comparison types are missing `_gt`, `_gte`, `_lt`, `_lte` operators that Hasura provides. These are ordering operators on enum types.
+
+Affected: `AffiliateCommissionBaseComparisonExp`, `AffiliateCommissionTypeComparisonExp`, `ContentChannelSourceComparisonExp`, `CounterTypeComparisonExp`, `FunctionStatusComparisonExp`, `FunctionTriggerTypeComparisonExp`, `PaymentApprovalTypeComparisonExp`, and 10 more.
+
+- [x] Add `_gt`, `_gte`, `_lt`, `_lte` operators to all PG enum comparison types
+- [x] SQL compiler: emit `> $N`, `>= $N`, `< $N`, `<= $N` for enum ordering (already generic)
+- [x] 25 tests: schema verification + E2E ordering on enum columns
+
+### P10.10 — Array Fields in Aggregate Min/Max Types (Low) ✅
+
+Hakkyra returns `String` for array columns (e.g., `tags`, `currencies`) in `MaxFields`/`MinFields` aggregate types. Hasura returns `[String!]`.
+
+- [x] Aggregate type builder: use array type `[ScalarType!]` for array columns in min/max fields
+- [x] Test: aggregate min/max on array columns returns array type
+
+### P10.11 — Aggregate Stat Return Types (Low) ✅
+
+Hakkyra uses `Float` for all aggregate stat fields (avg, stddev, variance, etc.). Hasura uses `Numeric` for `numeric`/`bigint` columns and `Int` for `integer`/`smallint` columns. 44 occurrences.
+
+- [x] Aggregate stat type builder: use `Numeric` return type for `numeric`/`bigint` source columns
+- [x] Use `Int` return type for `integer`/`smallint` source columns in sum fields
+- [x] Test: aggregate stat fields use correct return types
+
+### P10.12 — `Timestamp` vs `Timestamptz` (Low) ✅
+
+`CampaignContentQueue.checkpoint`/`.deliverAt` and `CampaignPlayerPayment.createdAt` use `Timestamptz` in Hakkyra but `Timestamp` (without timezone) in Hasura. This is a PG column type issue — the columns are likely `timestamp without time zone`.
+
+- [x] Add `Timestamp` scalar type for `timestamp without time zone` columns (separate from `Timestamptz`)
+- [x] Generate `TimestampComparisonExp` for timestamp-without-tz columns
+
+### P10.13 — `Transaction.sequence` Smallint Scalar (Low) ✅
+
+`Transaction.sequence` uses `Int` in Hakkyra but `Smallint` in Hasura. The PG column is `smallint`.
+
+- [x] Add `Smallint` scalar type with `SmallintComparisonExp`
+- [x] Map `smallint`/`int2` → `Smallint` in PG type map
+
+### P10.14 — Hasura-Only Input Types (Low)
+
+Hasura generates ~545 input types that Hakkyra doesn't: `*IncInput` (increment), `*Updates` (multi-column update), `*ObjRelInsertInput`/`*ArrRelInsertInput` (nested insert relationship wrappers), `*AppendInput`/`*PrependInput`/`*DeleteAtPathInput`/`*DeleteElemInput`/`*DeleteKeyInput` (JSONB mutation operators).
+
+Hakkyra uses simpler `InsertInput` types (not `ObjRelInsertInput`), and doesn't support JSONB mutation operators or `_inc` yet.
+
+- [ ] **JSONB mutation operators**: `_append`, `_prepend`, `_deleteAtPath`, `_deleteElem`, `_deleteKey` for JSONB columns in update mutations
+- [ ] **`_inc` operator**: numeric increment operator for update mutations
+- [ ] **Nested insert input wrapper types**: `ObjRelInsertInput`/`ArrRelInsertInput` for relationship-aware nested inserts
+- [ ] **`*Updates` input type**: Hasura's batch update input type (alternative to Hakkyra's `updateMany`)
+
+### P10.15 — `updateGameSessionMany` Casing (Low) ✅
+
+Hakkyra generates `updategameSessionMany` (lowercase `g`). Hasura generates `updateGameSessionMany` (capital `G`). This is because `gameSession` is a `custom_name` and the `updateMany` name builder doesn't handle verbatim custom names correctly.
+
+- [x] Fix: capitalize first letter of `typeName` after verb prefixes for all 7 prefixed root fields
+- [x] Same fix applied to insert*, update*, delete* prefixed names
+
+### P10.16 — Async Action Query/Subscription Return Types (Low) ✅
+
+Hakkyra returns `AsyncActionId!` for async mutation results and `GenerateTestDataAsyncResult`/`UpdateGamesAsyncResult` for result queries. Hasura returns `uuid!` for mutations and uses the action name directly for result queries/subscriptions (e.g., `generateTestData`, `updateGames`).
+
+- [x] Mutation return: use `uuid!` scalar instead of custom `AsyncActionId` type
+- [x] Result query return: use action handler return type, not custom `*AsyncResult` wrapper
+
+### P10.17 — `playerDataReport`/`playerProfile` Return Types (Low) ✅
+
+Hakkyra returns `String` for `playerDataReport` and `playerProfile` tracked functions. Hasura returns `jsonb!`. These functions return JSONB but Hakkyra may be treating them as text.
+
+- [x] Tracked functions returning `jsonb` now expose `Jsonb!` scalar (not skipped)
+- [x] Tracked functions returning `json` now expose `json!` scalar
+- [x] Added scalar function resolver for non-table-returning tracked functions
+
+### P10.18 — Hasura-Only `AggregateBoolExp` Bool Column Enums (Low)
+
+Hasura generates `*SelectColumn*AggregateBoolExpBool_andArgumentsColumns` and `*Bool_orArgumentsColumns` enums for aggregate boolean expressions. These are used for typed `bool_and`/`bool_or` aggregate filtering. 47 missing enums.
+
+- [ ] Generate `AggregateBoolExpBool_and` and `AggregateBoolExpBool_or` types with column-specific enum arguments
+- [ ] Only needed for tables with boolean columns used in aggregate bool expressions
+
+---
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.

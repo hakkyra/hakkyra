@@ -113,7 +113,13 @@ function getRootFieldNames(table: TableInfo): RootFieldNames {
  * Check if a specific operation is enabled for a table.
  * When no operations config exists, all operations default to enabled.
  */
+function isMutationOp(op: keyof OperationsConfig): boolean {
+  return op !== 'select' && op !== 'selectByPk' && op !== 'selectAggregate';
+}
+
 function isOpEnabled(table: TableInfo, op: keyof OperationsConfig): boolean {
+  // Views and materialized views cannot have mutation operations
+  if (table.isView && isMutationOp(op)) return false;
   if (!table.operations) return true;
   return table.operations[op] !== false;
 }
