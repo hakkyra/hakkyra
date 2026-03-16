@@ -1011,7 +1011,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 - [x] **Context building deduplicated** — `buildResolverContext()` factory in `server/context.ts` replaces 3× duplicated inline context objects.
 - [ ] **Events/crons/actions inconsistent init patterns** — Events return a `Manager` with `stop()`, crons return nothing, actions require two separate calls (`ensureAsyncActionSchema` + `registerAsyncActionWorkers`). Fix: standardize on a `Manager` interface with `init()` and `stop()`.
 - [ ] **`resolvers.ts` too large (1749 lines)** — Contains all 10 resolver factories plus helpers. Fix: split into `resolvers/select.ts`, `resolvers/insert.ts`, `resolvers/update.ts`, `resolvers/delete.ts` with shared helpers in `resolvers/helpers.ts`.
-- [ ] **Error handling inconsistency in webhook workers** — Events and async actions store error details in DB on failure; crons only log a warning. Fix: standardize error recording across all webhook workers.
+- [x] **Error handling inconsistency in webhook workers** — All three consumers (events, crons, async actions) now use the shared `registerWebhookWorker` factory in `src/shared/webhook-worker.ts`, which provides consistent logging (info on success, warn on failure) and throws on failure so pg-boss records error details. Async actions refactored from manual `jobQueue.work()` to the factory with a custom `deliver` callback.
 
 #### Low
 

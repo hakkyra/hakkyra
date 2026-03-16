@@ -10,13 +10,13 @@
 import type { Pool } from 'pg';
 import type { Logger } from 'pino';
 import type { ActionConfig, SessionVariables, AsyncActionResult } from '../types.js';
-import type { JobQueue, Job } from '../shared/job-queue/types.js';
+import type { JobQueue } from '../shared/job-queue/types.js';
+import { registerWebhookWorker } from '../shared/webhook-worker.js';
 import { executeAction } from './proxy.js';
 import {
   nsKey,
   WELL_KNOWN_SUFFIXES,
   DEFAULT_SESSION_NAMESPACE,
-  resolveSessionVar,
 } from '../auth/session-namespace.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -93,10 +93,36 @@ export async function enqueueAsyncAction(
 // ─── Worker Registration ────────────────────────────────────────────────────
 
 /**
+ * Reconstruct a SessionVariables object from stored session variable map.
+ */
+function reconstructSession(sessionVars: Record<string, string>): SessionVariables {
+  const ns = DEFAULT_SESSION_NAMESPACE;
+  const roleKey = nsKey(ns, WELL_KNOWN_SUFFIXES.ROLE);
+  const userIdKey = nsKey(ns, WELL_KNOWN_SUFFIXES.USER_ID);
+  const allowedRolesKey = nsKey(ns, WELL_KNOWN_SUFFIXES.ALLOWED_ROLES);
+  return {
+    role: sessionVars[roleKey] ?? sessionVars['x-hasura-role'] ?? 'anonymous',
+    userId: sessionVars[userIdKey] ?? sessionVars['x-hasura-user-id'],
+    allowedRoles: (sessionVars[allowedRolesKey] ?? sessionVars['x-hasura-allowed-roles'])
+      ? (sessionVars[allowedRolesKey] ?? sessionVars['x-hasura-allowed-roles']).split(',')
+      : [],
+    isAdmin: false,
+    claims: sessionVars,
+  };
+}
+
+/** Job data shape for async action jobs. */
+interface AsyncActionJobData {
+  actionId: string;
+  actionName: string;
+  [key: string]: unknown;
+}
+
+/**
  * Register job queue workers for all async actions.
  *
- * Each worker fetches the action from the DB, calls the webhook handler,
- * and stores the result.
+ * Each worker fetches the action from the DB, calls the webhook handler
+ * via the shared webhook worker factory, and stores the result.
  */
 export async function registerAsyncActionWorkers(
   jobQueue: JobQueue,
@@ -117,105 +143,115 @@ export async function registerAsyncActionWorkers(
   for (const action of asyncActions) {
     const queueName = `action/${action.name}`;
 
-    // Configure the queue with retry settings
-    await jobQueue.createQueue(queueName, {
-      retryLimit: 3,
-      retryDelay: 10,
-      retryBackoff: true,
-      expireInSeconds: action.definition.timeout ?? 120,
-    });
+    await registerWebhookWorker<AsyncActionJobData>(
+      jobQueue,
+      logger,
+      {
+        queueName,
+        label: `action/${action.name}`,
+        queueOptions: {
+          retryLimit: 3,
+          retryDelay: 10,
+          retryBackoff: true,
+          expireInSeconds: action.definition.timeout ?? 120,
+        },
+        callbacks: {
+          async resolveWebhook(job) {
+            const { actionId } = job.data;
 
-    await jobQueue.work<{ actionId: string; actionName: string }>(
-      queueName,
-      async (jobs: Job<{ actionId: string; actionName: string }>[]) => {
-        for (const job of jobs) {
-          const { actionId } = job.data;
-
-          // Fetch the action row from DB
-          const rowResult = await pool.query<AsyncActionRow>(
-            `SELECT id, action_name, input, session_variables, status
-             FROM hakkyra.async_action_log
-             WHERE id = $1`,
-            [actionId],
-          );
-
-          const row = rowResult.rows[0];
-          if (!row) {
-            logger.warn({ actionId }, 'Async action row not found, skipping');
-            continue;
-          }
-
-          const actionConfig = actionConfigMap.get(row.action_name);
-          if (!actionConfig) {
-            logger.warn({ actionId, actionName: row.action_name }, 'Action config not found');
-            await pool.query(
-              `UPDATE hakkyra.async_action_log
-               SET status = 'failed', errors = $2, updated_at = now()
+            // Fetch the action row from DB
+            const rowResult = await pool.query<AsyncActionRow>(
+              `SELECT id, action_name, input, session_variables, status
+               FROM hakkyra.async_action_log
                WHERE id = $1`,
-              [actionId, JSON.stringify({ message: `Action config "${row.action_name}" not found` })],
+              [actionId],
             );
-            continue;
-          }
 
-          // Reconstruct session from stored session variables
-          const sessionVars = row.session_variables ?? {};
-          const ns = DEFAULT_SESSION_NAMESPACE;
-          const roleKey = nsKey(ns, WELL_KNOWN_SUFFIXES.ROLE);
-          const userIdKey = nsKey(ns, WELL_KNOWN_SUFFIXES.USER_ID);
-          const allowedRolesKey = nsKey(ns, WELL_KNOWN_SUFFIXES.ALLOWED_ROLES);
-          const session: SessionVariables = {
-            role: sessionVars[roleKey] ?? sessionVars['x-hasura-role'] ?? 'anonymous',
-            userId: sessionVars[userIdKey] ?? sessionVars['x-hasura-user-id'],
-            allowedRoles: (sessionVars[allowedRolesKey] ?? sessionVars['x-hasura-allowed-roles'])
-              ? (sessionVars[allowedRolesKey] ?? sessionVars['x-hasura-allowed-roles']).split(',')
-              : [],
-            isAdmin: false,
-            claims: sessionVars,
-          };
+            const row = rowResult.rows[0];
+            if (!row) {
+              logger.warn({ actionId }, 'Async action row not found, skipping');
+              return null;
+            }
 
-          logger.info(
-            { actionId, actionName: row.action_name, jobId: job.id },
-            'Processing async action',
-          );
+            const actionConfig = actionConfigMap.get(row.action_name);
+            if (!actionConfig) {
+              logger.warn({ actionId, actionName: row.action_name }, 'Action config not found');
+              await pool.query(
+                `UPDATE hakkyra.async_action_log
+                 SET status = 'failed', errors = $2, updated_at = now()
+                 WHERE id = $1`,
+                [actionId, JSON.stringify({ message: `Action config "${row.action_name}" not found` })],
+              );
+              return null;
+            }
 
-          // Execute the webhook
-          const result = await executeAction({
-            action: actionConfig,
-            input: row.input,
-            session,
-          });
+            // Store resolved data in payload for the deliver callback
+            const session = reconstructSession(row.session_variables ?? {});
+            return {
+              url: actionConfig.definition.handler,
+              headers: {},
+              payload: { action: actionConfig, input: row.input, session },
+              timeoutMs: (actionConfig.definition.timeout ?? 30) * 1000,
+            };
+          },
 
-          if (result.success) {
-            // Store successful result
+          async deliver(config, _job) {
+            // Use executeAction() which wraps deliverWebhook() with
+            // request/response transforms and structured error parsing.
+            const { action: actionConfig, input, session } = config.payload as {
+              action: ActionConfig;
+              input: Record<string, unknown>;
+              session: SessionVariables;
+            };
+
+            const start = performance.now();
+            const result = await executeAction({ action: actionConfig, input, session });
+            const durationMs = Math.round(performance.now() - start);
+
+            if (result.success) {
+              return {
+                success: true,
+                statusCode: 200,
+                body: JSON.stringify(result.data),
+                durationMs,
+              };
+            }
+
+            // Map ActionResult failure to WebhookDeliveryResult
+            const statusCode = (result.extensions?.statusCode as number) ?? undefined;
+            return {
+              success: false,
+              statusCode,
+              error: result.error ?? 'Unknown error',
+              durationMs,
+            };
+          },
+
+          async onSuccess(job, result) {
+            const { actionId } = job.data;
+            // Parse the data back from the serialized body
+            const data = result.body ? JSON.parse(result.body) : null;
             await pool.query(
               `UPDATE hakkyra.async_action_log
                SET status = 'completed', output = $2, updated_at = now()
                WHERE id = $1`,
-              [actionId, JSON.stringify(result.data)],
+              [actionId, JSON.stringify(data)],
             );
+          },
 
-            logger.info(
-              { actionId, actionName: row.action_name },
-              'Async action completed',
-            );
-          } else {
-            // Store failure
+          async onFailure(job, result) {
+            const { actionId } = job.data;
             await pool.query(
               `UPDATE hakkyra.async_action_log
                SET status = 'failed', errors = $2, updated_at = now()
                WHERE id = $1`,
-              [actionId, JSON.stringify({ message: result.error, extensions: result.extensions })],
+              [actionId, JSON.stringify({
+                message: result.error ?? `HTTP ${result.statusCode}`,
+                extensions: result.statusCode ? { statusCode: result.statusCode } : undefined,
+              })],
             );
-
-            logger.warn(
-              { actionId, actionName: row.action_name, error: result.error },
-              'Async action failed',
-            );
-
-            // Throw so the job queue retries
-            throw new Error(`Async action webhook failed: ${result.error}`);
-          }
-        }
+          },
+        },
       },
     );
   }
