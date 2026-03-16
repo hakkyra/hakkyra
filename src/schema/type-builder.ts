@@ -55,11 +55,12 @@ export function getColumnFieldName(table: TableInfo, columnName: string): string
 
 /**
  * Derive the GraphQL type name for a table.
- * Uses the alias if available, otherwise falls back to the table name.
+ * When a custom_name alias is set, use it verbatim (Hasura does NOT PascalCase it).
+ * Otherwise, PascalCase the raw table name.
  */
 export function getTypeName(table: TableInfo): string {
-  const base = table.alias ?? table.name;
-  return toPascalCase(base);
+  if (table.alias) return table.alias;
+  return toPascalCase(table.name);
 }
 
 /**

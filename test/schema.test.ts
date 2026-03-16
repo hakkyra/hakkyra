@@ -4,7 +4,8 @@ import { generateSchema } from '../src/schema/generator.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
-import type { SchemaModel } from '../src/types.js';
+import { getTypeName } from '../src/schema/type-builder.js';
+import type { SchemaModel, TableInfo } from '../src/types.js';
 import { getPool, closePool, waitForDb, METADATA_DIR, SERVER_CONFIG_PATH, TEST_DB_URL } from './setup.js';
 
 let schemaModel: SchemaModel;
@@ -383,6 +384,63 @@ describe('GraphQL Schema Generation', () => {
       const usernameField = clientType.getFields()['username'];
       expect(usernameField).toBeDefined();
       expect(usernameField.args).toHaveLength(0);
+    });
+  });
+
+  describe('Table-level custom_name type naming (P9.5)', () => {
+    // Unit tests for getTypeName
+    it('getTypeName should return alias verbatim when set', () => {
+      const table = { alias: 'gameSession' } as TableInfo;
+      expect(getTypeName(table)).toBe('gameSession');
+    });
+
+    it('getTypeName should NOT PascalCase the alias', () => {
+      const table = { alias: 'gameSession' } as TableInfo;
+      // Must not become "GameSession"
+      expect(getTypeName(table)).not.toBe('GameSession');
+    });
+
+    it('getTypeName should PascalCase the table name when no alias is set', () => {
+      const table = { name: 'game_session' } as TableInfo;
+      expect(getTypeName(table)).toBe('GameSession');
+    });
+
+    // Integration test: fiscal_period has custom_name: fiscalPeriod in metadata
+    it('should use custom_name verbatim as the GraphQL type name (fiscalPeriod, not FiscalPeriod)', () => {
+      const typeMap = schema.getTypeMap();
+      // With custom_name: fiscalPeriod, the type should be "fiscalPeriod" (verbatim)
+      expect(typeMap['fiscalPeriod']).toBeDefined();
+      // The old PascalCased name should NOT exist
+      expect(typeMap['FiscalPeriod']).toBeUndefined();
+    });
+
+    it('should use custom_name verbatim for derived input type names', () => {
+      const typeMap = schema.getTypeMap();
+      // BoolExp, OrderBy, InsertInput, etc. should all use the verbatim custom_name
+      expect(typeMap['fiscalPeriodBoolExp']).toBeDefined();
+      expect(typeMap['fiscalPeriodOrderBy']).toBeDefined();
+      expect(typeMap['fiscalPeriodInsertInput']).toBeDefined();
+      expect(typeMap['fiscalPeriodSetInput']).toBeDefined();
+      expect(typeMap['fiscalPeriodSelectColumn']).toBeDefined();
+    });
+
+    it('should use custom_name verbatim for aggregate type names', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['fiscalPeriodAggregate']).toBeDefined();
+      expect(typeMap['fiscalPeriodAggregateFields']).toBeDefined();
+    });
+
+    it('should use custom_name verbatim for mutation response type names', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['fiscalPeriodMutationResponse']).toBeDefined();
+    });
+
+    it('tables without custom_name should still use PascalCase', () => {
+      const typeMap = schema.getTypeMap();
+      // "client" table has no custom_name, so type should be PascalCase "Client"
+      expect(typeMap['Client']).toBeDefined();
+      // "account" table has no custom_name, so type should be PascalCase "Account"
+      expect(typeMap['Account']).toBeDefined();
     });
   });
 });
