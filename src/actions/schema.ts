@@ -45,12 +45,15 @@ import { executeAction } from './proxy.js';
 import { enqueueAsyncAction, getAsyncActionResult } from './async.js';
 import { compileSelect } from '../sql/select.js';
 import { toCamelCase, getRelFieldName } from '../shared/naming.js';
+import { randomUUID } from 'crypto';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export interface ActionSchemaResult {
   queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>>;
   mutationFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>>;
+  /** Subscription fields for async action result polling (mirrors query fields). */
+  subscriptionFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>>;
   types: GraphQLNamedType[];
 }
 
@@ -414,7 +417,7 @@ export function buildActionFields(
   options?: ActionSchemaOptions,
 ): ActionSchemaResult {
   if (!sdl || actions.length === 0) {
-    return { queryFields: {}, mutationFields: {}, types: [] };
+    return { queryFields: {}, mutationFields: {}, subscriptionFields: {}, types: [] };
   }
 
   const { actions: parsedActions, inputTypeDefs, outputTypeDefs } = parseActionsSDL(sdl);
@@ -505,9 +508,10 @@ export function buildActionFields(
     );
   }
 
-  // Build field configs for Query and Mutation
+  // Build field configs for Query, Mutation, and Subscription
   const queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
   const mutationFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
+  const subscriptionFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
 
   // Track whether we need async types in the schema
   let hasAsyncActions = false;
@@ -572,6 +576,19 @@ export function buildActionFields(
         resolve: makeAsyncActionResultResolver(actionConfig),
       };
       queryFields[parsed.name] = resultQueryFieldConfig;
+
+      // ── Async action: subscription field (mirrors query) ─────────────
+      // Hasura exposes async action result queries as subscription fields,
+      // allowing clients to subscribe to action completion.
+      subscriptionFields[parsed.name] = {
+        type: asyncResultType,
+        args: {
+          id: { type: new GraphQLNonNull(customScalars['Uuid']!) },
+        },
+        description: `Subscribe to the result of async action "${actionConfig.name}"`,
+        resolve: (payload: unknown) => payload,
+        subscribe: makeAsyncActionResultSubscribe(actionConfig),
+      };
     } else {
       // ── Sync action: standard resolver ────────────────────────────────
       const fieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
@@ -600,7 +617,7 @@ export function buildActionFields(
     types.push(AsyncActionStatusEnum, AsyncActionIdType);
   }
 
-  return { queryFields, mutationFields, types };
+  return { queryFields, mutationFields, subscriptionFields, types };
 }
 
 // ─── Sync Action Resolver Factory ───────────────────────────────────────────
@@ -733,5 +750,155 @@ function makeAsyncActionResultResolver(
       errors: result.errors,
       createdAt: result.createdAt,
     };
+  };
+}
+
+// ─── Async Action Result Subscription Factory ─────────────────────────────
+
+/**
+ * Simple push-to-pull adapter for async action result subscriptions.
+ * Same pattern used in subscription-resolvers.ts (createAsyncQueue).
+ */
+function createAsyncQueue<T>(): {
+  push(value: T): void;
+  iterator: AsyncIterableIterator<T>;
+  done(): void;
+} {
+  const buffer: T[] = [];
+  const waiters: Array<(result: IteratorResult<T>) => void> = [];
+  let finished = false;
+
+  function push(value: T): void {
+    if (finished) return;
+    if (waiters.length > 0) {
+      const resolve = waiters.shift()!;
+      resolve({ value, done: false });
+    } else {
+      buffer.push(value);
+    }
+  }
+
+  function done(): void {
+    finished = true;
+    for (const resolve of waiters) {
+      resolve({ value: undefined as unknown as T, done: true });
+    }
+    waiters.length = 0;
+  }
+
+  const iterator: AsyncIterableIterator<T> = {
+    next(): Promise<IteratorResult<T>> {
+      if (buffer.length > 0) {
+        return Promise.resolve({ value: buffer.shift()!, done: false });
+      }
+      if (finished) {
+        return Promise.resolve({ value: undefined as unknown as T, done: true });
+      }
+      return new Promise<IteratorResult<T>>((resolve) => {
+        waiters.push(resolve);
+      });
+    },
+    return(): Promise<IteratorResult<T>> {
+      done();
+      return Promise.resolve({ value: undefined as unknown as T, done: true });
+    },
+    throw(error: unknown): Promise<IteratorResult<T>> {
+      done();
+      return Promise.reject(error);
+    },
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+  };
+
+  return { push, iterator, done };
+}
+
+/**
+ * Creates a `subscribe` function for async action result subscription fields.
+ *
+ * Registers with the subscription manager on the `hakkyra.async_action_log` table,
+ * re-querying the action result whenever the table changes. This allows clients
+ * to subscribe to async action completion.
+ */
+function makeAsyncActionResultSubscribe(
+  action: ActionConfig,
+) {
+  return (
+    _parent: unknown,
+    args: Record<string, unknown>,
+    context: ResolverContext,
+  ): AsyncIterableIterator<unknown> => {
+    const { auth, subscriptionManager, pool } = context;
+
+    // Check permissions — same as the action query
+    if (!checkActionPermission(action, auth)) {
+      throw new GraphQLError(
+        `Not authorized to subscribe to result of action "${action.name}"`,
+        { extensions: { code: 'FORBIDDEN' } },
+      );
+    }
+
+    if (!subscriptionManager) {
+      throw new Error('Subscription manager is not available');
+    }
+
+    if (!pool) {
+      throw new GraphQLError(
+        'Async action infrastructure not available',
+        { extensions: { code: 'SERVICE_UNAVAILABLE' } },
+      );
+    }
+
+    const actionId = args.id as string;
+
+    // Build a SQL query that fetches the async action result and wraps it
+    // in the format expected by the subscription manager
+    const sql = `SELECT json_build_object(
+      'id', id,
+      'status', status,
+      'output', output,
+      'errors', errors,
+      'createdAt', created_at
+    ) AS "data"
+    FROM hakkyra.async_action_log
+    WHERE id = $1 AND action_name = $2
+    LIMIT 1`;
+    const params = [actionId, action.name];
+
+    const queue = createAsyncQueue<unknown>();
+    const subscriptionId = randomUUID();
+
+    function processResult(data: unknown): unknown {
+      if (!data || typeof data !== 'object') {
+        return null;
+      }
+      return data;
+    }
+
+    async function* generate(): AsyncGenerator<unknown> {
+      try {
+        const initialData = await subscriptionManager!.register({
+          id: subscriptionId,
+          tableKey: 'hakkyra.async_action_log',
+          query: { sql, params },
+          session: auth,
+          push: (data: unknown) => {
+            queue.push(processResult(data));
+          },
+        });
+
+        yield processResult(initialData);
+
+        for await (const value of queue.iterator) {
+          yield value;
+        }
+      } finally {
+        subscriptionManager!.unregister(subscriptionId);
+        queue.done();
+      }
+    }
+
+    return generate();
   };
 }
