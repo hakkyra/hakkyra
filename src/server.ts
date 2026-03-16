@@ -256,6 +256,28 @@ export async function createServer(
 
 
 
+  // ── GraphQL batching limit ───────────────────────────────────────────
+  const maxBatchSize = config.graphql.maxBatchSize;
+  if (maxBatchSize > 0) {
+    server.addHook('preHandler', (request, reply, done) => {
+      // Only apply to GraphQL endpoint
+      if (request.url === '/graphql' || request.url === '/v1/graphql') {
+        if (Array.isArray(request.body)) {
+          if (request.body.length > maxBatchSize) {
+            void reply.code(400).send({
+              errors: [{
+                message: `Batched GraphQL request exceeds maximum batch size of ${maxBatchSize}`,
+                extensions: { code: 'BATCH_SIZE_EXCEEDED', maxBatchSize },
+              }],
+            });
+            return;
+          }
+        }
+      }
+      done();
+    });
+  }
+
   // 7. Register auth middleware (must be BEFORE Mercurius so preHandler runs)
   await server.register(createAuthHook(config.auth));
 

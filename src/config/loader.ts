@@ -384,6 +384,7 @@ export async function loadConfig(
     graphql: stripUndefined({
       queryDepth: serverConfig?.graphql?.query_depth,
       maxLimit: serverConfig?.graphql?.max_limit,
+      maxBatchSize: serverConfig?.graphql?.max_batch_size,
     }),
     sql: stripUndefined({
       arrayAnyThreshold: serverConfig?.sql?.array_any_threshold,

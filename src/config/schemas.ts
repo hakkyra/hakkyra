@@ -725,6 +725,7 @@ export const RawServerConfigSchema = z
       .object({
         query_depth: z.number().optional(),
         max_limit: z.number().optional(),
+        max_batch_size: z.number().optional(),
       })
       .strict()
       .optional(),

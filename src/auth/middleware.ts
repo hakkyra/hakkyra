@@ -40,6 +40,7 @@ function buildAdminSession(request: FastifyRequest): SessionVariables {
     role: requestedRole ?? 'admin',
     allowedRoles: ['admin'],
     isAdmin: true,
+    useBackendOnlyPermissions: true,
     claims: {
       'x-hasura-role': requestedRole ?? 'admin',
     },
@@ -182,6 +183,12 @@ export function createAuthHook(config: AuthConfig): any {
             return;
           }
           session = { ...session, role: requestedRole, isAdmin: config.jwt?.adminRoleIsAdmin === true && requestedRole === 'admin' };
+        }
+
+        // Check for backend-only permissions header
+        const backendOnlyHeader = getSingleHeader(request, 'x-hasura-use-backend-only-permissions');
+        if (backendOnlyHeader?.toLowerCase() === 'true') {
+          session = { ...session, useBackendOnlyPermissions: true };
         }
 
         request.session = session;

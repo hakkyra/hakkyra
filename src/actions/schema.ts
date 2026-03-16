@@ -708,7 +708,7 @@ function makeAsyncActionResultResolver(
     }
 
     const actionId = args.id as string;
-    const result = await getAsyncActionResult(context.pool, actionId);
+    const result = await getAsyncActionResult(context.pool, actionId, context.auth);
 
     if (!result) {
       return null;

@@ -20,6 +20,7 @@ interface AsyncActionRow {
   action_name: string;
   input: Record<string, unknown>;
   session_variables: Record<string, string> | null;
+  user_id: string | null;
   status: string;
   output: unknown;
   errors: unknown;
@@ -51,13 +52,16 @@ export async function enqueueAsyncAction(
     sessionVariables['x-hasura-role'] = session.role;
   }
 
+  // Extract user ID from session for authorization
+  const userId = session.userId ?? session.claims['x-hasura-user-id'] ?? null;
+
   // Insert row into async_action_log
   const result = await pool.query<{ id: string }>(
     `INSERT INTO hakkyra.async_action_log
-     (action_name, input, session_variables, status)
-     VALUES ($1, $2, $3, 'created')
+     (action_name, input, session_variables, user_id, status)
+     VALUES ($1, $2, $3, $4, 'created')
      RETURNING id`,
-    [action.name, JSON.stringify(input), JSON.stringify(sessionVariables)],
+    [action.name, JSON.stringify(input), JSON.stringify(sessionVariables), userId],
   );
 
   const actionId = result.rows[0].id;
@@ -213,16 +217,45 @@ export async function registerAsyncActionWorkers(
 
 /**
  * Get the current result/status of an async action by ID.
+ *
+ * Authorization: non-admin users can only see their own actions (matched by user_id).
+ * Admin users bypass this check and can see any action.
  */
 export async function getAsyncActionResult(
   pool: Pool,
   actionId: string,
+  session?: SessionVariables,
 ): Promise<AsyncActionResult | null> {
+  // Admin users can see any action
+  if (session?.isAdmin) {
+    const result = await pool.query<AsyncActionRow>(
+      `SELECT id, action_name, status, output, errors, created_at, updated_at
+       FROM hakkyra.async_action_log
+       WHERE id = $1`,
+      [actionId],
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      actionName: row.action_name,
+      status: row.status as AsyncActionResult['status'],
+      output: row.output ?? undefined,
+      errors: row.errors ?? undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  // Non-admin users: filter by user_id
+  const userId = session?.userId ?? session?.claims['x-hasura-user-id'] ?? null;
   const result = await pool.query<AsyncActionRow>(
     `SELECT id, action_name, status, output, errors, created_at, updated_at
      FROM hakkyra.async_action_log
-     WHERE id = $1`,
-    [actionId],
+     WHERE id = $1 AND user_id = $2`,
+    [actionId, userId],
   );
 
   const row = result.rows[0];
