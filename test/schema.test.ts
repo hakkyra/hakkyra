@@ -741,4 +741,49 @@ describe('GraphQL Schema Generation', () => {
       expect(fields['metadata'].type.toString()).toBe('Jsonb');
     });
   });
+
+  describe('Prefixed root field casing with custom_name (P10.15)', () => {
+    // fiscal_period has custom_name: fiscalPeriod — prefixed root fields must
+    // capitalize the first letter after the prefix: insertFiscalPeriod, not insertfiscalPeriod.
+
+    it('should capitalize custom_name first letter in insert root field names', () => {
+      const mutationType = schema.getMutationType()!;
+      const fields = mutationType.getFields();
+      expect(fields['insertFiscalPeriod']).toBeDefined();
+      expect(fields['insertFiscalPeriodOne']).toBeDefined();
+      // Must NOT have lowercase-start variant
+      expect(fields['insertfiscalPeriod']).toBeUndefined();
+      expect(fields['insertfiscalPeriodOne']).toBeUndefined();
+    });
+
+    it('should capitalize custom_name first letter in update root field names', () => {
+      const mutationType = schema.getMutationType()!;
+      const fields = mutationType.getFields();
+      expect(fields['updateFiscalPeriod']).toBeDefined();
+      expect(fields['updateFiscalPeriodByPk']).toBeDefined();
+      expect(fields['updateFiscalPeriodMany']).toBeDefined();
+      // Must NOT have lowercase-start variant
+      expect(fields['updatefiscalPeriod']).toBeUndefined();
+      expect(fields['updatefiscalPeriodByPk']).toBeUndefined();
+      expect(fields['updatefiscalPeriodMany']).toBeUndefined();
+    });
+
+    it('should capitalize custom_name first letter in delete root field names', () => {
+      const mutationType = schema.getMutationType()!;
+      const fields = mutationType.getFields();
+      expect(fields['deleteFiscalPeriod']).toBeDefined();
+      // Must NOT have lowercase-start variant
+      expect(fields['deletefiscalPeriod']).toBeUndefined();
+    });
+
+    it('should keep PascalCase unchanged for tables without custom_name', () => {
+      const mutationType = schema.getMutationType()!;
+      const fields = mutationType.getFields();
+      // "client" has custom_root_fields overriding names (insertClients, etc.)
+      // "account" has no custom_name → PascalCase "Account" → insertAccount (already correct)
+      expect(fields['insertAccount']).toBeDefined();
+      expect(fields['updateAccount']).toBeDefined();
+      expect(fields['deleteAccount']).toBeDefined();
+    });
+  });
 });

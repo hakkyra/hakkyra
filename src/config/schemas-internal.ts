@@ -85,6 +85,7 @@ export const CustomRootFieldsSchema = z.object({
   insert_one: z.string().optional().describe('Custom name for the insert_one root field'),
   update: z.string().optional().describe('Custom name for the update root field'),
   update_by_pk: z.string().optional().describe('Custom name for the update-by-pk root field'),
+  update_many: z.string().optional().describe('Custom name for the update_many root field'),
   delete: z.string().optional().describe('Custom name for the delete root field'),
   delete_by_pk: z.string().optional().describe('Custom name for the delete-by-pk root field'),
 }).describe('Custom GraphQL root field names for a table');
