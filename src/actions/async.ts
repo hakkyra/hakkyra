@@ -231,44 +231,19 @@ export async function registerAsyncActionWorkers(
 /**
  * Get the current result/status of an async action by ID.
  *
- * Authorization: non-admin users can only see their own actions (matched by user_id).
- * Admin users bypass this check and can see any action.
+ * This is a pure data-access function — it does NOT perform authorization.
+ * Callers are responsible for checking permissions (e.g. via checkActionPermission)
+ * before or after calling this function.
  */
 export async function getAsyncActionResult(
   pool: Pool,
   actionId: string,
-  session?: SessionVariables,
 ): Promise<AsyncActionResult | null> {
-  // Admin users can see any action
-  if (session?.isAdmin) {
-    const result = await pool.query<AsyncActionRow>(
-      `SELECT id, action_name, status, output, errors, created_at, updated_at
-       FROM hakkyra.async_action_log
-       WHERE id = $1`,
-      [actionId],
-    );
-
-    const row = result.rows[0];
-    if (!row) return null;
-
-    return {
-      id: row.id,
-      actionName: row.action_name,
-      status: row.status as AsyncActionResult['status'],
-      output: row.output ?? undefined,
-      errors: row.errors ?? undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
-  }
-
-  // Non-admin users: filter by user_id
-  const userId = session?.userId ?? session?.claims['x-hasura-user-id'] ?? null;
   const result = await pool.query<AsyncActionRow>(
     `SELECT id, action_name, status, output, errors, created_at, updated_at
      FROM hakkyra.async_action_log
-     WHERE id = $1 AND user_id = $2`,
-    [actionId, userId],
+     WHERE id = $1`,
+    [actionId],
   );
 
   const row = result.rows[0];
