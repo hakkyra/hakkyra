@@ -151,6 +151,7 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerAsyncActionStatusRoute(server as any, {
     pool: primaryPool,
+    actions: config.actions,
   });
 
   // Subscriptions
