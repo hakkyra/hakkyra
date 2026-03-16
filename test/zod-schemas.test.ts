@@ -24,7 +24,6 @@ import {
   RawActionsYamlSchema,
   RawCronTriggerSchema,
   RawRESTOverrideSchema,
-  RawCustomQuerySchema,
   RawApiConfigSchema,
   RawServerConfigSchema,
 } from '../src/config/schemas.js';
@@ -48,7 +47,6 @@ import {
   ActionConfigSchema,
   RESTEndpointOverrideSchema,
   RESTConfigSchema,
-  CustomQueryConfigSchema,
   APIDocsConfigSchema,
   JobQueueProviderSchema,
   JobQueueConfigSchema,
@@ -785,51 +783,6 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
     });
   });
 
-  // ─── RawCustomQuerySchema ──────────────────────────────────────────────────
-
-  describe('RawCustomQuerySchema', () => {
-    const validQuery = {
-      name: 'get_stats',
-      type: 'query' as const,
-      sql: 'SELECT count(*) FROM users',
-      returns: 'StatsResult',
-    };
-
-    it('accepts a valid custom query', () => {
-      const result = expectValid(RawCustomQuerySchema, validQuery);
-      expect(result.name).toBe('get_stats');
-    });
-
-    it('accepts mutation type', () => {
-      expectValid(RawCustomQuerySchema, { ...validQuery, type: 'mutation' });
-    });
-
-    it('accepts optional params and permissions', () => {
-      expectValid(RawCustomQuerySchema, {
-        ...validQuery,
-        params: [{ name: 'org_id', type: 'uuid' }],
-        permissions: [{ role: 'admin' }],
-      });
-    });
-
-    it('rejects invalid type enum', () => {
-      const err = expectInvalid(RawCustomQuerySchema, { ...validQuery, type: 'subscription' });
-      expect(err.issues.length).toBeGreaterThan(0);
-    });
-
-    it('rejects missing sql', () => {
-      const { sql, ...rest } = validQuery;
-      const err = expectInvalid(RawCustomQuerySchema, rest);
-      expect(err.issues.some((i) => i.path.includes('sql'))).toBe(true);
-    });
-
-    it('rejects missing returns', () => {
-      const { returns, ...rest } = validQuery;
-      const err = expectInvalid(RawCustomQuerySchema, rest);
-      expect(err.issues.some((i) => i.path.includes('returns'))).toBe(true);
-    });
-  });
-
   // ─── RawApiConfigSchema ────────────────────────────────────────────────────
 
   describe('RawApiConfigSchema', () => {
@@ -840,9 +793,6 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
     it('accepts full api config', () => {
       expectValid(RawApiConfigSchema, {
         table_aliases: { users: 'people' },
-        custom_queries: [
-          { name: 'q', type: 'query', sql: 'SELECT 1', returns: 'Result' },
-        ],
         rest: {
           auto_generate: true,
           base_path: '/api/v1',
@@ -1477,48 +1427,6 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
     });
   });
 
-  // ─── CustomQueryConfigSchema ───────────────────────────────────────────────
-
-  describe('CustomQueryConfigSchema', () => {
-    it('accepts valid custom query config', () => {
-      expectValid(CustomQueryConfigSchema, {
-        name: 'stats',
-        type: 'query',
-        sql: 'SELECT count(*) FROM users',
-        returns: 'StatsResult',
-      });
-    });
-
-    it('accepts mutation type', () => {
-      expectValid(CustomQueryConfigSchema, {
-        name: 'reset',
-        type: 'mutation',
-        sql: 'DELETE FROM logs',
-        returns: 'AffectedRows',
-      });
-    });
-
-    it('accepts params and permissions', () => {
-      expectValid(CustomQueryConfigSchema, {
-        name: 'q',
-        type: 'query',
-        sql: 'SELECT 1',
-        returns: 'R',
-        params: [{ name: 'id', type: 'uuid' }],
-        permissions: [{ role: 'admin' }],
-      });
-    });
-
-    it('rejects invalid type', () => {
-      expectInvalid(CustomQueryConfigSchema, {
-        name: 'q',
-        type: 'subscription',
-        sql: 'SELECT 1',
-        returns: 'R',
-      });
-    });
-  });
-
   // ─── APIDocsConfigSchema ───────────────────────────────────────────────────
 
   describe('APIDocsConfigSchema', () => {
@@ -1810,7 +1718,6 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
         basePath: '/api/v1',
         pagination: { defaultLimit: 20, maxLimit: 100 },
       },
-      customQueries: [],
       apiDocs: { generate: false },
       tableAliases: {},
       eventLogRetentionDays: 30,
@@ -2146,7 +2053,6 @@ describe('Edge cases', () => {
       actions: [],
       cronTriggers: [],
       rest: { autoGenerate: true, basePath: '/', pagination: { defaultLimit: 20, maxLimit: 100 } },
-      customQueries: [],
       apiDocs: { generate: false },
       tableAliases: {},
       eventLogRetentionDays: 30,

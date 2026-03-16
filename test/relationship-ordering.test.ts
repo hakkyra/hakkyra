@@ -9,7 +9,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { GraphQLSchema, GraphQLInputObjectType } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
-import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { compileSelect } from '../src/sql/select.js';
 import type { OrderByItem } from '../src/sql/select.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
@@ -31,7 +30,7 @@ function findTable(name: string): TableInfo {
 
 beforeAll(async () => {
   process.env['DATABASE_URL'] = TEST_DB_URL;
-  resetCustomOutputTypeCache();
+
   await waitForDb();
   const pool = getPool();
   const introspection = await introspectDatabase(pool);
@@ -50,7 +49,7 @@ describe('OrderBy schema generation', () => {
   let schema: GraphQLSchema;
 
   beforeAll(() => {
-    resetCustomOutputTypeCache();
+  
     schema = generateSchema(schemaModel);
   });
 

@@ -252,7 +252,7 @@ export const ENUMS_QUERY = `
   ORDER BY n.nspname, t.typname, e.enumsortorder;
 `;
 
-// ─── Functions (for computed fields / custom queries) ────────────────────────
+// ─── Functions (for computed fields / tracked functions) ─────────────────────
 
 /**
  * Returns non-aggregate, non-window functions that take a table row type

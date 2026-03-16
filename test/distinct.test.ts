@@ -3,7 +3,6 @@ import { GraphQLSchema, GraphQLEnumType, GraphQLList, GraphQLNonNull } from 'gra
 import { compileSelect } from '../src/sql/select.js';
 import { generateSchema } from '../src/schema/generator.js';
 import { resetComparisonTypeCache } from '../src/schema/filters.js';
-import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
@@ -36,7 +35,6 @@ beforeAll(async () => {
   schemaModel = result.model;
   // Generate schema for unit/integration tests — must reset caches first
   resetComparisonTypeCache();
-  resetCustomOutputTypeCache();
   schema = generateSchema(schemaModel);
 });
 
@@ -296,7 +294,7 @@ describe('DISTINCT ON — E2E via GraphQL & REST', () => {
   beforeAll(async () => {
     // Reset caches so startServer can generate a fresh schema
     resetComparisonTypeCache();
-    resetCustomOutputTypeCache();
+
     await startServer();
   });
 

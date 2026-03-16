@@ -21,7 +21,6 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 - **Streaming subscriptions** — cursor-based streaming with `batchSize` and `cursor` arguments
 - **Event triggers** — capture INSERT/UPDATE/DELETE changes and deliver webhooks with retry
 - **Cron triggers** — scheduled webhook invocations via pg-boss or BullMQ
-- **Custom queries** — hand-written SQL overrides registered as GraphQL operations
 - **Upsert** — ON CONFLICT support for inserts
 - **Batch operations** — optimized UNNEST-based bulk inserts and updateMany
 - **Distinct queries** — DISTINCT ON support
@@ -209,7 +208,7 @@ metadata/
 │           ├── tables.yaml
 │           ├── public_users.yaml
 │           └── public_articles.yaml
-├── api_config.yaml          # table aliases, custom queries, REST overrides
+├── api_config.yaml          # table aliases, REST overrides
 ├── actions.yaml
 ├── actions.graphql
 ├── cron_triggers.yaml
@@ -319,30 +318,6 @@ JWT claims follow the Hasura format:
     "x-hasura-user-id": "42"
   }
 }
-```
-
-## Custom Queries
-
-Define SQL-backed operations in `api_config.yaml`:
-
-```yaml
-custom_queries:
-  - name: userWithStats
-    type: query
-    sql: |
-      SELECT u.id, u.username,
-        (SELECT count(*) FROM orders WHERE user_id = u.id) as order_count
-      FROM users u WHERE u.id = $1
-    params:
-      - name: userId
-        type: uuid
-    returns: UserWithStats
-    permissions:
-      - role: admin
-      - role: user
-        filter:
-          id:
-            _eq: X-Hasura-User-Id
 ```
 
 ## Subscriptions
