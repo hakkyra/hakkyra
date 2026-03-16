@@ -19,7 +19,8 @@ import type {
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
-import { toCamelCase } from '../schema/type-builder.js';
+import { toCamelCase } from '../shared/naming.js';
+import { resolveSessionValue } from '../shared/session-resolution.js';
 import type { RelationshipSelection, ComputedFieldSelection } from './select.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -74,23 +75,10 @@ export interface UpdateOptions {
 
 /**
  * Resolve a preset value from session variables.
+ * Delegates to the shared resolveSessionValue utility.
  */
 function resolvePreset(value: string, session: SessionVariables): unknown {
-  const lower = value.toLowerCase();
-  if (!lower.startsWith('x-hasura-')) return value;
-
-  if (lower === 'x-hasura-role') return session.role;
-  if (lower === 'x-hasura-user-id') return session.userId;
-
-  const claimKey = lower.slice('x-hasura-'.length);
-  if (session.claims) {
-    if (claimKey in session.claims) return session.claims[claimKey];
-    for (const [k, v] of Object.entries(session.claims)) {
-      if (k.toLowerCase() === claimKey) return v;
-    }
-  }
-
-  return undefined;
+  return resolveSessionValue(value, session);
 }
 
 /**

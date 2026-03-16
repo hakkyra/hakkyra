@@ -7,6 +7,7 @@
 
 import type { BoolExp, ColumnInfo, ColumnOperators, ComputedFieldConfig, ExistsExp, SessionVariables } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
+import { resolveSessionValue } from '../shared/session-resolution.js';
 
 /**
  * Threshold above which _in / _nin operators use = ANY($1) / != ALL($1)
@@ -18,30 +19,10 @@ export const ARRAY_ANY_THRESHOLD = 20;
 
 /**
  * Resolve a value that may be a session variable reference.
- * Session variable references are strings starting with "x-hasura-" or "X-Hasura-".
+ * Delegates to the shared resolveSessionValue utility.
  */
 function resolveValue(value: unknown, session?: SessionVariables): unknown {
-  if (typeof value !== 'string') return value;
-
-  const lower = value.toLowerCase();
-  if (!lower.startsWith('x-hasura-')) return value;
-
-  // Well-known session variables
-  if (lower === 'x-hasura-role') return session?.role;
-  if (lower === 'x-hasura-user-id') return session?.userId;
-  if (lower === 'x-hasura-allowed-roles') return session?.allowedRoles;
-
-  // Look up in claims map (try both original and lowercased key)
-  const claimKey = lower.slice('x-hasura-'.length); // e.g. "org-id"
-  if (session?.claims) {
-    // Try exact match first, then lowercase
-    if (claimKey in session.claims) return session.claims[claimKey];
-    for (const [k, v] of Object.entries(session.claims)) {
-      if (k.toLowerCase() === claimKey) return v;
-    }
-  }
-
-  return undefined;
+  return resolveSessionValue(value, session);
 }
 
 // ─── Operator Compilation ────────────────────────────────────────────────────

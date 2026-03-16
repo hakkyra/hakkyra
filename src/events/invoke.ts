@@ -8,10 +8,11 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { Pool } from 'pg';
-import type { TableInfo, EventTriggerConfig } from '../types.js';
+import type { TableInfo } from '../types.js';
 import type { JobQueue } from '../shared/job-queue/types.js';
 import { buildEventPayload } from './delivery.js';
 import type { EventLogRow } from './delivery.js';
+import { buildTriggerLookup } from './shared.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -22,25 +23,7 @@ interface InvokeRequestBody {
   };
 }
 
-interface TriggerMatch {
-  trigger: EventTriggerConfig;
-  table: TableInfo;
-}
-
 // ─── Helpers ───────────────────────────────────────────────────────────────
-
-/**
- * Build a lookup map from trigger name to its config and parent table.
- */
-function buildTriggerLookup(tables: TableInfo[]): Map<string, TriggerMatch> {
-  const lookup = new Map<string, TriggerMatch>();
-  for (const table of tables) {
-    for (const trigger of table.eventTriggers) {
-      lookup.set(trigger.name, { trigger, table });
-    }
-  }
-  return lookup;
-}
 
 /**
  * Validate the request body for manual event invocation.

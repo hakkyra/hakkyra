@@ -7,13 +7,15 @@
 
 import type { Pool } from 'pg';
 import type { Logger } from 'pino';
-import type { TableInfo, EventTriggerConfig } from '../types.js';
+import type { TableInfo } from '../types.js';
 import type { JobQueue, Job } from '../shared/job-queue/types.js';
 import {
   deliverWebhook,
   resolveWebhookUrl,
   resolveWebhookHeaders,
 } from '../shared/webhook.js';
+import { quoteIdentifier as quoteIdent } from '../sql/utils.js';
+import { buildTriggerLookup } from './shared.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -57,26 +59,6 @@ export function buildEventPayload(event: EventLogRow): unknown {
 }
 
 // ─── Event delivery via pg-boss ────────────────────────────────────────────
-
-/**
- * Build a trigger config lookup from all tables.
- */
-function buildTriggerLookup(tables: TableInfo[]): Map<string, { trigger: EventTriggerConfig; table: TableInfo }> {
-  const lookup = new Map<string, { trigger: EventTriggerConfig; table: TableInfo }>();
-  for (const table of tables) {
-    for (const trigger of table.eventTriggers) {
-      lookup.set(trigger.name, { trigger, table });
-    }
-  }
-  return lookup;
-}
-
-/**
- * Double-quote a SQL identifier to prevent injection.
- */
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
-}
 
 /**
  * Fetch and enqueue pending events from the event_log table into pg-boss.

@@ -16,7 +16,7 @@ import type {
 } from '../types.js';
 import type { IntrospectedTable, IntrospectionResult } from './introspector.js';
 import { quoteIdentifier } from '../sql/utils.js';
-import { toCamelCase } from '../schema/type-builder.js';
+import { toCamelCase } from '../shared/naming.js';
 
 // ─── Warnings ────────────────────────────────────────────────────────────────
 
