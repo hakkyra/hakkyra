@@ -7,17 +7,17 @@
 
 import type { Logger } from 'pino';
 import type { CronTriggerConfig } from '../types.js';
-import type { JobQueue, Job } from '../shared/job-queue/types.js';
+import type { JobQueue } from '../shared/job-queue/types.js';
 import {
-  deliverWebhook,
   resolveWebhookUrl,
   resolveWebhookHeaders,
 } from '../shared/webhook.js';
+import { registerWebhookWorker } from '../shared/webhook-worker.js';
 
 /**
  * Build a Hasura-compatible cron trigger webhook payload.
  */
-function buildCronPayload(trigger: CronTriggerConfig, scheduledTime: string): unknown {
+export function buildCronPayload(trigger: CronTriggerConfig, scheduledTime: string): unknown {
   return {
     scheduled_time: scheduledTime,
     payload: trigger.payload ?? null,
@@ -43,53 +43,40 @@ export async function registerCronWorkers(
   for (const trigger of triggers) {
     const queueName = `cron/${trigger.name}`;
 
-    await jobQueue.work<Record<string, unknown>>(queueName, async (jobs: Job<Record<string, unknown>>[]) => {
-      for (const job of jobs) {
-        const url = resolveWebhookUrl(trigger.webhook, trigger.webhookFromEnv);
-        const headers = resolveWebhookHeaders(trigger.headers);
-        const scheduledTime = job.data?.scheduledTime as string
-          ?? new Date().toISOString();
+    await registerWebhookWorker<Record<string, unknown>>(
+      jobQueue,
+      logger,
+      {
+        queueName,
+        label: `cron/${trigger.name}`,
+        callbacks: {
+          resolveWebhook(job) {
+            const scheduledTime = job.data?.scheduledTime as string
+              ?? new Date().toISOString();
 
-        const payload = buildCronPayload(trigger, scheduledTime);
-
-        logger.info(
-          { trigger: trigger.name, url, jobId: job.id },
-          'Delivering cron trigger webhook',
-        );
-
-        const result = await deliverWebhook({
-          url,
-          headers,
-          payload,
-          timeoutMs: trigger.retryConf?.timeoutSeconds
-            ? trigger.retryConf.timeoutSeconds * 1000
-            : 30000,
-        });
-
-        if (!result.success) {
-          logger.warn(
-            {
-              trigger: trigger.name,
-              statusCode: result.statusCode,
-              error: result.error,
-              durationMs: result.durationMs,
-            },
-            'Cron trigger webhook delivery failed',
-          );
-          throw new Error(
-            `Webhook delivery failed: ${result.error ?? `HTTP ${result.statusCode}`}`,
-          );
-        }
-
-        logger.info(
-          {
-            trigger: trigger.name,
-            statusCode: result.statusCode,
-            durationMs: result.durationMs,
+            return {
+              url: resolveWebhookUrl(trigger.webhook, trigger.webhookFromEnv),
+              headers: resolveWebhookHeaders(trigger.headers),
+              payload: buildCronPayload(trigger, scheduledTime),
+              timeoutMs: trigger.retryConf?.timeoutSeconds
+                ? trigger.retryConf.timeoutSeconds * 1000
+                : 30000,
+            };
           },
-          'Cron trigger webhook delivered successfully',
-        );
-      }
-    });
+
+          async onSuccess(_job, _result) {
+            // Crons have no DB state to update on success.
+            // Logging is handled by the webhook worker factory.
+          },
+
+          async onFailure(_job, _result) {
+            // Crons have no DB state to update on failure.
+            // The factory logs the failure and throws for retry.
+            // Previously crons only logged a warning — now error details
+            // are logged consistently via the shared factory.
+          },
+        },
+      },
+    );
   }
 }
