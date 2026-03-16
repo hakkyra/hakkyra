@@ -7,7 +7,11 @@
 
 import type { BoolExp, ColumnInfo, ColumnOperators, ComputedFieldConfig, ExistsExp, SessionVariables } from '../types.js';
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
-import { resolveSessionValue } from '../shared/session-resolution.js';
+import {
+  isSessionVariable as isSessionVar,
+  resolveSessionVar,
+  DEFAULT_SESSION_NAMESPACE,
+} from '../auth/session-namespace.js';
 
 /**
  * Threshold above which _in / _nin operators use = ANY($1) / != ALL($1)
@@ -19,10 +23,16 @@ export const ARRAY_ANY_THRESHOLD = 20;
 
 /**
  * Resolve a value that may be a session variable reference.
- * Delegates to the shared resolveSessionValue utility.
+ * Session variable references are strings starting with the configured namespace
+ * prefix or "x-hasura-" (for Hasura metadata compatibility).
  */
-function resolveValue(value: unknown, session?: SessionVariables): unknown {
-  return resolveSessionValue(value, session);
+function resolveValue(value: unknown, session?: SessionVariables, namespace: string = DEFAULT_SESSION_NAMESPACE): unknown {
+  if (typeof value !== 'string') return value;
+
+  if (!isSessionVar(value, namespace)) return value;
+
+  if (!session) return undefined;
+  return resolveSessionVar(value, session, namespace);
 }
 
 // ─── Operator Compilation ────────────────────────────────────────────────────

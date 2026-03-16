@@ -20,8 +20,12 @@ import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
 import { toCamelCase } from '../shared/naming.js';
-import { resolveSessionValue } from '../shared/session-resolution.js';
 import type { RelationshipSelection, ComputedFieldSelection } from './select.js';
+import {
+  isSessionVariable,
+  resolveSessionVar,
+  DEFAULT_SESSION_NAMESPACE,
+} from '../auth/session-namespace.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -78,7 +82,8 @@ export interface UpdateOptions {
  * Delegates to the shared resolveSessionValue utility.
  */
 function resolvePreset(value: string, session: SessionVariables): unknown {
-  return resolveSessionValue(value, session);
+  if (!isSessionVariable(value, DEFAULT_SESSION_NAMESPACE)) return value;
+  return resolveSessionVar(value, session, DEFAULT_SESSION_NAMESPACE) ?? undefined;
 }
 
 /**

@@ -6,12 +6,17 @@
  * - `claims_map` for extracting from arbitrary JWT paths
  * - `claims_format: "stringified_json"` (namespace value is a JSON string)
  * - Case-insensitive claim key matching
+ * - Configurable session variable namespace (default `x-hk`, set `x-hasura` for compat)
  */
 
 import type { JWTPayload } from 'jose';
 import type { AuthConfig, SessionVariables } from '../types.js';
-
-const DEFAULT_NAMESPACE = 'https://hasura.io/jwt/claims';
+import {
+  DEFAULT_JWT_CLAIMS_NAMESPACE,
+  WELL_KNOWN_SUFFIXES,
+  nsKey,
+  DEFAULT_SESSION_NAMESPACE,
+} from './session-namespace.js';
 
 /**
  * Resolve a JSONPath-like expression (e.g. `$.user.roles`) against an object.
@@ -116,15 +121,35 @@ function extractFromNamespace(
 }
 
 /**
+ * Find a claim by its suffix, trying both the configured namespace and x-hasura namespace.
+ * Claims from JWT are stored lowercase. We look up both `{ns}-{suffix}` and `x-hasura-{suffix}`.
+ */
+function findClaim(
+  claims: Record<string, string | string[]>,
+  suffix: string,
+  sessionNs: string,
+): string | string[] | undefined {
+  // Try configured namespace first
+  const nsLookup = nsKey(sessionNs, suffix);
+  if (claims[nsLookup] !== undefined) return claims[nsLookup];
+
+  // Try x-hasura namespace (JWT claims from Hasura-compatible providers)
+  const hasuraLookup = `x-hasura-${suffix}`;
+  if (claims[hasuraLookup] !== undefined) return claims[hasuraLookup];
+
+  return undefined;
+}
+
+/**
  * Extract session variables from a verified JWT payload according to the auth config.
  *
- * Required claims:
- * - `x-hasura-allowed-roles` (string[])
- * - `x-hasura-default-role` (string)
+ * Required claims (searched with both configured namespace and x-hasura- prefix):
+ * - `{ns}-allowed-roles` (string[])
+ * - `{ns}-default-role` (string)
  *
  * Optional claims:
- * - `x-hasura-user-id`
- * - Any other `x-hasura-*` custom claims
+ * - `{ns}-user-id`
+ * - Any other `{ns}-*` custom claims
  *
  * @throws If required claims are missing.
  */
@@ -133,30 +158,39 @@ export function extractSessionVariables(
   config: AuthConfig,
 ): SessionVariables {
   let claims: Record<string, string | string[]>;
+  const sessionNs = config.sessionNamespace ?? DEFAULT_SESSION_NAMESPACE;
 
   if (config.jwt?.claimsMap) {
     claims = extractFromClaimsMap(payload, config.jwt.claimsMap);
   } else {
-    const namespace = config.jwt?.claimsNamespace ?? DEFAULT_NAMESPACE;
+    const namespace = config.jwt?.claimsNamespace ?? DEFAULT_JWT_CLAIMS_NAMESPACE;
     claims = extractFromNamespace(payload, namespace);
   }
 
   // ── Validate required claims ──────────────────────────────────────────
-  const allowedRolesValue = claims['x-hasura-allowed-roles'];
+  const allowedRolesValue = findClaim(claims, WELL_KNOWN_SUFFIXES.ALLOWED_ROLES, sessionNs);
   if (!allowedRolesValue) {
-    throw new Error('JWT claims missing required "x-hasura-allowed-roles"');
+    const key1 = nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ALLOWED_ROLES);
+    const key2 = `x-hasura-${WELL_KNOWN_SUFFIXES.ALLOWED_ROLES}`;
+    throw new Error(
+      `JWT claims missing required "${key1}"${sessionNs !== 'x-hasura' ? ` (or "${key2}")` : ''}`,
+    );
   }
   const allowedRoles = Array.isArray(allowedRolesValue)
     ? allowedRolesValue
     : [allowedRolesValue];
 
-  const defaultRole = claims['x-hasura-default-role'];
+  const defaultRole = findClaim(claims, WELL_KNOWN_SUFFIXES.DEFAULT_ROLE, sessionNs);
   if (!defaultRole) {
-    throw new Error('JWT claims missing required "x-hasura-default-role"');
+    const key1 = nsKey(sessionNs, WELL_KNOWN_SUFFIXES.DEFAULT_ROLE);
+    const key2 = `x-hasura-${WELL_KNOWN_SUFFIXES.DEFAULT_ROLE}`;
+    throw new Error(
+      `JWT claims missing required "${key1}"${sessionNs !== 'x-hasura' ? ` (or "${key2}")` : ''}`,
+    );
   }
   const role = Array.isArray(defaultRole) ? defaultRole[0] : defaultRole;
 
-  const userIdValue = claims['x-hasura-user-id'];
+  const userIdValue = findClaim(claims, WELL_KNOWN_SUFFIXES.USER_ID, sessionNs);
   const userId = userIdValue
     ? (Array.isArray(userIdValue) ? userIdValue[0] : userIdValue)
     : undefined;
