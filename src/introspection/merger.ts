@@ -256,17 +256,24 @@ export function mergeSchemaModel(
     const configRels = configTable?.relationships ?? [];
     const mergedRels = mergeRelationships(autoRels, configRels);
 
-    // Determine the alias
-    const alias = config.tableAliases?.[introspected.name]
-      ?? configTable?.alias
-      ?? undefined;
+    // Determine the alias (from table-level custom_name via configTable.alias)
+    const alias = configTable?.alias ?? undefined;
+
+    // Apply column_config comments to introspected columns
+    const columns = introspected.columns.map((col) => {
+      const configComment = configTable?.columnComments?.[col.name];
+      if (configComment) {
+        return { ...col, comment: configComment };
+      }
+      return col;
+    });
 
     const tableInfo: TableInfo = {
       name: introspected.name,
       schema: introspected.schema,
       alias,
       comment: introspected.comment,
-      columns: introspected.columns,
+      columns,
       primaryKey: introspected.primaryKey,
       foreignKeys: introspected.foreignKeys,
       uniqueConstraints: introspected.uniqueConstraints,
@@ -276,6 +283,7 @@ export function mergeSchemaModel(
       eventTriggers: configTable?.eventTriggers ?? [],
       customRootFields: configTable?.customRootFields,
       computedFields: configTable?.computedFields,
+      customColumnNames: configTable?.customColumnNames,
       isEnum: configTable?.isEnum,
       isView: introspected.tableType !== 'BASE TABLE' || undefined,
     };

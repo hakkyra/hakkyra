@@ -413,7 +413,6 @@ export const RawRESTOverrideSchema = z
 
 export const RawApiConfigSchema = z
   .object({
-    table_aliases: z.record(z.string(), z.string()).optional(),
     rest: z
       .object({
         auto_generate: z.boolean().optional(),

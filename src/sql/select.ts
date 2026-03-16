@@ -493,6 +493,7 @@ export function buildJsonFields(
   computedFields?: ComputedFieldSelection[],
   setReturningComputedFields?: SetReturningComputedFieldSelection[],
   jsonbPaths?: Map<string, string>,
+  customColumnNames?: Record<string, string>,
 ): string {
   const fields: string[] = [];
 
@@ -500,7 +501,7 @@ export function buildJsonFields(
   for (const col of columns) {
     const colRef = `${quoteIdentifier(alias)}.${quoteIdentifier(col.name)}`;
 
-    const jsonKey = toCamelCase(col.name);
+    const jsonKey = customColumnNames?.[col.name] ?? toCamelCase(col.name);
 
     // JSONB path extraction: column #> $N::text[]
     const pathStr = jsonbPaths?.get(col.name);
@@ -612,6 +613,7 @@ function buildRelationshipSubquery(
     relSel.computedFields,
     relSel.setReturningComputedFields,
     relSel.jsonbPaths,
+    remoteTable.customColumnNames,
   );
 
   // Build the join condition from the relationship mapping
@@ -753,6 +755,7 @@ function buildSetReturningComputedFieldSubquery(
     selection.computedFields,
     selection.setReturningComputedFields,
     selection.jsonbPaths,
+    selection.remoteTable.customColumnNames,
   );
 
   // WHERE clauses (no join conditions — function call handles the relationship)
@@ -846,6 +849,7 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
     opts.computedFields,
     opts.setReturningComputedFields,
     opts.jsonbPaths,
+    opts.table.customColumnNames,
   );
 
   // Build WHERE clause
@@ -950,6 +954,7 @@ export function compileSelectByPk(opts: SelectByPkOptions): CompiledQuery {
     opts.computedFields,
     opts.setReturningComputedFields,
     opts.jsonbPaths,
+    opts.table.customColumnNames,
   );
 
   // Build WHERE for PK columns
@@ -1232,6 +1237,10 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
       params,
       opts.session,
       aliasCounter,
+      undefined,
+      undefined,
+      undefined,
+      opts.table.customColumnNames,
     );
 
     // Nodes need their own subquery with ORDER BY / LIMIT
