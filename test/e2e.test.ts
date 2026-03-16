@@ -304,14 +304,70 @@ describe('GraphQL E2E', () => {
       expect(field(appointments[0], 'priority')).toBe('HIGH');
     });
 
-    it('does not expose enum table as a queryable type', async () => {
+    it('exposes enum table as a queryable type (P9.3)', async () => {
       const { body } = await graphqlRequest(
-        `query { priorityType { value } }`,
+        `query { priorityType { value description } }`,
         undefined,
         { 'x-hasura-admin-secret': ADMIN_SECRET },
       );
-      // Should fail because the enum table is not a queryable type
-      expect(body.errors).toBeDefined();
+      expect(body.errors).toBeUndefined();
+      const rows = (body.data as { priorityType: AnyRow[] }).priorityType;
+      expect(rows.length).toBe(4);
+      const values = rows.map((r) => field<string>(r, 'value'));
+      expect(values).toContain('high');
+      expect(values).toContain('normal');
+      expect(values).toContain('low');
+      expect(values).toContain('urgent');
+    });
+
+    it('enum table is queryable by PK (P9.3)', async () => {
+      const { body } = await graphqlRequest(
+        `query { priorityTypeByPk(value: "high") { value description } }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      expect(body.errors).toBeUndefined();
+      const row = (body.data as { priorityTypeByPk: AnyRow }).priorityTypeByPk;
+      expect(field(row, 'value')).toBe('high');
+      expect(field(row, 'description')).toBe('High priority');
+    });
+
+    it('enum table supports aggregation (P9.3)', async () => {
+      const { body } = await graphqlRequest(
+        `query { priorityTypeAggregate { aggregate { count } } }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      expect(body.errors).toBeUndefined();
+      const agg = body.data as { priorityTypeAggregate: { aggregate: { count: number } } };
+      expect(agg.priorityTypeAggregate.aggregate.count).toBe(4);
+    });
+
+    it('enum table respects role permissions (P9.3)', async () => {
+      const token = await tokens.backoffice();
+      const { body } = await graphqlRequest(
+        `query { priorityType { value description } }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+      expect(body.errors).toBeUndefined();
+      const rows = (body.data as { priorityType: AnyRow[] }).priorityType;
+      expect(rows.length).toBe(4);
+    });
+
+    it('enum table still produces enum scalars on FK columns (P9.3)', async () => {
+      // Verify the dual nature: enum table is queryable AND its PK values
+      // are used as enum scalars for FK columns referencing the enum table
+      const { body } = await graphqlRequest(
+        `query { appointments(where: { priority: { _eq: HIGH } }) { id priority } }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      expect(body.errors).toBeUndefined();
+      const appointments = (body.data as { appointments: AnyRow[] }).appointments;
+      expect(appointments.length).toBe(1);
+      // The priority field is still an enum scalar (uppercased), not a raw string
+      expect(field(appointments[0], 'priority')).toBe('HIGH');
     });
   });
 

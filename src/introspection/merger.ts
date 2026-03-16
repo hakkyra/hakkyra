@@ -461,8 +461,12 @@ function validatePermissionColumns(
  * 2. Add EnumInfo entries to the schema model.
  * 3. For columns with a FK to an enum table, override their udtName
  *    so the existing type-mapping code treats them as enum columns.
- * 4. Remove auto-detected relationships that point to enum tables
+ * 4. Remove auto-detected relationships that cross enum-table FKs:
+ *    - Object rels on non-enum tables pointing to enum tables
+ *    - Array rels on enum tables pointing back to non-enum tables
  *    (the FK becomes an enum-typed scalar, not a relationship).
+ * 5. Keep enum tables in the tables list — they are queryable types
+ *    with full CRUD, in addition to generating enum scalar types.
  */
 export async function resolveTableEnums(
   model: SchemaModel,
@@ -493,8 +497,11 @@ export async function resolveTableEnums(
       );
       const values = result.rows.map((row: Record<string, unknown>) => String(row.value));
 
+      // Use the table name with '_enum' suffix to avoid collision with the
+      // table's own GraphQL object type (both would otherwise become "PriorityType").
+      // The enum scalar is named e.g. "priority_type_enum" → "PriorityTypeEnum".
       model.enums.push({
-        name: table.name,
+        name: `${table.name}_enum`,
         schema: table.schema,
         values,
       });
@@ -515,10 +522,11 @@ export async function resolveTableEnums(
       if (!enumTableKeys.has(refKey)) continue;
 
       // Single-column FK to an enum table → remap the column's udtName
+      // Use the _enum suffixed name to match the EnumInfo entry we created above
       if (fk.columns.length === 1) {
         const col = table.columns.find((c) => c.name === fk.columns[0]);
         if (col) {
-          col.udtName = fk.referencedTable;
+          col.udtName = `${fk.referencedTable}_enum`;
         }
       }
     }
@@ -530,6 +538,22 @@ export async function resolveTableEnums(
     });
   }
 
-  // Remove enum tables from the tables list (they're not queryable types)
-  model.tables = model.tables.filter((t) => !t.isEnum);
+  // Remove array relationships on enum tables that point to non-enum tables
+  // which had FKs to the enum table (those FKs are now enum scalars)
+  for (const table of model.tables) {
+    if (!table.isEnum) continue;
+
+    table.relationships = table.relationships.filter((rel) => {
+      const remoteKey = `${rel.remoteTable.schema}.${rel.remoteTable.name}`;
+      // Keep relationships unless they are array rels pointing to tables
+      // that had FK→enum relationships (those are now enum scalar columns)
+      if (rel.type === 'array' && !enumTableKeys.has(remoteKey)) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  // Enum tables remain in the tables list — they are queryable types with
+  // full CRUD support, in addition to producing enum scalar types.
 }
