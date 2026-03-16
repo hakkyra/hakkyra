@@ -152,11 +152,31 @@ describe('GraphQL Schema Generation', () => {
       expect(fields['invoices']).toBeDefined();
     });
 
-    it('should have array relationships as non-null list types', () => {
+    it('should have array relationships as nullable list of non-null items [Type!] (P10.7)', () => {
       const typeMap = schema.getTypeMap();
       const clientType = typeMap['Client'] as GraphQLObjectType;
       const accountsField = clientType.getFields()['accounts'];
-      expect(accountsField.type).toBeInstanceOf(GraphQLNonNull);
+      // Hasura returns nullable arrays: [Type!], NOT [Type!]!
+      expect(accountsField.type).toBeInstanceOf(GraphQLList);
+      expect(accountsField.type).not.toBeInstanceOf(GraphQLNonNull);
+      // Inner items should be non-null
+      const innerType = (accountsField.type as GraphQLList<any>).ofType;
+      expect(innerType).toBeInstanceOf(GraphQLNonNull);
+    });
+
+    it('should have all array relationships as nullable [Type!] not [Type!]! (P10.7)', () => {
+      const typeMap = schema.getTypeMap();
+      const clientType = typeMap['Client'] as GraphQLObjectType;
+      const fields = clientType.getFields();
+      // Check multiple array relationships on Client
+      for (const relName of ['accounts', 'invoices', 'ledgerEntries']) {
+        const field = fields[relName];
+        expect(field).toBeDefined();
+        // Should be [Type!] — nullable list of non-null items
+        expect(field.type).toBeInstanceOf(GraphQLList);
+        expect(field.type).not.toBeInstanceOf(GraphQLNonNull);
+        expect(field.type.toString()).toMatch(/^\[.+!\]$/); // [Type!] not [Type!]!
+      }
     });
 
     it('should have non-null object relationships when FK column is NOT NULL (P9.7c)', () => {
