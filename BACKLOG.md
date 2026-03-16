@@ -31,7 +31,7 @@
 - [x] Extract functions (for computed fields)
 - [x] Map PG types → GraphQL scalar types
 - [x] Merge introspection results with YAML config into internal schema model
-- [x] Auto-detect relationships from FKs, merge with config-defined relationships
+- [x] Auto-detect relationships from FKs for column mapping resolution; only expose config-defined relationships
 - [x] Validate: warn about config referencing non-existent tables/columns
 - [x] Integration tests against real PG 17 database (30 tests)
 
@@ -1106,6 +1106,29 @@ Hakkyra names async action result queries with a `Result` suffix (`generateTestD
 
 - [x] Remove the `Result` suffix from async action result query root fields
 - [x] Use the action name as-is for the result query field name
+
+### P9.7a — Only Expose Config-Defined Relationships ✅
+
+Hakkyra auto-detected relationships from foreign keys and exposed them all in the schema, even when not defined in metadata config. Hasura only exposes relationships that are explicitly tracked. This caused extra relationship fields in BoolExp types, extra SelectColumn enum values, and extra fields on object types.
+
+**Root cause**: `mergeRelationships()` in `src/introspection/merger.ts` included auto-detected relationships that weren't overridden by config.
+
+- [x] Change `mergeRelationships()` to only include config-defined relationships
+- [x] Auto-detected FK data still used to fill in missing column mappings for configured relationships
+- [x] All existing tests pass (relationships used in tests are all explicitly configured in metadata)
+
+### P9.7b — Remaining Comparison Operator Parity (Medium)
+
+Schema comparison (hakkyra vs Hasura on neofix DB) found missing comparison operators:
+
+- [ ] Add `_gt`, `_gte`, `_lt`, `_lte` to `BooleanComparisonExp` (Hasura has these, hakkyra uses `baseComparisonFields`)
+- [ ] Add `_gt`, `_gte`, `_lt`, `_lte` to `UuidComparisonExp` (same issue)
+- [ ] Add `_gt`, `_gte`, `_lt`, `_lte` to `JsonbComparisonExp` (same issue)
+- [ ] Verify `FloatComparisonExp` is generated when float columns exist
+
+### P9.7c — Nullability Parity (Low)
+
+- [ ] Investigate nullability mismatch: `Country.currency` and `Country.language` are nullable in hakkyra but non-null in Hasura — may depend on FK constraint NOT NULL vs nullable
 
 ### P9.7 — Tracked Function Aggregate Variants for Non-SETOF Functions (Low)
 
