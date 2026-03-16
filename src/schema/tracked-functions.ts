@@ -46,8 +46,8 @@ import type {
 import { customScalars, asScalar } from './scalars.js';
 import { toCamelCase, toPascalCase, getColumnFieldName, tableKey } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
-import type { ResolverContext, ResolverPermissionLookup } from './resolvers.js';
-import { remapBoolExp as remapBoolExpFull, resolveLimit } from './resolvers.js';
+import type { ResolverContext, ResolverPermissionLookup } from './resolvers/index.js';
+import { remapBoolExp as remapBoolExpFull, resolveLimit } from './resolvers/index.js';
 import { parseResolveInfo } from './resolve-info.js';
 import {
   compileSelect,

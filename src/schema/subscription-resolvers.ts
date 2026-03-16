@@ -20,8 +20,8 @@ import type { SubscriptionManager } from '../subscriptions/manager.js';
 import type { OrderByItem, RelationshipSelection } from '../sql/select.js';
 import { compileSelect, compileSelectByPk } from '../sql/select.js';
 import { toCamelCase, getColumnFieldName } from './type-builder.js';
-import type { ResolverContext } from './resolvers.js';
-import { isSubscriptionRootFieldAllowed, buildComputedFieldSelections, buildSetReturningComputedFieldSelections, resolveLimit } from './resolvers.js';
+import type { ResolverContext } from './resolvers/index.js';
+import { isSubscriptionRootFieldAllowed, buildComputedFieldSelections, buildSetReturningComputedFieldSelections, resolveLimit } from './resolvers/index.js';
 import { parseResolveInfo, type ParsedSelection, type SetReturningComputedFieldParsed } from './resolve-info.js';
 
 // ─── Async Queue (push-to-pull adapter) ─────────────────────────────────────

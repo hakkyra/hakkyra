@@ -55,8 +55,8 @@ export {
   makeUpdateByPkResolver,
   makeDeleteResolver,
   makeDeleteByPkResolver,
-} from './resolvers.js';
-export type { ResolverContext, ResolverPermissionLookup } from './resolvers.js';
+} from './resolvers/index.js';
+export type { ResolverContext, ResolverPermissionLookup } from './resolvers/index.js';
 
 // Native queries
 export {

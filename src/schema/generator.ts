@@ -52,8 +52,8 @@ import {
   makeUpdateManyResolver,
   makeDeleteResolver,
   makeDeleteByPkResolver,
-} from './resolvers.js';
-import type { ResolverContext } from './resolvers.js';
+} from './resolvers/index.js';
+import type { ResolverContext } from './resolvers/index.js';
 import {
   makeSubscriptionSelectSubscribe,
   makeSubscriptionSelectByPkSubscribe,
