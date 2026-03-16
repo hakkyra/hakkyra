@@ -97,6 +97,36 @@ export const GraphQLTimestamptz = new GraphQLScalarType({
   },
 });
 
+// ─── Timestamp (without timezone) ────────────────────────────────────────────
+
+const ISO_DATETIME_NO_TZ_REGEX = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$/;
+
+function validateTimestamp(value: unknown): string {
+  if (value instanceof Date) {
+    // Strip timezone info — return local representation
+    return value.toISOString().replace('Z', '');
+  }
+  const str = String(value);
+  if (!ISO_DATETIME_NO_TZ_REGEX.test(str) && !ISO_DATETIME_REGEX.test(str)) {
+    throw new TypeError(`Invalid Timestamp: "${str}". Expected ISO 8601 datetime format (without timezone).`);
+  }
+  return str;
+}
+
+export const GraphQLTimestamp = new GraphQLScalarType({
+  name: 'Timestamp',
+  description: 'An ISO 8601 datetime without timezone.',
+
+  serialize: validateTimestamp as GraphQLScalarSerializer<string>,
+  parseValue: validateTimestamp as GraphQLScalarValueParser<string>,
+  parseLiteral(ast) {
+    if (ast.kind !== Kind.STRING) {
+      throw new TypeError(`Timestamp must be a string, got: ${ast.kind}`);
+    }
+    return validateTimestamp(ast.value);
+  },
+});
+
 // ─── Date ────────────────────────────────────────────────────────────────────
 
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -196,6 +226,30 @@ export const GraphQLJsonb = new GraphQLScalarType({
   serialize: serializeJSON,
   parseValue: parseValueJSON,
   parseLiteral: parseLiteralJSON,
+});
+
+// ─── Smallint ─────────────────────────────────────────────────────────────────
+
+function validateSmallint(value: unknown): number {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(num) || num < -32768 || num > 32767) {
+    throw new TypeError(`Invalid Smallint: "${value}". Must be an integer between -32768 and 32767.`);
+  }
+  return num;
+}
+
+export const GraphQLSmallint = new GraphQLScalarType({
+  name: 'Smallint',
+  description: 'A 16-bit signed integer (-32768 to 32767).',
+
+  serialize: validateSmallint as GraphQLScalarSerializer<number>,
+  parseValue: validateSmallint as GraphQLScalarValueParser<number>,
+  parseLiteral(ast) {
+    if (ast.kind !== Kind.INT) {
+      throw new TypeError(`Smallint must be an integer, got: ${ast.kind}`);
+    }
+    return validateSmallint((ast as { value: string }).value);
+  },
 });
 
 // ─── BigInt ──────────────────────────────────────────────────────────────────
@@ -342,10 +396,12 @@ export const GraphQLBpchar = new GraphQLScalarType({
 export const customScalars: Record<string, GraphQLScalarType> = {
   Uuid: GraphQLUuid,
   Timestamptz: GraphQLTimestamptz,
+  Timestamp: GraphQLTimestamp,
   Date: GraphQLDate,
   Time: GraphQLTime,
   json: GraphQLJson,
   Jsonb: GraphQLJsonb,
+  Smallint: GraphQLSmallint,
   Bigint: GraphQLBigint,
   Numeric: GraphQLNumeric,
   Interval: GraphQLInterval,
