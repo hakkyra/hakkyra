@@ -22,3 +22,5 @@
 - !include public_transfer.yaml
 - !include public_fiscal_period.yaml
 - !include public_fiscal_report.yaml
+- !include public_player.yaml
+- !include public_player_lock.yaml

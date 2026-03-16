@@ -827,10 +827,15 @@ function transformRelationship(
       }
       const cols = fk.columns ?? (fk.column ? [fk.column] : undefined);
       if (cols) {
-        // For array rels, these are remote columns; for object rels, local columns
-        if (type === 'array') {
+        if (fk.table) {
+          // When a remote table is specified, the columns refer to the remote
+          // table — regardless of relationship type (array OR object).
+          // Object rels use this form for 1:1 reverse-FK relationships where
+          // the FK + unique constraint is on the remote table.
           rel.remoteColumns = cols;
         } else {
+          // No remote table — columns are on the local table (object rel only;
+          // this path shouldn't occur for array rels in practice)
           rel.localColumns = cols;
         }
       }

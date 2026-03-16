@@ -1,0 +1,30 @@
+table:
+  schema: public
+  name: player_lock
+
+object_relationships:
+  - name: player
+    using:
+      foreign_key_constraint_on: player_id
+
+select_permissions:
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+insert_permissions:
+  - role: administrator
+    permission:
+      columns: "*"
+      check: {}
+
+delete_permissions:
+  - role: administrator
+    permission:
+      filter: {}
