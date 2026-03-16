@@ -95,48 +95,6 @@ function isPrivateIPv4(ip: string): boolean {
 }
 
 /**
- * Validate a webhook URL hostname for SSRF. Resolves DNS and checks if the IP is private.
- * @throws Error if the hostname resolves to a private IP.
- */
-async function validateWebhookUrl(url: string): Promise<void> {
-  let hostname: string;
-  try {
-    const parsed = new URL(url);
-    hostname = parsed.hostname;
-    // Remove brackets from IPv6 literal
-    if (hostname.startsWith('[') && hostname.endsWith(']')) {
-      hostname = hostname.slice(1, -1);
-    }
-  } catch {
-    throw new Error(`Invalid webhook URL: ${url}`);
-  }
-
-  // Check if hostname is a raw IP first
-  if (isPrivateIP(hostname)) {
-    throw new Error(`Webhook URL resolves to a private/reserved IP address: ${hostname}`);
-  }
-
-  // DNS resolution
-  try {
-    const result = await lookup(hostname, { all: true });
-    const addresses = Array.isArray(result) ? result : [result];
-    for (const entry of addresses) {
-      if (isPrivateIP(entry.address)) {
-        throw new Error(
-          `Webhook URL hostname "${hostname}" resolves to private/reserved IP: ${entry.address}`,
-        );
-      }
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('private/reserved')) {
-      throw err;
-    }
-    // DNS resolution failures are allowed to pass through — the fetch call
-    // will fail with a more descriptive error.
-  }
-}
-
-/**
  * Resolve DNS for a webhook URL and return a version of the URL that connects
  * directly to the validated IP address, plus the original Host header value.
  *
@@ -184,31 +142,23 @@ export async function resolveAndValidateDns(
     return null;
   }
 
-  // Resolve DNS
+  // Resolve DNS once, validate the result, and pin to the resolved IP.
+  // We must NOT fall back to letting fetch() do its own DNS resolution,
+  // because that would create a TOCTOU window for DNS rebinding attacks.
   let resolvedAddress: string;
-  try {
-    const addresses = await resolveDns(hostname, { all: true });
+  const addresses = await resolveDns(hostname, { all: true });
 
-    // Validate ALL resolved addresses
-    for (const entry of addresses) {
-      if (isPrivateIP(entry.address)) {
-        throw new Error(
-          `Webhook URL hostname "${hostname}" resolves to private/reserved IP: ${entry.address}`,
-        );
-      }
+  // Validate ALL resolved addresses
+  for (const entry of addresses) {
+    if (isPrivateIP(entry.address)) {
+      throw new Error(
+        `Webhook URL hostname "${hostname}" resolves to private/reserved IP: ${entry.address}`,
+      );
     }
-
-    // Use the first resolved address for the connection
-    resolvedAddress = addresses[0].address;
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('private/reserved')) {
-      throw err;
-    }
-    // DNS resolution failures — fall back to pre-flight validation only.
-    // The fetch call will perform its own DNS and fail with a descriptive error.
-    await validateWebhookUrl(url);
-    return null;
   }
+
+  // Use the first resolved address for the connection
+  resolvedAddress = addresses[0].address;
 
   // Build a new URL with the resolved IP replacing the hostname.
   // This ensures the HTTP client connects to the validated IP directly,
