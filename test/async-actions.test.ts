@@ -135,7 +135,7 @@ describe('Async Actions', () => {
     });
 
     it('registers async action result query field', () => {
-      expect(sdl).toContain('requestVerificationResult(id: Uuid!): RequestVerificationAsyncResult');
+      expect(sdl).toContain('requestVerification(id: Uuid!): RequestVerificationAsyncResult');
     });
 
     it('generates AsyncActionId type', () => {
@@ -165,7 +165,7 @@ describe('Async Actions', () => {
       // createPayment is synchronous — should still have its normal return type
       expect(sdl).toContain('createPayment(input: CreatePaymentInput!): PaymentResult');
       // Should NOT have a result query for sync actions
-      expect(sdl).not.toContain('createPaymentResult');
+      expect(sdl).not.toContain('createPayment(id: Uuid!)');
     });
   });
 
@@ -386,7 +386,7 @@ describe('Async Actions', () => {
       // Query the result
       const { body: queryBody } = await gql(
         `query($id: Uuid!) {
-          requestVerificationResult(id: $id) {
+          requestVerification(id: $id) {
             id
             status
             output {
@@ -403,7 +403,7 @@ describe('Async Actions', () => {
       );
 
       expect(queryBody.errors).toBeUndefined();
-      const result = (queryBody.data as any).requestVerificationResult;
+      const result = (queryBody.data as any).requestVerification;
       expect(result).toBeDefined();
       expect(result.id).toBe(actionId);
       expect(result.status).toBe('completed');
@@ -420,7 +420,7 @@ describe('Async Actions', () => {
 
       const { body } = await gql(
         `query($id: Uuid!) {
-          requestVerificationResult(id: $id) {
+          requestVerification(id: $id) {
             id
             status
           }
@@ -430,7 +430,7 @@ describe('Async Actions', () => {
       );
 
       expect(body.errors).toBeUndefined();
-      expect((body.data as any).requestVerificationResult).toBeNull();
+      expect((body.data as any).requestVerification).toBeNull();
     });
   });
 
@@ -464,7 +464,7 @@ describe('Async Actions', () => {
 
       const { body } = await gql(
         `query($id: Uuid!) {
-          requestVerificationResult(id: $id) {
+          requestVerification(id: $id) {
             id
             status
           }
@@ -511,7 +511,7 @@ describe('Async Actions', () => {
       // Query result as admin
       const { body: queryBody } = await gql(
         `query($id: Uuid!) {
-          requestVerificationResult(id: $id) {
+          requestVerification(id: $id) {
             id
             status
           }
@@ -521,7 +521,7 @@ describe('Async Actions', () => {
       );
 
       expect(queryBody.errors).toBeUndefined();
-      expect((queryBody.data as any).requestVerificationResult.status).toBe('completed');
+      expect((queryBody.data as any).requestVerification.status).toBe('completed');
     });
   });
 
