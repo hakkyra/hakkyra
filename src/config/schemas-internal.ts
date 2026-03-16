@@ -502,7 +502,8 @@ export const HakkyraConfigSchema = z.object({
   graphql: z.object({
     queryDepth: z.number().default(10),
     maxLimit: z.number().default(100),
-  }).default({ queryDepth: 10, maxLimit: 100 }),
+    maxBatchSize: z.number().default(10),
+  }).default({ queryDepth: 10, maxLimit: 100, maxBatchSize: 10 }),
   sql: z.object({
     arrayAnyThreshold: z.number().default(20),
     unnestThreshold: z.number().default(500),

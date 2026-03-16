@@ -197,11 +197,21 @@ function getAllowedColumns(
   return allColumns.filter((c) => permColumns.includes(c));
 }
 
-function resolveLimit(userLimit?: number, permLimit?: number): number | undefined {
+function resolveLimit(userLimit?: number, permLimit?: number, globalMaxLimit?: number): number | undefined {
+  let limit: number | undefined;
   if (userLimit !== undefined && permLimit !== undefined) {
-    return Math.min(userLimit, permLimit);
+    limit = Math.min(userLimit, permLimit);
+  } else {
+    limit = userLimit ?? permLimit;
   }
-  return userLimit ?? permLimit;
+  if (globalMaxLimit !== undefined && globalMaxLimit > 0) {
+    if (limit !== undefined) {
+      limit = Math.min(limit, globalMaxLimit);
+    } else {
+      limit = globalMaxLimit;
+    }
+  }
+  return limit;
 }
 
 function remapRowToCamel(
@@ -334,7 +344,7 @@ export function makeSubscriptionSelectSubscribe(
 
     const where = remapBoolExp(args.where as BoolExp | undefined, columnMap);
     const orderBy = remapOrderBy(args.orderBy as Array<Record<string, string>> | undefined, columnMap);
-    const limit = resolveLimit(args.limit as number | undefined, perm?.limit);
+    const limit = resolveLimit(args.limit as number | undefined, perm?.limit, context.graphqlMaxLimit);
 
     const compiled = compileSelect({
       table,

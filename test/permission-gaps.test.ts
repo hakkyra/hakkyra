@@ -1011,6 +1011,7 @@ describe('Mutation permission checks', () => {
     let invoiceId: string | undefined;
     try {
       // Alice is active, so inserting an invoice with amount > 0 should succeed
+      // Note: function role has backend_only: true, so we add the backend-only header
       const token = await tokens.function_(ALICE_ID);
       const { body } = await graphqlRequest(
         `mutation {
@@ -1023,7 +1024,7 @@ describe('Mutation permission checks', () => {
           }) { id clientId amount state type }
         }`,
         undefined,
-        { authorization: `Bearer ${token}` },
+        { authorization: `Bearer ${token}`, 'x-hasura-use-backend-only-permissions': 'true' },
       );
       expect(body.errors).toBeUndefined();
       const invoice = (body.data as { insertInvoiceOne: AnyRow }).insertInvoiceOne;

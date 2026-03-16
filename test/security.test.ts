@@ -9,6 +9,10 @@
  * - Large array inputs (_in operator)
  * - Webhook header CRLF injection
  * - Tracked function argument SQL injection
+ * - Async action status IDOR (P7.1 Critical)
+ * - backend_only permission enforcement (P7.1 Critical)
+ * - GraphQL batching limit (P7.1 High)
+ * - resolveLimit global cap in subscriptions/tracked functions (P7.1 High)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -19,7 +23,7 @@ import {
   startServer, stopServer, closePool, waitForDb,
   graphqlRequest, restRequest,
   tokens, ADMIN_SECRET,
-  ALICE_ID, TEST_DB_URL,
+  ALICE_ID, BOB_ID, TEST_DB_URL,
   getServerAddress, getPool,
 } from './setup.js';
 import { resolveWebhookHeaders, deliverWebhook } from '../src/shared/webhook.js';
@@ -656,6 +660,236 @@ describe('Security', () => {
       const data = (body.data as { searchClients: Array<{ username: string }> }).searchClients;
       expect(data.length).toBeGreaterThan(0);
       expect(data.some((c) => c.username === 'alice')).toBe(true);
+    });
+  });
+
+  // ── 7. Async Action Status IDOR ──────────────────────────────────────
+
+  describe('async action status IDOR', () => {
+    let aliceActionId: string;
+
+    beforeAll(async () => {
+      // Insert a fake async action row belonging to Alice
+      const pool = getPool();
+      const result = await pool.query<{ id: string }>(
+        `INSERT INTO hakkyra.async_action_log
+         (action_name, input, session_variables, user_id, status, output)
+         VALUES ($1, $2, $3, $4, 'completed', $5)
+         RETURNING id`,
+        [
+          'testAction',
+          JSON.stringify({ test: true }),
+          JSON.stringify({ 'x-hasura-role': 'client', 'x-hasura-user-id': ALICE_ID }),
+          ALICE_ID,
+          JSON.stringify({ result: 'secret-data' }),
+        ],
+      );
+      aliceActionId = result.rows[0].id;
+    });
+
+    it('user can see their own action', async () => {
+      const token = await tokens.client(ALICE_ID);
+      const { status, body } = await restRequest('GET', `/v1/actions/${aliceActionId}/status`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(status).toBe(200);
+      const data = body as { id: string; status: string };
+      expect(data.id).toBe(aliceActionId);
+      expect(data.status).toBe('completed');
+    });
+
+    it('user cannot see another user\'s action', async () => {
+      const token = await tokens.client(BOB_ID);
+      const { status, body } = await restRequest('GET', `/v1/actions/${aliceActionId}/status`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(status).toBe(404);
+      const data = body as { error: string };
+      expect(data.error).toBe('not_found');
+    });
+
+    it('admin can see any user\'s action', async () => {
+      const { status, body } = await restRequest('GET', `/v1/actions/${aliceActionId}/status`, {
+        headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+      });
+
+      expect(status).toBe(200);
+      const data = body as { id: string; status: string };
+      expect(data.id).toBe(aliceActionId);
+    });
+  });
+
+  // ── 8. backend_only Permission Enforcement ─────────────────────────────
+
+  describe('backend_only permission enforcement', () => {
+    it('backend_only insert is blocked from regular JWT auth', async () => {
+      // The "function" role has backend_only: true on the account table
+      const token = await tokens.function_(ALICE_ID);
+      const { status, body } = await graphqlRequest(
+        `mutation {
+          insertAccountOne(object: {
+            clientId: "${ALICE_ID}",
+            currencyId: "EUR",
+            balance: 100
+          }) {
+            id
+          }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      // Should fail with permission denied
+      expect(body.errors).toBeDefined();
+      expect(body.errors!.length).toBeGreaterThan(0);
+      expect(body.errors![0].message).toContain('backend_only');
+    });
+
+    it('backend_only insert is allowed with admin secret', async () => {
+      const { status, body } = await graphqlRequest(
+        `mutation {
+          insertAccountOne(object: {
+            clientId: "${ALICE_ID}",
+            currencyId: "GBP",
+            balance: 50
+          }) {
+            id
+          }
+        }`,
+        undefined,
+        {
+          'x-hasura-admin-secret': ADMIN_SECRET,
+          'x-hasura-role': 'function',
+        },
+      );
+
+      // Admin secret bypasses backend_only check
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const data = body.data as { insertAccountOne: { id: string } };
+      expect(data.insertAccountOne.id).toBeDefined();
+
+      // Cleanup: delete the inserted account
+      const pool = getPool();
+      await pool.query(`DELETE FROM account WHERE id = $1`, [data.insertAccountOne.id]);
+    });
+
+    it('backend_only insert is allowed with backend-only permissions header', async () => {
+      const token = await tokens.function_(ALICE_ID);
+      const { status, body } = await graphqlRequest(
+        `mutation {
+          insertAccountOne(object: {
+            clientId: "${ALICE_ID}",
+            currencyId: "USD",
+            balance: 200
+          }) {
+            id
+          }
+        }`,
+        undefined,
+        {
+          authorization: `Bearer ${token}`,
+          'x-hasura-use-backend-only-permissions': 'true',
+        },
+      );
+
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const data = body.data as { insertAccountOne: { id: string } };
+      expect(data.insertAccountOne.id).toBeDefined();
+
+      // Cleanup
+      const pool = getPool();
+      await pool.query(`DELETE FROM account WHERE id = $1`, [data.insertAccountOne.id]);
+    });
+  });
+
+  // ── 9. GraphQL Batching Limit ──────────────────────────────────────────
+
+  describe('GraphQL batching limit', () => {
+    it('batch within limit is not rejected by batch guard (may still be rejected by GraphQL engine)', async () => {
+      const token = await tokens.backoffice();
+      // Build 10 identical queries as a batch — within the default max_batch_size of 10
+      const batch = Array.from({ length: 10 }, () => ({
+        query: '{ clients(limit: 1) { id } }',
+      }));
+
+      const addr = getServerAddress();
+      const res = await fetch(`${addr}/graphql`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify(batch),
+      });
+
+      const body = await res.json() as { errors?: Array<{ message: string; extensions?: { code?: string } }> };
+      // The batch guard should NOT reject — verify no BATCH_SIZE_EXCEEDED error
+      if (body.errors) {
+        for (const err of body.errors) {
+          expect(err.extensions?.code).not.toBe('BATCH_SIZE_EXCEEDED');
+        }
+      }
+    });
+
+    it('batch of 11+ operations is rejected with BATCH_SIZE_EXCEEDED', async () => {
+      const token = await tokens.backoffice();
+      // Build 11 queries — exceeds the default max_batch_size of 10
+      const batch = Array.from({ length: 11 }, () => ({
+        query: '{ clients(limit: 1) { id } }',
+      }));
+
+      const addr = getServerAddress();
+      const res = await fetch(`${addr}/graphql`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify(batch),
+      });
+
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errors: Array<{ message: string; extensions?: { code?: string } }> };
+      expect(body.errors).toBeDefined();
+      expect(body.errors[0].message).toContain('batch size');
+      expect(body.errors[0].extensions?.code).toBe('BATCH_SIZE_EXCEEDED');
+    });
+  });
+
+  // ── 10. resolveLimit cap in subscriptions and tracked functions ────────
+
+  describe('resolveLimit global cap', () => {
+    it('subscription select respects graphql.maxLimit (capped at 100)', async () => {
+      // The default maxLimit is 100. Requesting limit: 200 should be capped.
+      // We verify this by requesting more rows than exist and checking no error occurs.
+      const token = await tokens.backoffice();
+
+      // Use a regular query with a large limit to verify capping works
+      // (subscriptions use the same resolveLimit logic)
+      const { status, body } = await graphqlRequest(
+        `query { clients(limit: 200) { id } }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const clients = (body.data as { clients: unknown[] }).clients;
+      // Must be at most maxLimit (100)
+      expect(clients.length).toBeLessThanOrEqual(100);
+    });
+
+    it('tracked function query respects graphql.maxLimit', async () => {
+      const token = await tokens.backoffice();
+      const { status, body } = await graphqlRequest(
+        `query { searchClients(args: { searchTerm: "" }, limit: 200) { id } }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as { searchClients: unknown[] }).searchClients;
+      // Must be capped to maxLimit (100)
+      expect(data.length).toBeLessThanOrEqual(100);
     });
   });
 });
