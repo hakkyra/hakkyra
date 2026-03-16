@@ -272,6 +272,22 @@ CREATE TABLE transaction (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- ─── 1:1 reverse-FK relationship (P10.8) ──────────────────────────────────
+-- player_lock has a unique FK to player — models a 1:1 object relationship
+-- where the FK is on the "child" table but the parent defines an object rel
+
+CREATE TABLE player (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE player_lock (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  player_id UUID NOT NULL UNIQUE REFERENCES player(id),
+  locked_at TIMESTAMPTZ DEFAULT now(),
+  reason TEXT
+);
 -- ─── Materialized view ─────────────────────────────────────────────────────
 
 CREATE MATERIALIZED VIEW client_summary AS
@@ -547,6 +563,14 @@ INSERT INTO fiscal_report (id, fiscal_year, fiscal_quarter, title, amount) VALUE
 INSERT INTO transaction (id, account_id, sequence, amount, description, local_time) VALUES
   ('dd000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 1, 100.00, 'Deposit', '2025-01-15 10:30:00'),
   ('dd000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000001', 2, -50.00, 'Withdrawal', '2025-01-16 14:00:00');
+
+-- Players + locks (1:1 reverse-FK)
+INSERT INTO player (id, name) VALUES
+  ('df000000-0000-0000-0000-000000000001', 'PlayerOne'),
+  ('df000000-0000-0000-0000-000000000002', 'PlayerTwo');
+
+INSERT INTO player_lock (id, player_id, reason) VALUES
+  ('df100000-0000-0000-0000-000000000001', 'df000000-0000-0000-0000-000000000001', 'Maintenance');
 
 -- Refresh materialized view
 REFRESH MATERIALIZED VIEW client_summary;

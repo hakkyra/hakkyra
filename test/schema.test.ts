@@ -1042,4 +1042,76 @@ describe('GraphQL Schema Generation', () => {
       expect(argNames).not.toContain('distinctOn');
     });
   });
+
+  describe('Relationship cardinality from metadata (P10.8)', () => {
+    it('should produce object (singular) type for Player.lock defined as object_relationship with reverse FK', () => {
+      const typeMap = schema.getTypeMap();
+      const playerType = typeMap['Player'] as GraphQLObjectType;
+      expect(playerType).toBeDefined();
+      const fields = playerType.getFields();
+      // lock is defined as an object_relationship in metadata using the
+      // { table, column } form (reverse-FK / 1:1 pattern)
+      expect(fields['lock']).toBeDefined();
+      const lockType = fields['lock'].type;
+      // Must NOT be a list — object relationships are singular types
+      expect(lockType).not.toBeInstanceOf(GraphQLList);
+      // The inner type (unwrapped from possible NonNull) should be PlayerLock
+      const unwrapped = lockType instanceof GraphQLNonNull
+        ? (lockType as GraphQLNonNull<any>).ofType
+        : lockType;
+      expect(unwrapped).toBeInstanceOf(GraphQLObjectType);
+      expect((unwrapped as GraphQLObjectType).name).toBe('PlayerLock');
+    });
+
+    it('should not produce an array (list) type for Player.lock', () => {
+      const typeMap = schema.getTypeMap();
+      const playerType = typeMap['Player'] as GraphQLObjectType;
+      const fields = playerType.getFields();
+      const lockType = fields['lock'].type;
+      // Unwrap NonNull if present
+      const inner = lockType instanceof GraphQLNonNull
+        ? (lockType as GraphQLNonNull<any>).ofType
+        : lockType;
+      // The type must not be a list at any level
+      expect(inner).not.toBeInstanceOf(GraphQLList);
+    });
+
+    it('should correctly resolve PlayerLock.player as object relationship', () => {
+      const typeMap = schema.getTypeMap();
+      const playerLockType = typeMap['PlayerLock'] as GraphQLObjectType;
+      expect(playerLockType).toBeDefined();
+      const fields = playerLockType.getFields();
+      // player is defined as object_relationship using simple FK column form
+      expect(fields['player']).toBeDefined();
+      const playerFieldType = fields['player'].type;
+      // Should be non-null (player_id is NOT NULL)
+      expect(playerFieldType).toBeInstanceOf(GraphQLNonNull);
+      const innerType = (playerFieldType as GraphQLNonNull<any>).ofType;
+      expect(innerType).toBeInstanceOf(GraphQLObjectType);
+      expect((innerType as GraphQLObjectType).name).toBe('Player');
+    });
+
+    it('should store correct relationship extensions for reverse-FK object relationship', () => {
+      const typeMap = schema.getTypeMap();
+      const playerType = typeMap['Player'] as GraphQLObjectType;
+      const lockField = playerType.getFields()['lock'];
+      expect(lockField.extensions).toBeDefined();
+      expect(lockField.extensions['relationshipType']).toBe('object');
+      expect(lockField.extensions['isRelationship']).toBe(true);
+      // remoteColumns should contain the FK column on the remote table
+      expect(lockField.extensions['remoteColumns']).toContain('player_id');
+    });
+
+    it('should have correct localColumns inferred for reverse-FK object relationship', () => {
+      // The local columns (on player) should be inferred from the FK: player.id
+      const playerTable = schemaModel.tables.find((t) => t.name === 'player');
+      expect(playerTable).toBeDefined();
+      const lockRel = playerTable!.relationships.find((r) => r.name === 'lock');
+      expect(lockRel).toBeDefined();
+      expect(lockRel!.type).toBe('object');
+      expect(lockRel!.remoteColumns).toEqual(['player_id']);
+      // localColumns should be inferred from the FK: player_lock.player_id -> player.id
+      expect(lockRel!.localColumns).toEqual(['id']);
+    });
+  });
 });
