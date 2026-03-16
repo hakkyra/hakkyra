@@ -1,14 +1,5 @@
 # Hakkyra extension: API configuration
 
-table_aliases:
-  client_data: clientData
-  service_plan_client: servicePlanClient
-  client_service: clientService
-  client_summary: clientSummary
-  plan_item: planItem
-  ledger_entry: ledgerEntry
-  service_plan: servicePlan
-
 rest:
   auto_generate: true
   base_path: /api/v1

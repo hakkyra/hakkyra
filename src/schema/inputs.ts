@@ -36,7 +36,7 @@ import type {
 import type { TableInfo, ColumnInfo, RelationshipConfig, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
-import { toCamelCase, getTypeName, tableKey } from './type-builder.js';
+import { toCamelCase, getTypeName, getColumnFieldName, tableKey } from './type-builder.js';
 
 // ─── CursorOrdering Enum ────────────────────────────────────────────────────
 
@@ -97,9 +97,9 @@ function buildConstraintEnum(table: TableInfo, typeName: string): GraphQLEnumTyp
 function buildUpdateColumnEnum(table: TableInfo, typeName: string): GraphQLEnumType {
   const values: Record<string, { value: string }> = {};
   for (const col of table.columns) {
-    // camelCase enum value names per graphql-default naming convention
+    // Use custom column name if available, otherwise camelCase
     // Internal value stays as the PG column name for SQL compilation
-    const fieldName = toCamelCase(col.name);
+    const fieldName = getColumnFieldName(table, col.name);
     values[fieldName] = { value: col.name };
   }
   return new GraphQLEnumType({
@@ -112,8 +112,8 @@ function buildUpdateColumnEnum(table: TableInfo, typeName: string): GraphQLEnumT
 function buildSelectColumnEnum(table: TableInfo, typeName: string): GraphQLEnumType {
   const values: Record<string, { value: string }> = {};
   for (const col of table.columns) {
-    // camelCase enum value names — internal value is the PG column name
-    const fieldName = toCamelCase(col.name);
+    // Use custom column name if available — internal value is the PG column name
+    const fieldName = getColumnFieldName(table, col.name);
     values[fieldName] = { value: col.name };
   }
   return new GraphQLEnumType({
@@ -235,7 +235,7 @@ export function buildStreamCursorTypes(
     fields: () => {
       const fields: GraphQLInputFieldConfigMap = {};
       for (const column of table.columns) {
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         fields[fieldName] = {
           type: columnToInputType(column, enumTypes, enumNames),
           description: column.comment,
@@ -316,7 +316,7 @@ function buildAggregateOrderByTypes(
       fields: () => {
         const fields: GraphQLInputFieldConfigMap = {};
         for (const col of applicableColumns) {
-          const fieldName = toCamelCase(col.name);
+          const fieldName = getColumnFieldName(table, col.name);
           fields[fieldName] = { type: OrderByDirection };
         }
         return fields;
@@ -392,7 +392,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLInputFieldConfigMap = {};
       for (const column of table.columns) {
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         const fieldType = columnToInputType(column, enumTypes, enumNames);
 
         fields[fieldName] = {
@@ -440,7 +440,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLInputFieldConfigMap = {};
       for (const column of table.columns) {
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         // All fields in SetInput are nullable (optional)
         fields[fieldName] = {
           type: columnToInputType(column, enumTypes, enumNames),
@@ -462,7 +462,7 @@ export function buildMutationInputTypes(
         for (const pkColName of table.primaryKey) {
           const column = table.columns.find((c) => c.name === pkColName);
           if (!column) continue;
-          const fieldName = toCamelCase(column.name);
+          const fieldName = getColumnFieldName(table, column.name);
           fields[fieldName] = {
             type: new GraphQLNonNull(columnToInputType(column, enumTypes, enumNames)),
           };
@@ -479,7 +479,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLInputFieldConfigMap = {};
       for (const column of table.columns) {
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         fields[fieldName] = { type: OrderByDirection };
       }
 
@@ -572,7 +572,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of numericColumns) {
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
         fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
       }
@@ -596,7 +596,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of numericColumns) {
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         // AVG always returns float/numeric
         fields[fieldName] = { type: GraphQLFloat };
       }
@@ -622,7 +622,7 @@ export function buildMutationInputTypes(
         // Min/Max work on any ordered type
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
         if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
-          const fieldName = toCamelCase(column.name);
+          const fieldName = getColumnFieldName(table, column.name);
           fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
         }
       }
@@ -647,7 +647,7 @@ export function buildMutationInputTypes(
       for (const column of table.columns) {
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
         if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
-          const fieldName = toCamelCase(column.name);
+          const fieldName = getColumnFieldName(table, column.name);
           fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
         }
       }
@@ -669,7 +669,7 @@ export function buildMutationInputTypes(
   function buildStatAggFields(): GraphQLFieldConfigMap<unknown, unknown> {
     const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
     for (const column of numericColumns) {
-      const fieldName = toCamelCase(column.name);
+      const fieldName = getColumnFieldName(table, column.name);
       fields[fieldName] = { type: GraphQLFloat };
     }
     for (const cf of numericComputedFields) {
@@ -746,7 +746,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of table.columns) {
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
         fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };
       }

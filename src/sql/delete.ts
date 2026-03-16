@@ -82,7 +82,7 @@ function buildReturningFields(
   if (hasRelationships || hasJsonbPaths || hasComputedFields) {
     const columns = filterColumns(validReturning, table);
     const aliasCounter = new AliasCounter();
-    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, computedFields, undefined, jsonbPaths);
+    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, computedFields, undefined, jsonbPaths, table.customColumnNames);
   }
 
   return validReturning.map(

@@ -314,16 +314,6 @@ export async function loadConfig(
   const queryCollections = await loadQueryCollections(absMetadataDir);
   const hasuraRestEndpoints = await loadRestEndpoints(absMetadataDir, queryCollections);
 
-  const tableAliases = apiConfig?.table_aliases ?? {};
-  for (const table of tables) {
-    const qualifiedName = `${table.schema}.${table.name}`;
-    if (tableAliases[qualifiedName]) {
-      table.alias = tableAliases[qualifiedName];
-    } else if (tableAliases[table.name]) {
-      table.alias = tableAliases[table.name];
-    }
-  }
-
   const raw = {
     version,
     server: stripUndefined({
@@ -347,7 +337,6 @@ export async function loadConfig(
     nativeQueries,
     logicalModels,
     apiDocs: transformDocsConfig(apiConfig),
-    tableAliases,
     inheritedRoles,
     jobQueue: transformJobQueueConfig(serverConfig),
     redis: transformRedisConfig(serverConfig),
@@ -664,9 +653,43 @@ function transformTable(raw: RawTableYaml): TableInfo {
     customRootFields = raw.configuration.custom_root_fields as CustomRootFields;
   }
 
+  // Apply table-level custom_name as alias (replaces old table_aliases)
+  const alias = raw.configuration?.custom_name ?? undefined;
+
+  // Merge custom_column_names and column_config custom names
+  // column_config takes precedence over custom_column_names
+  let customColumnNames: Record<string, string> | undefined;
+  if (raw.configuration?.custom_column_names || raw.configuration?.column_config) {
+    customColumnNames = { ...(raw.configuration?.custom_column_names ?? {}) };
+    if (raw.configuration?.column_config) {
+      for (const [colName, colConfig] of Object.entries(raw.configuration.column_config)) {
+        if (colConfig.custom_name) {
+          customColumnNames[colName] = colConfig.custom_name;
+        }
+      }
+    }
+  }
+
+  // Extract column comments from column_config
+  let columnComments: Record<string, string> | undefined;
+  if (raw.configuration?.column_config) {
+    const comments: Record<string, string> = {};
+    let hasComments = false;
+    for (const [colName, colConfig] of Object.entries(raw.configuration.column_config)) {
+      if (colConfig.comment) {
+        comments[colName] = colConfig.comment;
+        hasComments = true;
+      }
+    }
+    if (hasComments) {
+      columnComments = comments;
+    }
+  }
+
   return {
     name: raw.table.name,
     schema: raw.table.schema,
+    alias,
     comment: raw.configuration?.comment,
     columns: [],
     primaryKey: [],
@@ -678,6 +701,8 @@ function transformTable(raw: RawTableYaml): TableInfo {
     eventTriggers,
     customRootFields,
     computedFields: computedFields.length > 0 ? computedFields : undefined,
+    customColumnNames,
+    columnComments,
     isEnum: raw.is_enum || undefined,
   };
 }

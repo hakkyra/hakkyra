@@ -33,6 +33,7 @@ import { customScalars } from './scalars.js';
 import {
   buildObjectType,
   getTypeName,
+  getColumnFieldName,
   toCamelCase,
   tableKey,
 } from './type-builder.js';
@@ -272,7 +273,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       for (const pkColName of table.primaryKey) {
         const column = table.columns.find((c) => c.name === pkColName);
         if (!column) continue;
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         // PK args are required non-null scalars
         const pkInputType = mutInputs.pkColumnsInput.getFields()[fieldName];
         if (pkInputType) {
@@ -448,7 +449,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       for (const pkColName of table.primaryKey) {
         const column = table.columns.find((c) => c.name === pkColName);
         if (!column) continue;
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         const pkField = mutInputs.pkColumnsInput.getFields()[fieldName];
         if (pkField) {
           pkArgs[fieldName] = { type: pkField.type };
@@ -516,7 +517,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       for (const pkColName of table.primaryKey) {
         const column = table.columns.find((c) => c.name === pkColName);
         if (!column) continue;
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         const pkField = mutInputs.pkColumnsInput.getFields()[fieldName];
         if (pkField) {
           pkArgs[fieldName] = { type: pkField.type };

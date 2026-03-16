@@ -382,9 +382,9 @@ Hasura's table `configuration` block supports `column_config` (per-column settin
 
 - [x] Accept `column_config` in table configuration Zod schema (record of column → `{ custom_name?, comment? }`)
 - [x] Accept `custom_name` in table configuration Zod schema
-- [ ] Config loader: merge `column_config` custom names into `custom_column_names` (column_config takes precedence)
-- [ ] Config loader: apply table-level `custom_name` as table alias for type naming and root fields
-- [ ] `column_config.comment`: surface as GraphQL field descriptions
+- [x] Config loader: merge `column_config` custom names into `custom_column_names` (column_config takes precedence)
+- [x] Config loader: apply table-level `custom_name` as table alias for type naming and root fields
+- [x] `column_config.comment`: surface as GraphQL field descriptions
 
 ### Request Transform: `template_engine` and `version`
 
