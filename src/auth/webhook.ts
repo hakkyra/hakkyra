@@ -9,10 +9,16 @@
  * - POST mode: forward headers as JSON body to the webhook
  * - Simple in-memory cache with configurable TTL
  * - Timeout handling (default 5s)
+ * - Configurable session variable namespace
  */
 
 import { createHash } from 'node:crypto';
 import type { AuthConfig, SessionVariables } from '../types.js';
+import {
+  DEFAULT_SESSION_NAMESPACE,
+  WELL_KNOWN_SUFFIXES,
+  nsKey,
+} from './session-namespace.js';
 
 export type WebhookAuthConfig = NonNullable<AuthConfig['webhook']>;
 
@@ -82,6 +88,10 @@ function computeCacheKey(headers: Record<string, string>): string {
 /**
  * Parse the webhook response body into SessionVariables.
  *
+ * Webhook responses use the Hasura convention with `X-Hasura-*` keys.
+ * The parser accepts both `X-Hasura-*` and `{ns}-*` keys, normalizing
+ * claim keys to lowercase.
+ *
  * Expected format (Hasura-compatible):
  * ```json
  * {
@@ -91,7 +101,7 @@ function computeCacheKey(headers: Record<string, string>): string {
  * }
  * ```
  */
-function parseWebhookResponse(body: Record<string, unknown>): SessionVariables {
+function parseWebhookResponse(body: Record<string, unknown>, sessionNs: string): SessionVariables {
   const claims: Record<string, string | string[]> = {};
 
   for (const [key, value] of Object.entries(body)) {
@@ -103,22 +113,31 @@ function parseWebhookResponse(body: Record<string, unknown>): SessionVariables {
     }
   }
 
+  // Helper to find a claim by suffix, trying both configured namespace and x-hasura
+  function findClaim(suffix: string): string | string[] | undefined {
+    const nsLookup = nsKey(sessionNs, suffix);
+    if (claims[nsLookup] !== undefined) return claims[nsLookup];
+    const hasuraLookup = `x-hasura-${suffix}`;
+    if (claims[hasuraLookup] !== undefined) return claims[hasuraLookup];
+    return undefined;
+  }
+
   // ── Validate required claims ──────────────────────────────────────────
-  const allowedRolesValue = claims['x-hasura-allowed-roles'];
+  const allowedRolesValue = findClaim(WELL_KNOWN_SUFFIXES.ALLOWED_ROLES);
   if (!allowedRolesValue) {
-    throw new Error('Webhook response missing required "X-Hasura-Allowed-Roles"');
+    throw new Error(`Webhook response missing required "${nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ALLOWED_ROLES)}" (or "X-Hasura-Allowed-Roles")`);
   }
   const allowedRoles = Array.isArray(allowedRolesValue)
     ? allowedRolesValue
     : [allowedRolesValue];
 
-  const defaultRole = claims['x-hasura-role'];
+  const defaultRole = findClaim(WELL_KNOWN_SUFFIXES.ROLE);
   if (!defaultRole) {
-    throw new Error('Webhook response missing required "X-Hasura-Role"');
+    throw new Error(`Webhook response missing required "${nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ROLE)}" (or "X-Hasura-Role")`);
   }
   const role = Array.isArray(defaultRole) ? defaultRole[0] : defaultRole;
 
-  const userIdValue = claims['x-hasura-user-id'];
+  const userIdValue = findClaim(WELL_KNOWN_SUFFIXES.USER_ID);
   const userId = userIdValue
     ? (Array.isArray(userIdValue) ? userIdValue[0] : userIdValue)
     : undefined;
@@ -139,6 +158,8 @@ export interface WebhookAuthOptions {
   cacheTtlMs?: number;
   /** Request timeout in milliseconds (default 5000). */
   timeoutMs?: number;
+  /** Session variable namespace (default 'x-hk'). */
+  sessionNamespace?: string;
 }
 
 /**
@@ -173,6 +194,7 @@ export function createWebhookAuthenticator(
   const url = resolveWebhookUrl(config);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const cache = new SessionCache(options.cacheTtlMs ?? 0);
+  const sessionNs = options.sessionNamespace ?? DEFAULT_SESSION_NAMESPACE;
 
   return {
     async authenticate(headers: Record<string, string>): Promise<SessionVariables> {
@@ -229,7 +251,7 @@ export function createWebhookAuthenticator(
         throw new Error('Webhook returned invalid JSON');
       }
 
-      const session = parseWebhookResponse(body);
+      const session = parseWebhookResponse(body, sessionNs);
 
       // ── Populate cache ──────────────────────────────────────────────
       if (cache.enabled) {

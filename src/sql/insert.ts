@@ -22,6 +22,11 @@ import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
 import type { RelationshipSelection, ComputedFieldSelection, SetReturningComputedFieldSelection } from './select.js';
 import { toCamelCase } from '../schema/type-builder.js';
+import {
+  isSessionVariable,
+  resolveSessionVar,
+  DEFAULT_SESSION_NAMESPACE,
+} from '../auth/session-namespace.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -97,25 +102,12 @@ export interface OnConflictClause {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Resolve a preset value. If it's a session variable reference (x-hasura-*),
+ * Resolve a preset value. If it's a session variable reference (x-hasura-* or {ns}-*),
  * resolve it from the session. Otherwise use the literal value.
  */
 function resolvePreset(value: string, session: SessionVariables): unknown {
-  const lower = value.toLowerCase();
-  if (!lower.startsWith('x-hasura-')) return value;
-
-  if (lower === 'x-hasura-role') return session.role;
-  if (lower === 'x-hasura-user-id') return session.userId;
-
-  const claimKey = lower.slice('x-hasura-'.length);
-  if (session.claims) {
-    if (claimKey in session.claims) return session.claims[claimKey];
-    for (const [k, v] of Object.entries(session.claims)) {
-      if (k.toLowerCase() === claimKey) return v;
-    }
-  }
-
-  return undefined;
+  if (!isSessionVariable(value, DEFAULT_SESSION_NAMESPACE)) return value;
+  return resolveSessionVar(value, session, DEFAULT_SESSION_NAMESPACE) ?? undefined;
 }
 
 /**

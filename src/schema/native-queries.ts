@@ -35,6 +35,11 @@ import type {
 } from '../types.js';
 import { customScalars } from './scalars.js';
 import type { ResolverContext } from './resolvers.js';
+import {
+  isSessionVariable,
+  resolveSessionVar,
+  DEFAULT_SESSION_NAMESPACE,
+} from '../auth/session-namespace.js';
 
 // ─── Type Mapping ────────────────────────────────────────────────────────────
 
@@ -117,23 +122,17 @@ export function parseNativeQuerySQL(code: string): { sql: string; paramNames: st
 
 // ─── Session Variable Resolution ─────────────────────────────────────────────
 
-const SESSION_VAR_PREFIX = 'X-Hasura-';
-
 function resolveSessionVariable(
   name: string,
   session: SessionVariables,
 ): string | undefined {
-  const lowerName = name.toLowerCase();
-
-  if (lowerName === 'x-hasura-user-id') return session.userId;
-  if (lowerName === 'x-hasura-role') return session.role;
-
-  const claimValue = session.claims[lowerName] ?? session.claims[name];
-  if (claimValue !== undefined) {
-    return Array.isArray(claimValue) ? claimValue[0] : claimValue;
+  if (!isSessionVariable(name, DEFAULT_SESSION_NAMESPACE)) {
+    // Not a session variable — return undefined
+    return undefined;
   }
-
-  return undefined;
+  const resolved = resolveSessionVar(name, session, DEFAULT_SESSION_NAMESPACE);
+  if (resolved === undefined) return undefined;
+  return Array.isArray(resolved) ? resolved[0] : String(resolved);
 }
 
 // ─── Permission Filter Compilation ───────────────────────────────────────────
@@ -179,7 +178,7 @@ function compilePermissionFilter(
       for (const [op, rawValue] of Object.entries(operators)) {
         let value = rawValue;
         // Check if the value is a session variable reference
-        if (typeof value === 'string' && value.startsWith(SESSION_VAR_PREFIX)) {
+        if (typeof value === 'string' && isSessionVariable(value, DEFAULT_SESSION_NAMESPACE)) {
           value = resolveSessionVariable(value, session);
         }
 

@@ -12,6 +12,11 @@ import {
   resolveWebhookHeaders,
 } from '../shared/webhook.js';
 import { applyRequestTransform, applyResponseTransform } from './transform.js';
+import {
+  nsKey,
+  WELL_KNOWN_SUFFIXES,
+  DEFAULT_SESSION_NAMESPACE,
+} from '../auth/session-namespace.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -67,7 +72,11 @@ export async function executeAction(options: ActionExecutionOptions): Promise<Ac
     sessionVariables[key] = Array.isArray(value) ? value.join(',') : value;
   }
   if (session.role) {
-    sessionVariables['x-hasura-role'] = session.role;
+    // Include role under both configured namespace and x-hasura for webhook compatibility
+    sessionVariables[nsKey(DEFAULT_SESSION_NAMESPACE, WELL_KNOWN_SUFFIXES.ROLE)] = session.role;
+    if (DEFAULT_SESSION_NAMESPACE !== 'x-hasura') {
+      sessionVariables['x-hasura-role'] = session.role;
+    }
   }
 
   // Build Hasura-compatible payload
