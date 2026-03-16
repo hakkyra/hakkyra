@@ -35,46 +35,25 @@ import { customScalars } from './scalars.js';
 import { toCamelCase } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import type { ResolverContext } from './resolvers.js';
+import {
+  resolveSessionVar,
+  DEFAULT_SESSION_NAMESPACE,
+} from '../auth/session-namespace.js';
 
 // ─── Session Variable Mapping ────────────────────────────────────────────────
 
 /**
- * Well-known session variable names mapped to their short form
- * used in custom query parameter references.
- */
-const SESSION_VARIABLE_MAP: Record<string, (session: SessionVariables) => string | undefined> = {
-  'x-hasura-user-id': (s) => s.userId,
-  'x-hasura-role': (s) => s.role,
-  'x-hasura-player-id': (s) => {
-    const val = s.claims['x-hasura-player-id'];
-    return Array.isArray(val) ? val[0] : val;
-  },
-};
-
-/**
  * Resolve a session variable reference from the session.
- * Supports both the standard x-hasura-* format and looking up
- * arbitrary claims from the session.
+ * Supports both the configured namespace and x-hasura-* format,
+ * and looking up arbitrary claims from the session.
  */
 function resolveSessionVariable(
   name: string,
   session: SessionVariables,
 ): string | undefined {
-  const lowerName = name.toLowerCase();
-
-  // Check well-known mappings first
-  const resolver = SESSION_VARIABLE_MAP[lowerName];
-  if (resolver) {
-    return resolver(session);
-  }
-
-  // Fall back to claims lookup
-  const claimValue = session.claims[lowerName] ?? session.claims[name];
-  if (claimValue !== undefined) {
-    return Array.isArray(claimValue) ? claimValue[0] : claimValue;
-  }
-
-  return undefined;
+  const resolved = resolveSessionVar(name, session, DEFAULT_SESSION_NAMESPACE);
+  if (resolved === undefined) return undefined;
+  return Array.isArray(resolved) ? resolved[0] : String(resolved);
 }
 
 // ─── Type Mapping ────────────────────────────────────────────────────────────

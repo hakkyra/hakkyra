@@ -12,6 +12,12 @@ import type { Logger } from 'pino';
 import type { ActionConfig, SessionVariables, AsyncActionResult } from '../types.js';
 import type { JobQueue, Job } from '../shared/job-queue/types.js';
 import { executeAction } from './proxy.js';
+import {
+  nsKey,
+  WELL_KNOWN_SUFFIXES,
+  DEFAULT_SESSION_NAMESPACE,
+  resolveSessionVar,
+} from '../auth/session-namespace.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -48,7 +54,10 @@ export async function enqueueAsyncAction(
     sessionVariables[key] = Array.isArray(value) ? value.join(',') : value;
   }
   if (session.role) {
-    sessionVariables['x-hasura-role'] = session.role;
+    sessionVariables[nsKey(DEFAULT_SESSION_NAMESPACE, WELL_KNOWN_SUFFIXES.ROLE)] = session.role;
+    if (DEFAULT_SESSION_NAMESPACE !== 'x-hasura') {
+      sessionVariables['x-hasura-role'] = session.role;
+    }
   }
 
   // Insert row into async_action_log
@@ -146,11 +155,15 @@ export async function registerAsyncActionWorkers(
 
           // Reconstruct session from stored session variables
           const sessionVars = row.session_variables ?? {};
+          const ns = DEFAULT_SESSION_NAMESPACE;
+          const roleKey = nsKey(ns, WELL_KNOWN_SUFFIXES.ROLE);
+          const userIdKey = nsKey(ns, WELL_KNOWN_SUFFIXES.USER_ID);
+          const allowedRolesKey = nsKey(ns, WELL_KNOWN_SUFFIXES.ALLOWED_ROLES);
           const session: SessionVariables = {
-            role: sessionVars['x-hasura-role'] ?? 'anonymous',
-            userId: sessionVars['x-hasura-user-id'],
-            allowedRoles: sessionVars['x-hasura-allowed-roles']
-              ? sessionVars['x-hasura-allowed-roles'].split(',')
+            role: sessionVars[roleKey] ?? sessionVars['x-hasura-role'] ?? 'anonymous',
+            userId: sessionVars[userIdKey] ?? sessionVars['x-hasura-user-id'],
+            allowedRoles: (sessionVars[allowedRolesKey] ?? sessionVars['x-hasura-allowed-roles'])
+              ? (sessionVars[allowedRolesKey] ?? sessionVars['x-hasura-allowed-roles']).split(',')
               : [],
             isAdmin: false,
             claims: sessionVars,

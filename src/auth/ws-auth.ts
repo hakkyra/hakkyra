@@ -6,7 +6,7 @@
  * - { Authorization: "Bearer ..." }
  * - { headers: { Authorization: "Bearer ..." } }
  * - { token: "..." }
- * - { "x-hasura-admin-secret": "..." }
+ * - { "{ns}-admin-secret": "..." } (also accepts "x-hasura-admin-secret")
  */
 
 import { timingSafeEqual as cryptoTimingSafeEqual } from 'node:crypto';
@@ -14,6 +14,11 @@ import type { AuthConfig, SessionVariables } from '../types.js';
 import type { JWTVerifier } from './jwt.js';
 import { createJWTVerifier } from './jwt.js';
 import { extractSessionVariables } from './claims.js';
+import {
+  DEFAULT_SESSION_NAMESPACE,
+  WELL_KNOWN_SUFFIXES,
+  nsKey,
+} from './session-namespace.js';
 
 // ─── Token Extraction ────────────────────────────────────────────────────────
 
@@ -49,36 +54,64 @@ function extractBearerToken(connectionParams: Record<string, unknown>): string |
 }
 
 /**
- * Extract an admin secret from connectionParams, trying multiple common formats.
+ * Extract an admin secret from connectionParams, trying both the configured
+ * namespace and the Hasura-compatible x-hasura-admin-secret.
  */
-function extractAdminSecret(connectionParams: Record<string, unknown>): string | null {
-  // Direct: { "x-hasura-admin-secret": "..." }
-  const direct = connectionParams['x-hasura-admin-secret'];
+function extractAdminSecret(connectionParams: Record<string, unknown>, sessionNs: string): string | null {
+  const nsAdminSecret = nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ADMIN_SECRET);
+
+  // Direct: { "{ns}-admin-secret": "..." }
+  const direct = connectionParams[nsAdminSecret];
   if (typeof direct === 'string') return direct;
 
-  // In headers: { headers: { "x-hasura-admin-secret": "..." } }
+  // Fallback: { "x-hasura-admin-secret": "..." }
+  if (sessionNs !== 'x-hasura') {
+    const hasuraDirect = connectionParams['x-hasura-admin-secret'];
+    if (typeof hasuraDirect === 'string') return hasuraDirect;
+  }
+
+  // In headers: { headers: { "{ns}-admin-secret": "..." } }
   const headers = connectionParams['headers'];
   if (headers && typeof headers === 'object') {
     const headerMap = headers as Record<string, unknown>;
-    const headerSecret = headerMap['x-hasura-admin-secret'];
+    const headerSecret = headerMap[nsAdminSecret];
     if (typeof headerSecret === 'string') return headerSecret;
+
+    if (sessionNs !== 'x-hasura') {
+      const hasuraHeaderSecret = headerMap['x-hasura-admin-secret'];
+      if (typeof hasuraHeaderSecret === 'string') return hasuraHeaderSecret;
+    }
   }
 
   return null;
 }
 
 /**
- * Extract a requested role from connectionParams.
+ * Extract a requested role from connectionParams, checking both the configured
+ * namespace and the Hasura-compatible x-hasura-role.
  */
-function extractRequestedRole(connectionParams: Record<string, unknown>): string | null {
-  const direct = connectionParams['x-hasura-role'];
+function extractRequestedRole(connectionParams: Record<string, unknown>, sessionNs: string): string | null {
+  const nsRole = nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ROLE);
+
+  const direct = connectionParams[nsRole];
   if (typeof direct === 'string') return direct;
+
+  // Fallback: x-hasura-role
+  if (sessionNs !== 'x-hasura') {
+    const hasuraDirect = connectionParams['x-hasura-role'];
+    if (typeof hasuraDirect === 'string') return hasuraDirect;
+  }
 
   const headers = connectionParams['headers'];
   if (headers && typeof headers === 'object') {
     const headerMap = headers as Record<string, unknown>;
-    const headerRole = headerMap['x-hasura-role'];
+    const headerRole = headerMap[nsRole];
     if (typeof headerRole === 'string') return headerRole;
+
+    if (sessionNs !== 'x-hasura') {
+      const hasuraHeaderRole = headerMap['x-hasura-role'];
+      if (typeof hasuraHeaderRole === 'string') return hasuraHeaderRole;
+    }
   }
 
   return null;
@@ -117,6 +150,7 @@ export async function authenticateWsConnection(
   authConfig: AuthConfig,
 ): Promise<SessionVariables | null> {
   const params = connectionParams ?? {};
+  const sessionNs = authConfig.sessionNamespace ?? DEFAULT_SESSION_NAMESPACE;
 
   // Resolve admin secret from env
   const adminSecret = authConfig.adminSecretEnv
@@ -125,16 +159,16 @@ export async function authenticateWsConnection(
 
   // ── 1. Admin secret check ──────────────────────────────────────────────
   if (adminSecret) {
-    const providedSecret = extractAdminSecret(params);
+    const providedSecret = extractAdminSecret(params, sessionNs);
     if (providedSecret) {
       if (timingSafeEqual(providedSecret, adminSecret)) {
-        const requestedRole = extractRequestedRole(params);
+        const requestedRole = extractRequestedRole(params, sessionNs);
         return {
           role: requestedRole ?? 'admin',
           allowedRoles: ['admin'],
           isAdmin: true,
           claims: {
-            'x-hasura-role': requestedRole ?? 'admin',
+            [nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ROLE)]: requestedRole ?? 'admin',
           },
         };
       }
@@ -169,7 +203,7 @@ export async function authenticateWsConnection(
       let session = extractSessionVariables(payload, authConfig);
 
       // Active role resolution
-      const requestedRole = extractRequestedRole(params);
+      const requestedRole = extractRequestedRole(params, sessionNs);
       if (requestedRole) {
         if (!session.allowedRoles.includes(requestedRole)) {
           return null;
@@ -190,8 +224,8 @@ export async function authenticateWsConnection(
       allowedRoles: [authConfig.unauthorizedRole],
       isAdmin: false,
       claims: {
-        'x-hasura-default-role': authConfig.unauthorizedRole,
-        'x-hasura-allowed-roles': [authConfig.unauthorizedRole],
+        [nsKey(sessionNs, WELL_KNOWN_SUFFIXES.DEFAULT_ROLE)]: authConfig.unauthorizedRole,
+        [nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ALLOWED_ROLES)]: [authConfig.unauthorizedRole],
       },
     };
   }

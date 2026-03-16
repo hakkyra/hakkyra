@@ -24,6 +24,11 @@ import { ParamCollector, quoteIdentifier, quoteTableRef } from '../sql/utils.js'
 import { compileWhere } from '../sql/where.js';
 import { compileSelectAggregate } from '../sql/select.js';
 import type { AggregateSelection } from '../sql/select.js';
+import {
+  isSessionVariable,
+  resolveSessionVar,
+  DEFAULT_SESSION_NAMESPACE,
+} from '../auth/session-namespace.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -394,19 +399,8 @@ function buildDeleteSQL(
  * Resolve a preset value that may reference a session variable.
  */
 function resolvePresetValue(value: string, session: SessionVariables): unknown {
-  const lower = value.toLowerCase();
-  if (lower.startsWith('x-hasura-')) {
-    if (lower === 'x-hasura-user-id') return session.userId;
-    if (lower === 'x-hasura-role') return session.role;
-    // Look up in claims
-    const claimKey = lower.slice('x-hasura-'.length);
-    if (session.claims[claimKey] !== undefined) return session.claims[claimKey];
-    for (const [k, v] of Object.entries(session.claims)) {
-      if (k.toLowerCase() === claimKey) return v;
-    }
-    return undefined;
-  }
-  return value;
+  if (!isSessionVariable(value, DEFAULT_SESSION_NAMESPACE)) return value;
+  return resolveSessionVar(value, session, DEFAULT_SESSION_NAMESPACE) ?? undefined;
 }
 
 /**

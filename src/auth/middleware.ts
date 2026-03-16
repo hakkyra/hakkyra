@@ -4,7 +4,7 @@
  * Registers a `preHandler` hook that:
  * 1. Checks for admin secret header
  * 2. Verifies JWT from Authorization header
- * 3. Resolves active role from `x-hasura-role` header
+ * 3. Resolves active role from `{ns}-role` header (also accepts `x-hasura-role`)
  * 4. Tries webhook authentication if configured
  * 5. Falls back to `unauthorizedRole` if configured
  * 6. Attaches `SessionVariables` to the request
@@ -19,6 +19,11 @@ import { createJWTVerifier } from './jwt.js';
 import { extractSessionVariables } from './claims.js';
 import type { WebhookAuthenticator } from './webhook.js';
 import { createWebhookAuthenticator } from './webhook.js';
+import {
+  DEFAULT_SESSION_NAMESPACE,
+  WELL_KNOWN_SUFFIXES,
+  nsKey,
+} from './session-namespace.js';
 
 // Fastify request augmentation key
 const SESSION_KEY = 'session';
@@ -31,17 +36,17 @@ declare module 'fastify' {
 
 /**
  * Build the admin session used when the request supplies a valid admin secret.
- * The admin can optionally assume a specific role via the `x-hasura-role` header.
+ * The admin can optionally assume a specific role via the `{ns}-role` header.
  */
-function buildAdminSession(request: FastifyRequest): SessionVariables {
-  const requestedRole = getSingleHeader(request, 'x-hasura-role');
+function buildAdminSession(request: FastifyRequest, sessionNs: string): SessionVariables {
+  const requestedRole = getRoleHeader(request, sessionNs);
 
   return {
     role: requestedRole ?? 'admin',
     allowedRoles: ['admin'],
     isAdmin: true,
     claims: {
-      'x-hasura-role': requestedRole ?? 'admin',
+      [nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ROLE)]: requestedRole ?? 'admin',
     },
   };
 }
@@ -49,14 +54,14 @@ function buildAdminSession(request: FastifyRequest): SessionVariables {
 /**
  * Build a session for the configured unauthorized (anonymous) role.
  */
-function buildUnauthorizedSession(role: string): SessionVariables {
+function buildUnauthorizedSession(role: string, sessionNs: string): SessionVariables {
   return {
     role,
     allowedRoles: [role],
     isAdmin: false,
     claims: {
-      'x-hasura-default-role': role,
-      'x-hasura-allowed-roles': [role],
+      [nsKey(sessionNs, WELL_KNOWN_SUFFIXES.DEFAULT_ROLE)]: role,
+      [nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ALLOWED_ROLES)]: [role],
     },
   };
 }
@@ -70,6 +75,22 @@ function getSingleHeader(request: FastifyRequest, name: string): string | undefi
     return value[0];
   }
   return value;
+}
+
+/**
+ * Get the role override header, checking the configured namespace first,
+ * then falling back to `x-hasura-role` for backwards compatibility.
+ */
+function getRoleHeader(request: FastifyRequest, sessionNs: string): string | undefined {
+  // Prefer the configured namespace
+  const nsRole = getSingleHeader(request, nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ROLE));
+  if (nsRole) return nsRole;
+
+  // Fall back to x-hasura-role for backwards compatibility
+  if (sessionNs !== 'x-hasura') {
+    return getSingleHeader(request, 'x-hasura-role');
+  }
+  return undefined;
 }
 
 /**
@@ -96,6 +117,8 @@ export function createAuthHook(config: AuthConfig): any {
       instance.decorateRequest(SESSION_KEY, null);
     }
 
+    const sessionNs = config.sessionNamespace ?? DEFAULT_SESSION_NAMESPACE;
+
     // Lazily initialize the JWT verifier (async key import).
     let verifierPromise: Promise<JWTVerifier> | undefined;
 
@@ -115,13 +138,17 @@ export function createAuthHook(config: AuthConfig): any {
       ? process.env[config.adminSecretEnv]
       : undefined;
 
+    // Admin secret header: check both the configured namespace and x-hasura-admin-secret
+    const adminSecretHeader = nsKey(sessionNs, WELL_KNOWN_SUFFIXES.ADMIN_SECRET);
+
     instance.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
       // ── 1. Admin secret check ──────────────────────────────────────────
       if (adminSecret) {
-        const headerSecret = getSingleHeader(request, 'x-hasura-admin-secret');
+        const headerSecret = getSingleHeader(request, adminSecretHeader)
+          ?? (sessionNs !== 'x-hasura' ? getSingleHeader(request, 'x-hasura-admin-secret') : undefined);
         if (headerSecret) {
           if (timingSafeEqual(headerSecret, adminSecret)) {
-            request.session = buildAdminSession(request);
+            request.session = buildAdminSession(request, sessionNs);
             return;
           }
           sendUnauthorized(reply, 'Invalid admin secret');
@@ -172,7 +199,7 @@ export function createAuthHook(config: AuthConfig): any {
         }
 
         // ── 3. Active role resolution ──────────────────────────────────
-        const requestedRole = getSingleHeader(request, 'x-hasura-role');
+        const requestedRole = getRoleHeader(request, sessionNs);
         if (requestedRole) {
           if (!session.allowedRoles.includes(requestedRole)) {
             sendUnauthorized(
@@ -202,7 +229,7 @@ export function createAuthHook(config: AuthConfig): any {
           let session = await webhookAuthenticator.authenticate(flatHeaders);
 
           // ── Active role resolution ────────────────────────────────────
-          const requestedRole = getSingleHeader(request, 'x-hasura-role');
+          const requestedRole = getRoleHeader(request, sessionNs);
           if (requestedRole) {
             if (!session.allowedRoles.includes(requestedRole)) {
               sendUnauthorized(
@@ -224,7 +251,7 @@ export function createAuthHook(config: AuthConfig): any {
 
       // ── 5. Unauthorized role fallback ──────────────────────────────────
       if (config.unauthorizedRole) {
-        request.session = buildUnauthorizedSession(config.unauthorizedRole);
+        request.session = buildUnauthorizedSession(config.unauthorizedRole, sessionNs);
         return;
       }
 
