@@ -90,6 +90,7 @@ const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> =
 
   // Boolean
   bool: { name: 'Boolean', isCustomScalar: false },
+  boolean: { name: 'Boolean', isCustomScalar: false },
 
   // String types
   text: { name: 'String', isCustomScalar: false },

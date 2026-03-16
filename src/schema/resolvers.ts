@@ -998,7 +998,7 @@ export function makeSelectAggregateResolver(
         if (!fn || fn.isSetReturning) continue;
         const NUMERIC_PG_RETURN = new Set(['int2', 'int4', 'int8', 'float4', 'float8', 'numeric', 'serial', 'serial4', 'serial8', 'bigserial', 'oid']);
         if (NUMERIC_PG_RETURN.has(fn.returnType)) {
-          numericCFRefs.push({ name: cf.name, functionName: cf.function.name, schema: fnSchema });
+          numericCFRefs.push({ name: toCamelCase(cf.name), functionName: cf.function.name, schema: fnSchema });
         }
       }
     }
@@ -1020,21 +1020,22 @@ export function makeSelectAggregateResolver(
         aggregate.varPop = numericCols;
         aggregate.varSamp = numericCols;
       }
-      // Add numeric computed fields to group-by aggregates
-      if (numericCFRefs.length > 0) {
-        aggregate.computedFields = {
-          sum: numericCFRefs,
-          avg: numericCFRefs,
-          min: numericCFRefs,
-          max: numericCFRefs,
-          stddev: numericCFRefs,
-          stddevPop: numericCFRefs,
-          stddevSamp: numericCFRefs,
-          variance: numericCFRefs,
-          varPop: numericCFRefs,
-          varSamp: numericCFRefs,
-        };
-      }
+    }
+
+    // Add numeric computed fields to aggregates (both groupBy and non-groupBy paths)
+    if (numericCFRefs.length > 0) {
+      aggregate.computedFields = {
+        sum: numericCFRefs,
+        avg: numericCFRefs,
+        min: numericCFRefs,
+        max: numericCFRefs,
+        stddev: numericCFRefs,
+        stddevPop: numericCFRefs,
+        stddevSamp: numericCFRefs,
+        variance: numericCFRefs,
+        varPop: numericCFRefs,
+        varSamp: numericCFRefs,
+      };
     }
 
     if (groupBy) {
@@ -2019,11 +2020,21 @@ export function makeUpdateManyResolver(
 
     const returningColumns = getReturningColumns(table);
 
-    // Parse returning selection set for relationships
-    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth);
+    // Parse returning selection set for relationships and computed fields
+    const returningParsed = parseReturningInfo(info, table, context.tables, permissionLookup, auth, context.functions);
     const returningRelationships = returningParsed?.relationships && returningParsed.relationships.length > 0
       ? returningParsed.relationships
       : undefined;
+
+    // Build computed field selections (use select permission for returning clause access)
+    const updateManySelectPerm = permissionLookup.getSelect(table.schema, table.name, auth.role);
+    const returningComputedFields = buildComputedFieldSelections(
+      returningParsed?.computedFields,
+      table,
+      context.functions,
+      updateManySelectPerm?.computedFields,
+      auth.isAdmin,
+    );
 
     // Compile each update
     const updates = rawUpdates.map((entry) => ({
@@ -2036,6 +2047,7 @@ export function makeUpdateManyResolver(
       updates,
       returningColumns,
       returningRelationships,
+      returningComputedFields: returningComputedFields.length > 0 ? returningComputedFields : undefined,
       returningJsonbPaths: returningParsed?.jsonbPaths,
       permission: perm ? {
         filter: perm.filter,
@@ -2053,9 +2065,10 @@ export function makeUpdateManyResolver(
     for (const compiled of compiledQueries) {
       const result = await queryWithSession(compiled.sql, compiled.params, auth, 'write');
 
-      // CTE pattern (check OR relationships): single row with "data" as JSON array
+      // CTE pattern (check OR relationships, jsonbPaths, or computedFields): single row with "data" as JSON array
       // Without CTE: each row has a "data" column
-      const usesCTE = !!(perm?.check || returningRelationships);
+      const usesCTE = !!(perm?.check || returningRelationships || returningParsed?.jsonbPaths?.size
+        || returningComputedFields.length > 0);
 
       if (usesCTE) {
         const firstRow = result.rows[0] as Record<string, unknown> | undefined;
