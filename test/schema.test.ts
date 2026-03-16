@@ -97,6 +97,19 @@ describe('GraphQL Schema Generation', () => {
       expect(fields['updateClientByPk']).toBeDefined();
     });
 
+    it('should have updateMany field with array return type [MutationResponse]', () => {
+      const mutationType = schema.getMutationType()!;
+      const fields = mutationType.getFields();
+      const updateManyField = fields['updateClientMany'];
+      expect(updateManyField).toBeDefined();
+      // Hasura returns [MutationResponse] (one result per update entry)
+      const returnType = updateManyField.type;
+      expect(returnType).toBeInstanceOf(GraphQLList);
+      const innerType = (returnType as GraphQLList<any>).ofType;
+      expect(innerType).toBeInstanceOf(GraphQLObjectType);
+      expect(innerType.name).toBe('ClientMutationResponse');
+    });
+
     it('should have delete fields', () => {
       const mutationType = schema.getMutationType()!;
       const fields = mutationType.getFields();
