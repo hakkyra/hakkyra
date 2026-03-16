@@ -918,13 +918,13 @@ Covers all recent commits (e654f3b through 1518030). All 1194 tests passing.
 
 These recent commits have no regression tests for the specific fix:
 
-- [ ] **e654f3b** — Non-set-returning computed fields returning table types: NO test for composite-return-without-SETOF scenario
-- [ ] **db5e112** — Relationship where filters on tracked functions: NO test using relationship-based where filter on tracked function query (e.g., `where: { branch: { name: { _eq: "HQ" } } }`)
-- [ ] **eeab354** — FK relationships with custom names: NO test for name-mismatch FK resolution by localColumns in merger
-- [ ] **71b10f2** — Table alias in ByPk compilers for computed field permission filters: NO test combining updateByPk/deleteByPk with computed-field-based permission filter
-- [ ] **81da417** — stringify_numeric_types schema types: NO test asserting GraphQL type names remain Bigint/Numeric (not String) when enabled
-- [ ] **e8ef889** — Create queue before scheduling cleanup: NO test for `registerEventCleanup`
-- [ ] **8a04019** — Concurrency control: NO unit tests for concurrency pass-through in adapters
+- [x] **e654f3b** — Non-set-returning computed fields returning table types: regression test in `test/regression-p72.test.ts`
+- [x] **db5e112** — Relationship where filters on tracked functions: regression test in `test/regression-p72.test.ts`
+- [x] **eeab354** — FK relationships with custom names: regression test in `test/regression-p72.test.ts`
+- [x] **71b10f2** — Table alias in ByPk compilers for computed field permission filters: regression test in `test/regression-p72.test.ts`
+- [x] **81da417** — stringify_numeric_types schema types: regression test in `test/regression-p72.test.ts`
+- [x] **e8ef889** — Create queue before scheduling cleanup: regression test in `test/regression-p72.test.ts`
+- [x] **8a04019** — Concurrency control: regression test in `test/regression-p72.test.ts`
 
 ### P7.3 — Permission Test Gaps
 
