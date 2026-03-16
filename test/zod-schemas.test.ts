@@ -24,7 +24,6 @@ import {
   RawActionsYamlSchema,
   RawCronTriggerSchema,
   RawRESTOverrideSchema,
-  RawApiConfigSchema,
   RawServerConfigSchema,
 } from '../src/config/schemas.js';
 
@@ -780,19 +779,6 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
         path: '/test',
       });
       expect(err.issues.some((i) => i.path.includes('operation'))).toBe(true);
-    });
-  });
-
-  // ─── RawApiConfigSchema ────────────────────────────────────────────────────
-
-  describe('RawApiConfigSchema', () => {
-    it('accepts empty object', () => {
-      expectValid(RawApiConfigSchema, {});
-    });
-
-    it('rejects unknown keys (strict mode)', () => {
-      const err = expectInvalid(RawApiConfigSchema, { rest: {} });
-      expect(err.issues.length).toBeGreaterThan(0);
     });
   });
 

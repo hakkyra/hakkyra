@@ -27,7 +27,6 @@ import type {
   RawActionSchema,
   RawActionsYamlSchema,
   RawCronTriggerSchema,
-  RawApiConfigSchema,
   RawRESTOverrideSchema,
   RawServerConfigSchema,
   RawTrackedFunctionSchema,
@@ -77,9 +76,8 @@ export type RawAction = z.infer<typeof RawActionSchema>;
 
 export type RawCronTrigger = z.infer<typeof RawCronTriggerSchema>;
 
-// ─── Hakkyra extension: api_config.yaml ─────────────────────────────────────
+// ─── REST Override (used by hakkyra.yaml rest.overrides) ─────────────────────
 
-export type RawApiConfig = z.infer<typeof RawApiConfigSchema>;
 export type RawRESTOverride = z.infer<typeof RawRESTOverrideSchema>;
 
 // ─── Tracked Functions ───────────────────────────────────────────────────────

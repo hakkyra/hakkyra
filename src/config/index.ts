@@ -9,7 +9,6 @@ export type {
   RawDatabaseEntry,
   RawAction,
   RawCronTrigger,
-  RawApiConfig,
   RawServerConfig,
 } from './types.js';
 export { createConfigWatcher } from './watcher.js';

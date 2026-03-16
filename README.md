@@ -14,9 +14,11 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 - **Authentication** — JWT (HS256, RS256, ES256, Ed25519), JWKS auto-rotation, webhook auth
 - **Relationships** — object and array relationships resolved in a single SQL query
 - **Actions** — proxy mutations/queries to external webhook handlers with request/response transforms, async support, and action relationships
+- **Native queries** — expose raw SQL as GraphQL fields via Hasura-compatible logical models
 - **Tracked functions** — expose PostgreSQL functions as top-level Query/Mutation fields with permission enforcement
 - **Computed fields** — virtual fields backed by PostgreSQL functions
 - **Table-based enums** — `is_enum: true` tables become GraphQL enum types; FK columns auto-typed
+- **Hasura REST endpoints** — define custom REST endpoints backed by named GraphQL queries (query collections)
 - **Subscriptions** — real-time updates via WebSocket (graphql-ws protocol) with LISTEN/NOTIFY + Redis pub/sub fanout for multi-instance deployments
 - **Streaming subscriptions** — cursor-based streaming with `batchSize` and `cursor` arguments
 - **Event triggers** — capture INSERT/UPDATE/DELETE changes and deliver webhooks with retry
@@ -80,11 +82,14 @@ auth:
   admin_secret_from_env: HAKKYRA_ADMIN_SECRET  # Env var with admin secret
   unauthorized_role: anonymous                  # Fallback role when no auth provided
 
+  session_namespace: x-hk         # Session variable prefix (default: x-hk)
+
   jwt:
     type: RS256                   # Algorithm: HS256, RS256, ES256, Ed25519 (default: HS256)
     key: "secret"                 # Raw secret key (HS256)
     key_from_env: JWT_SECRET      # ...or from env var
     jwk_url: https://.../.well-known/jwks.json  # JWKS endpoint (RS256/ES256/Ed25519)
+    jwk_url_from_env: JWK_URL     # ...or JWKS URL from env var
     claims_namespace: https://hasura.io/jwt/claims  # JWT claims namespace
     claims_map:                   # Alternative: map claims from arbitrary JWT paths
       x-hasura-user-id:
@@ -134,9 +139,21 @@ databases:
 graphql:
   query_depth: 10                 # Max query nesting depth (default: 10)
   max_limit: 100                  # Max rows per query (default: 100)
+  max_batch_size: 10              # Max queries per batched request (optional)
 
 # ─── REST API ────────────────────────────────────────────────────────────────
-# Note: REST config is in api_config.yaml (metadata), not hakkyra.yaml
+rest:
+  auto_generate: true             # Auto-generate CRUD endpoints (default: true)
+  base_path: /api                 # REST base path (default: /api)
+  pagination:
+    default_limit: 20             # Default rows per request (default: 20)
+    max_limit: 100                # Maximum allowed limit (default: 100)
+
+# ─── API Docs ────────────────────────────────────────────────────────────────
+docs:
+  generate: true                  # Generate OpenAPI/SDL/LLM docs (default: true)
+  llm_format: false               # Generate LLM-friendly compact format (default: false)
+  include_examples: false         # Include example queries in docs (default: false)
 
 # ─── Subscriptions ───────────────────────────────────────────────────────────
 subscriptions:
@@ -181,6 +198,7 @@ job_queue:
 # ─── Redis (multi-instance subscription fanout) ─────────────────────────────
 redis:
   url: redis://localhost:6379     # Redis connection URL
+  url_from_env: REDIS_URL         # ...or from env var
   host: localhost                 # Or host/port/password separately
   port: 6379                     # Default: 6379
   password: secret
@@ -208,11 +226,13 @@ metadata/
 │           ├── tables.yaml
 │           ├── public_users.yaml
 │           └── public_articles.yaml
-├── api_config.yaml          # table aliases, REST overrides
 ├── actions.yaml
 ├── actions.graphql
 ├── cron_triggers.yaml
-└── inherited_roles.yaml
+├── inherited_roles.yaml
+├── query_collections.yaml       # Named GraphQL queries for REST endpoints
+├── rest_endpoints.yaml          # Hasura-style REST endpoints
+└── graphql_schema_introspection.yaml  # Introspection access control
 ```
 
 #### Table config example
@@ -222,10 +242,29 @@ table:
   schema: public
   name: client
 
+configuration:
+  custom_name: Client              # Custom GraphQL type name (optional)
+  column_config:                   # Per-column GraphQL customization (optional)
+    created_at:
+      custom_name: createdAt
+  custom_root_fields:              # Custom query/mutation root field names (optional)
+    select: clients
+    select_by_pk: client
+
 object_relationships:
   - name: branch
     using:
       foreign_key_constraint_on: branch_id
+
+  - name: parent_org
+    using:
+      manual_configuration:
+        remote_table:
+          schema: public
+          name: organization
+        column_mapping:
+          org_id: id
+        insertion_order: before_parent  # before_parent (default) or after_parent
 
 array_relationships:
   - name: accounts
@@ -268,24 +307,28 @@ Column presets (`set`) inject values automatically on insert/update. Preset colu
 | Endpoint | Description |
 |----------|-------------|
 | `POST /graphql` | GraphQL endpoint (queries, mutations, subscriptions via WebSocket upgrade) |
-| `GET /api/v1/{table}` | List rows with filters, ordering, pagination |
-| `GET /api/v1/{table}/:id` | Get row by primary key |
-| `POST /api/v1/{table}` | Insert row |
-| `PATCH /api/v1/{table}/:id` | Update row |
-| `DELETE /api/v1/{table}/:id` | Delete row |
+| `POST /v1/graphql` | Alias for `/graphql` (Hasura compatibility) |
+| `GET {base_path}/{table}` | List rows with filters, ordering, pagination |
+| `GET {base_path}/{table}/:id` | Get row by primary key |
+| `POST {base_path}/{table}` | Insert row |
+| `PATCH {base_path}/{table}/:id` | Update row |
+| `DELETE {base_path}/{table}/:id` | Delete row |
 | `GET /openapi.json` | OpenAPI 3.1 specification |
 | `GET /llm-api.json` | LLM-friendly compact API description |
 | `GET /sdl` | GraphQL SDL with descriptions |
 | `GET /healthz` | Health check |
 | `GET /readyz` | Readiness check |
 | `POST /v1/events/invoke/:trigger` | Manually invoke an event trigger (admin only) |
+| `GET /v1/actions/:id/status` | Check async action status |
+
+`{base_path}` defaults to `/api` (configurable via `rest.base_path`).
 
 ### REST Filtering
 
 Query parameters use PostgREST-style syntax:
 
 ```
-GET /api/v1/users?status=eq.active&created_at=gte.2024-01-01&order=created_at.desc&limit=20
+GET /api/users?status=eq.active&created_at=gte.2024-01-01&order=created_at.desc&limit=20
 ```
 
 | Filter | SQL Equivalent |
@@ -414,6 +457,47 @@ Action handler URLs support `{{ENV_VAR}}` template interpolation — the same sy
 - **Asynchronous** — return immediately, deliver result via webhook later
 - **Request/response transforms** — template-based URL, body, and header rewriting
 - **Action relationships** — map action output fields to database table relationships
+
+## Native Queries
+
+Expose raw SQL as GraphQL query fields using Hasura's logical model / native query format:
+
+```yaml
+# In databases.yaml, inside the database entry
+native_queries:
+  - root_field_name: search_users
+    code: "SELECT id, username, email FROM public.users WHERE username ILIKE '%' || {{search}} || '%'"
+    returns: SearchUserResult
+    arguments:
+      search:
+        type: text
+
+logical_models:
+  - name: SearchUserResult
+    fields:
+      - name: id
+        type: { scalar: integer }
+      - name: username
+        type: { scalar: text }
+      - name: email
+        type: { scalar: text }
+    select_permissions:
+      - role: user
+        permission:
+          columns: [id, username, email]
+          filter: {}
+```
+
+## Introspection Control
+
+Disable GraphQL introspection for specific roles:
+
+```yaml
+# graphql_schema_introspection.yaml
+disabled_for_roles:
+  - anonymous
+  - public
+```
 
 ## CLI
 
