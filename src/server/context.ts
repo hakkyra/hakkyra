@@ -136,6 +136,12 @@ export function buildResolverContext(
       }
       return result;
     },
+    transactionalQueryWithSession: async (
+      queries: Array<{ sql: string; params: unknown[] }>,
+      session: SessionVariables,
+    ) => {
+      return connectionManager.transactionalQueryWithSession(queries, session);
+    },
     permissionLookup: resolverPermissionLookup,
     inheritedRoles: inheritedRolesRef.current,
     tables,
