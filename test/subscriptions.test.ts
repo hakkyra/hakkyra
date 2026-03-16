@@ -437,6 +437,174 @@ describe('Subscriptions', () => {
     });
   });
 
+  describe('aggregate subscriptions', () => {
+    it('returns initial aggregate data on subscribe', async () => {
+      const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+      try {
+        const data = await firstResult<{
+          branchAggregate: { aggregate: { count: number }; nodes: Array<{ id: string; name: string }> };
+        }>(client, `
+          subscription {
+            branchAggregate {
+              aggregate { count }
+              nodes { id name }
+            }
+          }
+        `);
+        expect(data.branchAggregate).toBeDefined();
+        expect(data.branchAggregate.aggregate).toBeDefined();
+        expect(typeof data.branchAggregate.aggregate.count).toBe('number');
+        expect(data.branchAggregate.aggregate.count).toBeGreaterThan(0);
+        expect(Array.isArray(data.branchAggregate.nodes)).toBe(true);
+        expect(data.branchAggregate.nodes.length).toBeGreaterThan(0);
+      } finally {
+        await client.dispose();
+      }
+    });
+
+    it('receives updated aggregate on INSERT', async () => {
+      const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+      const uniqueName = `agg_sub_ins_${Date.now()}`;
+      const uniqueCode = `AI${Date.now()}`;
+
+      try {
+        // Subscribe to aggregate count on all branches
+        const resultPromise = collectResults<{
+          branchAggregate: { aggregate: { count: number }; nodes: Array<{ id: string; name: string }> };
+        }>(
+          client,
+          `subscription {
+            branchAggregate {
+              aggregate { count }
+              nodes { id name }
+            }
+          }`,
+          undefined,
+          2, // initial + after insert
+          15000,
+        );
+
+        await wait(500);
+
+        // Insert a new branch — should trigger aggregate re-query
+        await pool.query(
+          `INSERT INTO branch (id, name, code, active) VALUES (gen_random_uuid(), $1, $2, true)`,
+          [uniqueName, uniqueCode],
+        );
+
+        const results = await resultPromise;
+
+        // First: initial count
+        const initialCount = results[0].branchAggregate.aggregate.count;
+        expect(initialCount).toBeGreaterThan(0);
+
+        // Second: count should have increased by 1 after insert
+        const updatedCount = results[1].branchAggregate.aggregate.count;
+        expect(updatedCount).toBe(initialCount + 1);
+      } finally {
+        await client.dispose();
+        await pool.query(`DELETE FROM branch WHERE name = $1`, [uniqueName]);
+      }
+    });
+
+    it('receives updated aggregate on DELETE', async () => {
+      const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+      const uniqueName = `agg_sub_del_${Date.now()}`;
+      const uniqueCode = `AD${Date.now()}`;
+
+      // Insert test data first
+      await pool.query(
+        `INSERT INTO branch (id, name, code, active) VALUES (gen_random_uuid(), $1, $2, true)`,
+        [uniqueName, uniqueCode],
+      );
+
+      try {
+        const resultPromise = collectResults<{
+          branchAggregate: { aggregate: { count: number } };
+        }>(
+          client,
+          `subscription {
+            branchAggregate {
+              aggregate { count }
+            }
+          }`,
+          undefined,
+          2, // initial + after delete
+          15000,
+        );
+
+        await wait(500);
+
+        // Delete the branch — should trigger aggregate re-query
+        await pool.query(`DELETE FROM branch WHERE name = $1`, [uniqueName]);
+
+        const results = await resultPromise;
+
+        // First: initial count (includes the inserted row)
+        const initialCount = results[0].branchAggregate.aggregate.count;
+        expect(initialCount).toBeGreaterThan(0);
+
+        // Second: count should have decreased by 1 after delete
+        const updatedCount = results[1].branchAggregate.aggregate.count;
+        expect(updatedCount).toBe(initialCount - 1);
+      } finally {
+        await client.dispose();
+        // Cleanup in case the delete failed
+        await pool.query(`DELETE FROM branch WHERE name = $1`, [uniqueName]).catch(() => {});
+      }
+    });
+
+    it('receives updated aggregate on UPDATE with where filter', async () => {
+      const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+      const uniqueName = `agg_sub_upd_${Date.now()}`;
+      const uniqueCode = `AU${Date.now()}`;
+
+      // Insert test data
+      await pool.query(
+        `INSERT INTO branch (id, name, code, active) VALUES (gen_random_uuid(), $1, $2, true)`,
+        [uniqueName, uniqueCode],
+      );
+
+      try {
+        // Subscribe to aggregate count of branches matching the unique name
+        const resultPromise = collectResults<{
+          branchAggregate: { aggregate: { count: number }; nodes: Array<{ name: string }> };
+        }>(
+          client,
+          `subscription {
+            branchAggregate(where: { name: { _eq: "${uniqueName}" } }) {
+              aggregate { count }
+              nodes { name }
+            }
+          }`,
+          undefined,
+          2, // initial + after update (name change moves it out of the filter)
+          15000,
+        );
+
+        await wait(500);
+
+        // Update the branch name so it no longer matches the where filter
+        await pool.query(`UPDATE branch SET name = $1 WHERE name = $2`, [uniqueName + '_changed', uniqueName]);
+
+        const results = await resultPromise;
+
+        // First: initial — should have 1 matching row
+        expect(results[0].branchAggregate.aggregate.count).toBe(1);
+        expect(results[0].branchAggregate.nodes.length).toBe(1);
+        expect(results[0].branchAggregate.nodes[0].name).toBe(uniqueName);
+
+        // Second: after update — the row no longer matches the filter
+        expect(results[1].branchAggregate.aggregate.count).toBe(0);
+        expect(results[1].branchAggregate.nodes).toEqual([]);
+      } finally {
+        await client.dispose();
+        await pool.query(`DELETE FROM branch WHERE name LIKE $1`, [uniqueName + '%']).catch(() => {});
+      }
+    });
+  });
+
   describe('streaming subscriptions', () => {
     it('returns initial data from branchStream', async () => {
       const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
