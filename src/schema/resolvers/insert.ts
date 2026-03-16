@@ -9,7 +9,7 @@ import type {
   BoolExp,
 } from '../../types.js';
 import { compileInsertOne, compileInsert } from '../../sql/insert.js';
-import { toCamelCase } from '../type-builder.js';
+import { toCamelCase, getRelFieldName } from '../type-builder.js';
 import { parseResolveInfo, parseReturningInfo } from '../resolve-info.js';
 import {
   type ResolverContext,
@@ -70,7 +70,7 @@ function extractNestedInserts(
   // Build relationship lookup by camelCase name → rel config
   const relByName = new Map<string, TableInfo['relationships'][number]>();
   for (const rel of table.relationships) {
-    relByName.set(toCamelCase(rel.name), rel);
+    relByName.set(getRelFieldName(rel), rel);
   }
 
   for (const [key, value] of Object.entries(obj)) {
@@ -159,7 +159,7 @@ function hasNestedData(
   table: TableInfo,
 ): boolean {
   for (const rel of table.relationships) {
-    const key = toCamelCase(rel.name);
+    const key = getRelFieldName(rel);
     if (key in obj && obj[key] != null) return true;
   }
   return false;

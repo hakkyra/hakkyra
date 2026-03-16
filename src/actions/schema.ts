@@ -43,7 +43,7 @@ import { checkActionPermission } from './permissions.js';
 import { executeAction } from './proxy.js';
 import { enqueueAsyncAction, getAsyncActionResult } from './async.js';
 import { compileSelect } from '../sql/select.js';
-import { toCamelCase } from '../shared/naming.js';
+import { toCamelCase, getRelFieldName } from '../shared/naming.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -283,13 +283,13 @@ function buildRelationshipFields(
     }
 
     if (rel.type === 'object') {
-      fields[toCamelCase(rel.name)] = {
+      fields[getRelFieldName(rel)] = {
         type: remoteType,
         resolve: makeActionRelationshipResolver(rel, remoteTable),
       };
     } else {
       // array relationship
-      fields[toCamelCase(rel.name)] = {
+      fields[getRelFieldName(rel)] = {
         type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(remoteType))),
         resolve: makeActionRelationshipResolver(rel, remoteTable),
       };

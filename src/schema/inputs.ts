@@ -35,7 +35,7 @@ import type {
 import type { TableInfo, ColumnInfo, RelationshipConfig, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
-import { toCamelCase, getTypeName, getColumnFieldName, tableKey } from './type-builder.js';
+import { toCamelCase, getTypeName, getColumnFieldName, tableKey, getRelFieldName } from './type-builder.js';
 
 // ─── CursorOrdering Enum ────────────────────────────────────────────────────
 
@@ -408,7 +408,7 @@ export function buildMutationInputTypes(
           const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
           const relInsertInput = insertInputTypes.get(relKey);
           if (relInsertInput) {
-            const relFieldName = toCamelCase(rel.name);
+            const relFieldName = getRelFieldName(rel);
             if (rel.type === 'object') {
               // Object relationship: single nested object
               fields[relFieldName] = {
@@ -539,7 +539,7 @@ export function buildMutationInputTypes(
             const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
             const relOrderBy = orderByTypes.get(relKey);
             if (relOrderBy) {
-              fields[toCamelCase(rel.name)] = {
+              fields[getRelFieldName(rel)] = {
                 type: relOrderBy,
                 description: `Order by ${rel.name} relationship fields.`,
               };
@@ -554,7 +554,7 @@ export function buildMutationInputTypes(
             const aggOrderByKey = `${relKey}.__aggregateOrderBy`;
             const aggOrderBy = orderByTypes.get(aggOrderByKey);
             if (aggOrderBy) {
-              fields[`${toCamelCase(rel.name)}Aggregate`] = {
+              fields[`${getRelFieldName(rel)}Aggregate`] = {
                 type: aggOrderBy,
                 description: `Order by aggregated values of the ${rel.name} array relationship.`,
               };

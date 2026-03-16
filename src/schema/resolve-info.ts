@@ -25,7 +25,7 @@ import type {
 } from '../types.js';
 import type { RelationshipSelection, OrderByItem } from '../sql/select.js';
 import type { ResolverPermissionLookup } from './resolvers/index.js';
-import { toCamelCase, getColumnFieldName } from './type-builder.js';
+import { toCamelCase, getColumnFieldName, getRelFieldName } from './type-builder.js';
 
 // ─── Public Interface ────────────────────────────────────────────────────────
 
@@ -117,7 +117,7 @@ function camelToColumnMap(table: TableInfo): Map<string, string> {
 function relationshipMap(table: TableInfo): Map<string, TableInfo['relationships'][number]> {
   const map = new Map<string, TableInfo['relationships'][number]>();
   for (const rel of table.relationships) {
-    map.set(toCamelCase(rel.name), rel);
+    map.set(getRelFieldName(rel), rel);
   }
   return map;
 }
@@ -460,7 +460,7 @@ function parseSelectionSet(
   const aggRelMap = new Map<string, TableInfo['relationships'][number]>();
   for (const rel of table.relationships) {
     if (rel.type === 'array') {
-      aggRelMap.set(`${toCamelCase(rel.name)}Aggregate`, rel);
+      aggRelMap.set(`${getRelFieldName(rel)}Aggregate`, rel);
     }
   }
 
@@ -660,7 +660,7 @@ function parseSelectionSet(
         // Build the RelationshipSelection
         const relSelection: RelationshipSelection = {
           relationship: rel,
-          fieldName: toCamelCase(rel.name),
+          fieldName: getRelFieldName(rel),
           remoteTable,
           columns: subSelection.columns,
           relationships: subSelection.relationships.length > 0

@@ -28,6 +28,7 @@ export const RelationshipConfigSchema = z.object({
   remoteColumns: z.array(z.string()).optional(),
   columnMapping: z.record(z.string(), z.string()).optional(),
   insertionOrder: InsertionOrderSchema.optional(),
+  fromMetadata: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------

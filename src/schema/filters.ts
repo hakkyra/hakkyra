@@ -21,7 +21,7 @@ import type { GraphQLInputType } from 'graphql';
 import type { TableInfo, ColumnInfo, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
-import { getTypeName, toCamelCase, getColumnFieldName, tableKey, type TypeRegistry } from './type-builder.js';
+import { getTypeName, toCamelCase, getColumnFieldName, tableKey, getRelFieldName, type TypeRegistry } from './type-builder.js';
 
 // ─── Scalar Comparison Input Types ──────────────────────────────────────────
 
@@ -406,14 +406,14 @@ export function buildFilterTypes(
           const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
           const relBoolExp = filterTypes.get(relKey);
           if (relBoolExp) {
-            fields[toCamelCase(rel.name)] = { type: relBoolExp };
+            fields[getRelFieldName(rel)] = { type: relBoolExp };
           }
 
           // Aggregate filter for array relationships
           if (rel.type === 'array') {
             const aggBoolExp = aggregateBoolExpTypes.get(relKey);
             if (aggBoolExp) {
-              fields[`${toCamelCase(rel.name)}Aggregate`] = { type: aggBoolExp };
+              fields[`${getRelFieldName(rel)}Aggregate`] = { type: aggBoolExp };
             }
           }
         }

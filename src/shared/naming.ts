@@ -25,3 +25,12 @@ export function toCamelCase(str: string): string {
   const parts = str.split('_');
   return parts[0] + parts.slice(1).map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('');
 }
+
+/**
+ * Get the GraphQL field name for a relationship.
+ * Metadata-defined relationships use their name as-is (Hasura behavior).
+ * Auto-detected relationships (from FK inference) get camelCase conversion.
+ */
+export function getRelFieldName(rel: { name: string; fromMetadata?: boolean }): string {
+  return rel.fromMetadata ? rel.name : toCamelCase(rel.name);
+}

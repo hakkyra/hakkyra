@@ -19,7 +19,7 @@ import type { QueryCache } from '../../sql/cache.js';
 import type { SubscriptionManager } from '../../subscriptions/manager.js';
 import type { JobQueue } from '../../shared/job-queue/types.js';
 import type { OrderByItem, AggregateSelection, AggregateComputedFieldRef, AggregateRelationshipSelection, ComputedFieldSelection, SetReturningComputedFieldSelection } from '../../sql/select.js';
-import { toCamelCase, getColumnFieldName } from '../type-builder.js';
+import { toCamelCase, getColumnFieldName, getRelFieldName } from '../type-builder.js';
 import type { SetReturningComputedFieldParsed, AggregateRelationshipParsed } from '../resolve-info.js';
 
 // ─── Resolver Context ───────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ export function remapBoolExp(
   if (table && allTables) {
     for (const rel of table.relationships) {
       if (rel.type === 'array') {
-        aggRelMap.set(`${toCamelCase(rel.name)}Aggregate`, rel);
+        aggRelMap.set(`${getRelFieldName(rel)}Aggregate`, rel);
       }
     }
   }
@@ -225,7 +225,7 @@ export function remapBoolExp(
   const relMap = new Map<string, TableInfo['relationships'][number]>();
   if (table) {
     for (const rel of table.relationships) {
-      relMap.set(toCamelCase(rel.name), rel);
+      relMap.set(getRelFieldName(rel), rel);
     }
   }
 
