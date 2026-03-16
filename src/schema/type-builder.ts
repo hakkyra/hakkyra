@@ -208,9 +208,20 @@ export function buildObjectType(
         }
 
         if (rel.type === 'object') {
-          // Object relationship — nullable single related object
+          // Object relationship — non-null when all local FK columns are NOT NULL
+          // (matching Hasura behavior: if the FK column is required, the related
+          // object is guaranteed to exist)
+          const localCols = rel.localColumns ?? [];
+          const allFkColumnsRequired = localCols.length > 0 && localCols.every((colName) => {
+            const col = table.columns.find((c) => c.name === colName);
+            return col != null && !col.isNullable;
+          });
+          const objectRelType: GraphQLOutputType = allFkColumnsRequired
+            ? new GraphQLNonNull(relatedType)
+            : relatedType;
+
           fields[getRelFieldName(rel)] = {
-            type: relatedType,
+            type: objectRelType,
             description: `Object relationship to ${rel.remoteTable.name}`,
             extensions: {
               isRelationship: true,
