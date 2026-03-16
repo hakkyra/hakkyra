@@ -151,6 +151,8 @@ function getComparisonType(scalarName: string): GraphQLInputObjectType {
 
 /**
  * Get the comparison input type for an enum type.
+ * Uses orderedComparisonFields because PostgreSQL enums have a natural
+ * ordering based on their declaration order, supporting >, >=, <, <=.
  */
 function getEnumComparisonType(
   enumType: GraphQLEnumType,
@@ -162,7 +164,7 @@ function getEnumComparisonType(
   const compType = new GraphQLInputObjectType({
     name,
     description: `Comparison operators for the ${enumType.name} enum.`,
-    fields: baseComparisonFields(enumType),
+    fields: orderedComparisonFields(enumType),
   });
 
   comparisonTypeCache.set(name, compType);
