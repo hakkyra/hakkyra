@@ -85,6 +85,7 @@ export interface TableInfo {
   comment?: string;
   columns: ColumnInfo[];
   primaryKey: string[];
+  primaryKeyConstraintName?: string;
   foreignKeys: ForeignKeyInfo[];
   uniqueConstraints: UniqueConstraintInfo[];
   indexes: IndexInfo[];

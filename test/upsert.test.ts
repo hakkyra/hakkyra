@@ -440,8 +440,13 @@ describe('GraphQL Schema — OnConflict types', () => {
     expect(constraintEnum).toBeDefined();
     const values = constraintEnum!.getValues();
     const valueNames = values.map((v) => v.name);
-    // Should have the PK constraint
-    expect(valueNames.some((n) => n.includes('pkey'))).toBe(true);
+    // Should have the PK constraint (camelCased)
+    expect(valueNames.some((n) => n.includes('Pkey'))).toBe(true);
+    // Each enum value's internal value should be the raw PG constraint name
+    for (const v of values) {
+      expect(typeof v.value).toBe('string');
+      expect(v.value).toMatch(/_/); // raw PG names have underscores
+    }
   });
 
   it('should generate UpdateColumn enum with all columns', () => {
@@ -480,7 +485,11 @@ describe('GraphQL Schema — OnConflict types', () => {
     expect(constraintEnum).toBeDefined();
     const values = constraintEnum!.getValues();
     const valueNames = values.map((v) => v.name);
-    expect(valueNames).toContain('currency_pkey');
+    // Constraint enum values are camelCased from PG constraint names
+    expect(valueNames).toContain('currencyPkey');
+    // Internal value should be the raw PG constraint name
+    const pkValue = values.find((v) => v.name === 'currencyPkey');
+    expect(pkValue?.value).toBe('currency_pkey');
   });
 
   it('should generate Constraint enum with unique constraints for branch table', () => {
@@ -489,8 +498,10 @@ describe('GraphQL Schema — OnConflict types', () => {
     expect(constraintEnum).toBeDefined();
     const values = constraintEnum!.getValues();
     const valueNames = values.map((v) => v.name);
-    // Should have PK + name unique + code unique
-    expect(valueNames.some((n) => n.includes('pkey'))).toBe(true);
+    // Should have PK (camelCased) + unique constraints
+    expect(valueNames.some((n) => n.includes('Pkey'))).toBe(true);
+    // Should have more than just the PK (name and/or code unique constraints)
+    expect(values.length).toBeGreaterThanOrEqual(2);
   });
 
   it('where field on OnConflict should be the table BoolExp type', () => {

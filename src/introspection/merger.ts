@@ -275,6 +275,7 @@ export function mergeSchemaModel(
       comment: introspected.comment,
       columns,
       primaryKey: introspected.primaryKey,
+      primaryKeyConstraintName: introspected.primaryKeyConstraintName,
       foreignKeys: introspected.foreignKeys,
       uniqueConstraints: introspected.uniqueConstraints,
       indexes: introspected.indexes,

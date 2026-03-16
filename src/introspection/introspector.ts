@@ -34,6 +34,7 @@ export interface IntrospectedTable {
   comment?: string;
   columns: ColumnInfo[];
   primaryKey: string[];
+  primaryKeyConstraintName?: string;
   foreignKeys: ForeignKeyInfo[];
   uniqueConstraints: UniqueConstraintInfo[];
   indexes: IndexInfo[];
@@ -193,7 +194,8 @@ export async function introspectDatabase(
   // Assemble tables
   const tables: IntrospectedTable[] = tablesResult.rows.map((row) => {
     const key = tableKey(row.table_schema, row.table_name);
-    const pkColumns = primaryKeyMap.get(key) ?? [];
+    const pkResult = primaryKeyMap.get(key);
+    const pkColumns = pkResult?.columns ?? [];
     const columns = columnMap.get(key) ?? [];
 
     // Mark primary key columns
@@ -209,6 +211,7 @@ export async function introspectDatabase(
       comment: row.comment ?? undefined,
       columns,
       primaryKey: pkColumns,
+      primaryKeyConstraintName: pkResult?.constraintName,
       foreignKeys: foreignKeyMap.get(key) ?? [],
       uniqueConstraints: uniqueConstraintMap.get(key) ?? [],
       indexes: indexMap.get(key) ?? [],
@@ -261,15 +264,20 @@ function parseColumns(
   return map;
 }
 
-function parsePrimaryKeys(rows: PrimaryKeyRow[]): Map<string, string[]> {
-  const map = new Map<string, string[]>();
+interface PrimaryKeyResult {
+  columns: string[];
+  constraintName?: string;
+}
+
+function parsePrimaryKeys(rows: PrimaryKeyRow[]): Map<string, PrimaryKeyResult> {
+  const map = new Map<string, PrimaryKeyResult>();
 
   for (const row of rows) {
     const key = tableKey(row.table_schema, row.table_name);
     if (!map.has(key)) {
-      map.set(key, []);
+      map.set(key, { columns: [], constraintName: row.constraint_name });
     }
-    map.get(key)!.push(row.column_name);
+    map.get(key)!.columns.push(row.column_name);
   }
 
   return map;
