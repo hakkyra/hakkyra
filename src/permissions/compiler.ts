@@ -17,6 +17,8 @@ import type {
   RelationshipConfig,
   SessionVariables,
 } from '../types.js';
+import { quoteIdentifier as quoteIdent } from '../sql/utils.js';
+import { resolveSessionValue } from '../shared/session-resolution.js';
 
 // ─── SQL operator mapping ──────────────────────────────────────────────────
 
@@ -90,29 +92,22 @@ function isSessionVariable(value: unknown): value is string {
 /**
  * Resolve a value: if it is a session variable reference, look it up in the session claims.
  * Otherwise return the value as-is.
+ *
+ * Delegates core lookup to resolveSessionValue, then applies permission-specific
+ * post-processing: null fallback for missing claims, single-element array unwrap.
  */
 function resolveValue(value: unknown, session: SessionVariables): unknown {
-  if (isSessionVariable(value)) {
-    const key = (value as string).toLowerCase();
-    const resolved = session.claims[key];
-    if (resolved === undefined) {
-      return null;
-    }
-    // If the claim is an array but a single value is expected, return the first element.
-    if (Array.isArray(resolved) && resolved.length === 1) {
-      return resolved[0];
-    }
-    return resolved;
-  }
-  return value;
-}
+  if (!isSessionVariable(value)) return value;
 
-/**
- * Quote an identifier (table name, column name) to prevent SQL injection.
- * Double-quotes are escaped by doubling them.
- */
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
+  const resolved = resolveSessionValue(value, session);
+  if (resolved === undefined) {
+    return null;
+  }
+  // If the claim is an array but a single value is expected, return the first element.
+  if (Array.isArray(resolved) && resolved.length === 1) {
+    return resolved[0];
+  }
+  return resolved;
 }
 
 /**

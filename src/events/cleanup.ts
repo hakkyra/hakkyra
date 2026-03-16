@@ -8,19 +8,13 @@
 import type { Pool } from 'pg';
 import type { Logger } from 'pino';
 import type { JobQueue } from '../shared/job-queue/types.js';
+import { quoteIdentifier as quoteIdent } from '../sql/utils.js';
 
 export interface EventCleanupOptions {
   /** Cron schedule for the cleanup job (default: '0 3 * * *'). */
   schedule?: string;
   /** Internal schema name (default: 'hakkyra'). */
   schemaName?: string;
-}
-
-/**
- * Double-quote a SQL identifier to prevent injection.
- */
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /**

@@ -20,7 +20,7 @@ import type {
 import { ParamCollector, quoteIdentifier, quoteTableRef } from './utils.js';
 import { compileWhere } from './where.js';
 import { shouldCastToText } from '../introspection/type-map.js';
-import { toCamelCase } from '../schema/type-builder.js';
+import { toCamelCase } from '../shared/naming.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

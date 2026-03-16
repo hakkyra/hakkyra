@@ -43,7 +43,7 @@ import { checkActionPermission } from './permissions.js';
 import { executeAction } from './proxy.js';
 import { enqueueAsyncAction, getAsyncActionResult } from './async.js';
 import { compileSelect } from '../sql/select.js';
-import { toCamelCase } from '../schema/type-builder.js';
+import { toCamelCase } from '../shared/naming.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 

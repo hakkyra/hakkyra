@@ -31,6 +31,10 @@ import type { TableInfo, ColumnInfo, FunctionInfo, ComputedFieldConfig } from '.
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
 import { pgArgTypeToGraphQL } from './tracked-functions.js';
+import { toCamelCase, toPascalCase } from '../shared/naming.js';
+
+// Re-export naming utilities so existing consumers don't break
+export { toCamelCase, toPascalCase } from '../shared/naming.js';
 
 // ─── Type Registry ───────────────────────────────────────────────────────────
 
@@ -40,28 +44,6 @@ import { pgArgTypeToGraphQL } from './tracked-functions.js';
  * types for relationships and avoids duplicates.
  */
 export type TypeRegistry = Map<string, GraphQLObjectType>;
-
-// ─── Naming Utilities ────────────────────────────────────────────────────────
-
-/**
- * Convert a snake_case or plain string to PascalCase.
- * "user_accounts" → "UserAccounts", "users" → "Users"
- */
-export function toPascalCase(str: string): string {
-  return str
-    .split('_')
-    .map((seg) => seg.charAt(0).toUpperCase() + seg.slice(1))
-    .join('');
-}
-
-/**
- * Convert a snake_case string to camelCase.
- * "created_at" → "createdAt", "user_id" → "userId"
- */
-export function toCamelCase(str: string): string {
-  const parts = str.split('_');
-  return parts[0] + parts.slice(1).map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('');
-}
 
 /**
  * Derive the GraphQL type name for a table.

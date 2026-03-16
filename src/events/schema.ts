@@ -6,6 +6,7 @@
  */
 
 import type { Pool } from 'pg';
+import { quoteIdentifier as quoteIdent } from '../sql/utils.js';
 
 /**
  * SQL to create the internal schema.
@@ -48,13 +49,6 @@ DO $$ BEGIN
   END IF;
 END $$
 `;
-}
-
-/**
- * Double-quote a SQL identifier to prevent injection.
- */
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /**
