@@ -136,3 +136,34 @@ type AcceptContractResult {
   walletId: Uuid!
   accepted: Boolean!
 }
+
+# ── Action: contentEvent (scalar type parity: enum, _text, Bigint, Jsonb, etc.) ─
+scalar _text
+
+enum ContentCategory {
+  NEWS
+  BLOG
+  EVENT
+  ANNOUNCEMENT
+}
+
+extend type Mutation {
+  contentEvent(input: ContentEventInput!): ContentEventResult
+}
+
+input ContentEventInput {
+  playerId: Bigint!
+  parameters: Jsonb
+  tags: _text
+  category: ContentCategory!
+  occurredAt: Timestamptz
+  amount: Numeric
+}
+
+type ContentEventResult {
+  eventId: Uuid!
+  category: ContentCategory!
+  processedTags: _text
+  metadata: Jsonb
+  success: Boolean!
+}
