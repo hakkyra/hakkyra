@@ -192,6 +192,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       orderByTypes,
       functions,
       aggregateTypesByTable,
+      selectColumnEnums,
     );
     typeRegistry.set(key, objectType);
   }
@@ -320,9 +321,9 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       };
       aggArgs['limit'] = { type: GraphQLInt };
       aggArgs['offset'] = { type: GraphQLInt };
-      aggArgs['groupBy'] = {
+      aggArgs['distinctOn'] = {
         type: new GraphQLList(new GraphQLNonNull(mutInputs.selectColumnEnum)),
-        description: 'Group results by columns. When used, populates the groupedAggregates field.',
+        description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
       };
 
       queryFields[names.selectAggregate] = {
@@ -524,6 +525,10 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     // subscribe to select (list)
     if (isOpEnabled(table, 'select')) {
       const subSelectArgs: GraphQLFieldConfigArgumentMap = {};
+      subSelectArgs['distinctOn'] = {
+        type: new GraphQLList(new GraphQLNonNull(mutInputs.selectColumnEnum)),
+        description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
+      };
       if (filterType) {
         subSelectArgs['where'] = { type: filterType };
       }
@@ -575,6 +580,10 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     };
     subAggArgs['limit'] = { type: GraphQLInt };
     subAggArgs['offset'] = { type: GraphQLInt };
+    subAggArgs['distinctOn'] = {
+      type: new GraphQLList(new GraphQLNonNull(mutInputs.selectColumnEnum)),
+      description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
+    };
 
     subscriptionFields[names.selectAggregate] = {
       type: new GraphQLNonNull(mutInputs.selectAggregateFields),

@@ -11,7 +11,7 @@ import type {
 import type { AggregateSelection, AggregateComputedFieldRef } from '../../sql/select.js';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../../sql/select.js';
 import { toCamelCase } from '../type-builder.js';
-import { parseResolveInfo, parseAggregateNodesInfo } from '../resolve-info.js';
+import { parseResolveInfo, parseAggregateNodesInfo, parseAggregateCountArgs } from '../resolve-info.js';
 import {
   type ResolverContext,
   permissionDenied,
@@ -268,20 +268,28 @@ export function makeSelectAggregateResolver(
     );
     const limit = resolveLimit(args.limit as number | undefined, perm?.limit, context.graphqlMaxLimit);
 
-    // Extract groupBy — enum values resolve to PG column names directly
-    const rawGroupBy = args.groupBy as string[] | undefined;
-    let groupBy: string[] | undefined;
-    if (rawGroupBy && rawGroupBy.length > 0) {
-      // Filter groupBy columns against permitted columns
+    // Extract distinctOn — enum values resolve to PG column names directly
+    const rawDistinctOn = args.distinctOn as string[] | undefined;
+    let distinctOn: string[] | undefined;
+    if (rawDistinctOn && rawDistinctOn.length > 0) {
+      // Filter distinctOn columns against permitted columns
       const allowedColumns = perm?.columns === '*'
         ? table.columns.map((c) => c.name)
         : (perm?.columns ?? table.columns.map((c) => c.name));
-      groupBy = rawGroupBy.filter((col) => allowedColumns.includes(col));
-      if (groupBy.length === 0) groupBy = undefined;
+      distinctOn = rawDistinctOn.filter((col) => allowedColumns.includes(col));
+      if (distinctOn.length === 0) distinctOn = undefined;
     }
 
+    // Extract count field arguments (columns, distinct) from the resolve info
+    const countArgs = parseAggregateCountArgs(info);
+
     // Build aggregate selection — request count + sum/avg/min/max for numeric columns
-    const aggregate: AggregateSelection = { count: {} };
+    const aggregate: AggregateSelection = {
+      count: {
+        columns: countArgs.columns,
+        distinct: countArgs.distinct,
+      },
+    };
 
     // Build computed field refs for aggregation
     const numericCFRefs: AggregateComputedFieldRef[] = [];
@@ -299,8 +307,8 @@ export function makeSelectAggregateResolver(
       }
     }
 
-    // When groupBy is present, also request sum/avg/stddev/variance for numeric columns
-    if (groupBy) {
+    // When distinctOn is present, also request sum/avg/stddev/variance for numeric columns
+    if (distinctOn) {
       const numericCols = table.columns
         .filter((c) => isNumericColumn(c))
         .map((c) => c.name);
@@ -334,13 +342,13 @@ export function makeSelectAggregateResolver(
       };
     }
 
-    if (groupBy) {
-      // Grouped aggregate path
+    if (distinctOn) {
+      // Grouped aggregate path (using distinctOn as groupBy)
       const compiled = compileSelectAggregate({
         table,
         where,
         aggregate,
-        groupBy,
+        groupBy: distinctOn,
         permission: perm ? {
           filter: perm.filter,
           columns: perm.columns,

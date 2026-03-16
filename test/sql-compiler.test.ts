@@ -444,6 +444,48 @@ describe('SQL SELECT Aggregate', () => {
     const agg = result.rows[0].aggregate;
     expect(agg.count).toBe(3); // alice, bob, diana are active
   });
+
+  it('should compile count with columns argument', async () => {
+    const pool = getPool();
+    const table = findTable('client');
+    const query = compileSelectAggregate({
+      table,
+      aggregate: { count: { columns: ['status'] } },
+      session: adminSession,
+    });
+    const result = await pool.query(query.sql, query.params);
+    const agg = result.rows[0].aggregate;
+    // count(status) counts non-null values — all 4 clients have a status
+    expect(agg.count).toBe(4);
+  });
+
+  it('should compile count with distinct argument', async () => {
+    const pool = getPool();
+    const table = findTable('client');
+    const query = compileSelectAggregate({
+      table,
+      aggregate: { count: { columns: ['status'], distinct: true } },
+      session: adminSession,
+    });
+    const result = await pool.query(query.sql, query.params);
+    const agg = result.rows[0].aggregate;
+    // count(DISTINCT status) — 'active' (3 clients) + 'suspended' (1 client) = 2 distinct
+    expect(agg.count).toBe(2);
+  });
+
+  it('should compile count with distinct but no columns (falls back to count(*))', async () => {
+    const pool = getPool();
+    const table = findTable('client');
+    const query = compileSelectAggregate({
+      table,
+      aggregate: { count: { distinct: true } },
+      session: adminSession,
+    });
+    const result = await pool.query(query.sql, query.params);
+    const agg = result.rows[0].aggregate;
+    // Without columns, distinct is ignored and count(*) is used
+    expect(agg.count).toBe(4);
+  });
 });
 
 describe('SQL INSERT Compiler', () => {

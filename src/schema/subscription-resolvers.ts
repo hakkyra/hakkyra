@@ -22,7 +22,7 @@ import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../sql
 import { toCamelCase, getColumnFieldName } from './type-builder.js';
 import type { ResolverContext } from './resolvers/index.js';
 import { isSubscriptionRootFieldAllowed, isNumericColumn, buildComputedFieldSelections, buildSetReturningComputedFieldSelections, resolveLimit, camelToColumnAndCFMap, remapBoolExp as remapBoolExpFull, remapOrderBy as remapOrderByFull, getAllowedColumns as getAllowedColumnsFull, remapRowsToCamel as remapRowsToCamelFull } from './resolvers/index.js';
-import { parseResolveInfo, parseAggregateNodesInfo, type ParsedSelection, type SetReturningComputedFieldParsed } from './resolve-info.js';
+import { parseResolveInfo, parseAggregateNodesInfo, parseAggregateCountArgs, type ParsedSelection, type SetReturningComputedFieldParsed } from './resolve-info.js';
 
 // ─── Async Queue (push-to-pull adapter) ─────────────────────────────────────
 
@@ -331,11 +331,23 @@ export function makeSubscriptionSelectSubscribe(
     const orderBy = remapOrderBy(args.orderBy as Array<Record<string, string>> | undefined, columnMap);
     const limit = resolveLimit(args.limit as number | undefined, perm?.limit, context.graphqlMaxLimit);
 
+    // Extract distinctOn — enum values resolve to PG column names directly
+    const rawDistinctOn = args.distinctOn as string[] | undefined;
+    let distinctOn: string[] | undefined;
+    if (rawDistinctOn && rawDistinctOn.length > 0) {
+      const allowedColumns = perm?.columns === '*'
+        ? table.columns.map((c) => c.name)
+        : (perm?.columns ?? table.columns.map((c) => c.name));
+      distinctOn = rawDistinctOn.filter((col) => allowedColumns.includes(col));
+      if (distinctOn.length === 0) distinctOn = undefined;
+    }
+
     const compiled = compileSelect({
       table,
       columns,
       where,
       orderBy,
+      distinctOn,
       limit,
       offset: args.offset as number | undefined,
       relationships: parsed.relationships,
@@ -571,8 +583,16 @@ export function makeSubscriptionSelectAggregateSubscribe(
     );
     const limit = resolveLimit(args.limit as number | undefined, perm?.limit, context.graphqlMaxLimit);
 
+    // Extract count field arguments (columns, distinct) from the resolve info
+    const countArgs = parseAggregateCountArgs(info);
+
     // Build aggregate selection — request count + sum/avg/min/max for numeric columns
-    const aggregate: AggregateSelection = { count: {} };
+    const aggregate: AggregateSelection = {
+      count: {
+        columns: countArgs.columns,
+        distinct: countArgs.distinct,
+      },
+    };
 
     // Build computed field refs for aggregation
     const numericCFRefs: AggregateComputedFieldRef[] = [];
