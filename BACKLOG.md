@@ -1027,6 +1027,136 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 ---
 
+## Phase 9: API Parity (Hakkyra vs Hasura Live Comparison)
+
+Schema introspection comparison of Hakkyra (localhost:8081) vs Hasura (localhost:8080) against the same neofix database. Hakkyra has 2637 object types vs Hasura's 1805. The extra types come from Hakkyra auto-tracking all DB tables instead of only metadata-configured ones.
+
+### P9.1 — Only Expose Metadata-Tracked Tables (Critical) ✅
+
+Hakkyra exposes ALL introspected database tables as GraphQL types with full CRUD, not just tables listed in Hasura metadata. This creates 872 extra types, 63 extra queries, and 212 extra mutations that shouldn't exist.
+
+**Root cause**: `src/introspection/merger.ts` iterates ALL introspected tables and creates `TableInfo` for each. `src/schema/generator.ts` builds types and root fields for everything in `SchemaModel.tables`.
+
+- [x] Merger: only include tables that have a matching entry in metadata YAML config (skip untracked tables)
+- [x] Generator: verify that only tracked tables produce object types and root fields
+- [x] Keep introspection of all tables for FK/relationship resolution, but mark untracked tables as non-exposed
+- [x] Test: tables not in metadata YAML are invisible in the schema
+
+### P9.2 — Preserve Original Relationship Names from Metadata (Critical) ✅
+
+Hakkyra always `toCamelCase()`s relationship names from metadata. Hasura uses the exact `name` field from the YAML. 13 relationships have snake_case names in metadata that Hakkyra incorrectly converts:
+
+| Type | Hasura (YAML `name`) | Hakkyra (converted) |
+|------|---------------------|-------------------|
+| Authentication | `player_authentication` | `playerAuthentication` |
+| BigWin | `game_integration` | `gameIntegration` |
+| Country | `payment_provider_countries` | `paymentProviderCountries` |
+| CurrentCampaign | `campaign_player` | `campaignPlayer` |
+| CurrentCampaignContent | `campaign_player` | `campaignPlayer` |
+| Document | `document_source` | `documentSource` |
+| Document | `document_status` | `documentStatus` |
+| Document | `document_type` | `documentType` |
+| GameIntegrationCurrency | `game_integration` | `gameIntegration` |
+| PaymentProviderCountry | `payment_provider` | `paymentProvider` |
+| PaymentProviderCurrency | `payment_provider` | `paymentProvider` |
+| PlayerEventRemoved | `player_event` | `playerEvent` |
+| Reward | `player_rewards` | `playerRewards` |
+
+**Root cause**: `src/schema/type-builder.ts:211,245` wraps `rel.name` with `toCamelCase()`.
+
+- [x] Use `rel.name` as-is for the GraphQL field name (Hasura uses the exact YAML name, no conversion)
+- [x] Only apply camelCase to auto-detected relationships (from FK inference), not metadata-defined ones
+- [x] Update tests that assert camelCase relationship names
+- [x] Update `src/schema/resolve-info.ts` to handle snake_case field → snake_case DB mapping
+
+### P9.3 — Enum Table Queryability (High) ✅
+
+Hakkyra's `is_enum: true` handling (P5.13) excludes enum tables from the schema entirely. Hasura keeps multi-column enum tables as queryable types while also using their PK values as enum scalars. 4 tables affected:
+
+- `authentication_method` (1 column: `value`) — Hasura exposes as queryable + enum
+- `campaign_event_type` (2 columns: `id`, `description`) — queryable + enum
+- `campaign_player_state_type` (2 columns: `id`, `description`) — queryable + enum
+- `campaign_state` (2 columns: `id`, `description`) — queryable + enum
+
+This causes 20 missing queries, 28 missing mutations (full CRUD for these 4 tables).
+
+- [x] Change `is_enum` handling: expose enum tables as queryable GraphQL types (with select permissions), in addition to generating enum scalar types from their PK values
+- [x] Generate full CRUD for enum tables (same as regular tracked tables)
+- [x] Update P5.13 tests to verify enum tables are both queryable and produce enum scalars
+
+### P9.4 — Subscription Aggregate Fields (Medium) ✅
+
+Hakkyra subscriptions only expose `select`, `selectByPk`, and `selectStream`. Hasura also exposes `selectAggregate` subscriptions for every table (157 missing subscription fields).
+
+- [x] Register `{names.selectAggregate}` in `subscriptionFields` in `src/schema/generator.ts`, mirroring the query aggregate field
+- [x] Wire subscription-aggregate resolver (re-query on change, same as select subscription but with aggregate SQL)
+- [x] Test: subscription to aggregate field receives updates on INSERT/UPDATE/DELETE
+
+### P9.5 — Table-Level `custom_name` Type Naming (Medium) ✅
+
+When a table has `custom_name` in metadata (e.g., `game_session` → `custom_name: gameSession`), Hasura uses the exact custom name as the GraphQL type name (`gameSession`, lowercase start). Hakkyra PascalCases it to `GameSession`.
+
+- [x] When `custom_name` is set on a table, use it verbatim as the GraphQL type name (no PascalCase conversion)
+- [x] Apply the same verbatim rule to root field names derived from `custom_name`
+- [x] Test: `custom_name: gameSession` produces type `gameSession`, not `GameSession`
+
+### P9.6 — Async Action Result Query Naming (Low) ✅
+
+Hakkyra names async action result queries with a `Result` suffix (`generateTestDataResult`, `updateGamesResult`). Hasura uses the action name directly (`generateTestData`, `updateGames`).
+
+- [x] Remove the `Result` suffix from async action result query root fields
+- [x] Use the action name as-is for the result query field name
+
+### P9.7 — Tracked Function Aggregate Variants for Non-SETOF Functions (Low)
+
+Hasura generates `{function}Aggregate` query variants for all tracked functions including those returning single JSON objects. 6 missing aggregate queries. Low priority since these return `JsonResult` (opaque JSON) where aggregation is meaningless.
+
+- [ ] Generate aggregate query fields for all tracked SETOF functions (verify coverage)
+- [ ] Consider generating aggregate stubs for non-SETOF functions for schema parity
+
+### P9.8 — Global CRUD Operation Controls ✅
+
+Configurable global defaults for which CRUD operations are exposed, with per-table overrides in metadata YAML. Key distinction: PK-based operations (`updateByPk`, `deleteByPk`) are safe single-row mutations, while non-PK operations (`update`, `delete`, `updateMany`) can affect many rows via WHERE filters — these should be independently controllable.
+
+**Config** (`hakkyra.yaml`):
+
+```yaml
+schema:
+  default_operations:
+    # Reads
+    select: true
+    select_by_pk: true
+    select_aggregate: true
+    # Single-row mutations (by PK)
+    insert_one: true
+    update_by_pk: true
+    delete_by_pk: true
+    # Bulk/non-PK mutations (WHERE-based, can affect many rows)
+    insert: true
+    update: false          # e.g., disable non-PK bulk update globally
+    update_many: false     # disable updateMany globally
+    delete: false          # disable non-PK bulk delete globally
+```
+
+Per-table override in table YAML metadata:
+
+```yaml
+configuration:
+  operations:
+    delete: true          # re-enable non-PK delete for this specific table
+    update: true          # re-enable non-PK update for this specific table
+```
+
+- [x] Add `schema.default_operations` to `hakkyra.yaml` Zod schema (all default `true` for backwards compat)
+- [x] Add `configuration.operations` to table YAML Zod schema (optional per-table overrides)
+- [x] Schema generator: merge global defaults + per-table overrides, check before registering each root field
+- [x] Non-PK mutations (`update`, `delete`, `updateMany`) independently controllable from PK-based ones
+- [x] Test: globally disabled non-PK delete hides `deleteCountry` but keeps `deleteCountryByPk`
+- [x] Test: per-table override re-enables globally disabled operations
+- [x] Test: admin role bypasses operation restrictions (configurable)
+
+---
+
 ## Test Summary
 
 | Suite | Tests | Status |
@@ -1035,15 +1165,15 @@ Automated review of duplication, typing, security, and architectural coherence a
 | Introspection | 30 | Pass |
 | Permissions | 41 | Pass |
 | SQL compiler | 35 | Pass |
-| Schema generator | 52 | Pass |
+| Schema generator | 54 | Pass |
 | REST filters | 30 | Pass |
-| Server / E2E | 79 | Pass |
+| Server / E2E | 75 | Pass |
 | Events | 9 | Pass |
 | Crons | 14 | Pass |
-| Subscriptions | 17 | Pass |
+| Subscriptions | 20 | Pass |
 | Streaming subscriptions | 13 | Pass |
 | Actions | 19 | Pass |
-| Async actions | 18 | Pass |
+| Async actions | 23 | Pass |
 | Computed fields | 50 | Pass |
 | Upsert | 22 | Pass |
 | Distinct | 22 | Pass |
@@ -1067,4 +1197,5 @@ Automated review of duplication, typing, security, and architectural coherence a
 | Config unsupported | 37 | Pass |
 | REST permissions | 26 | Pass |
 | JWT admin role | 9 | Pass |
-| **Total** | **1266** | **40 suites, 1266 passing** |
+| CRUD operations | 20 | Pass |
+| **Total** | **1445** | **46 suites, 1445 passing** |
