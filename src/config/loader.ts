@@ -827,6 +827,9 @@ function transformRelationship(
   if (manual) {
     rel.remoteTable = { name: manual.remote_table.name, schema: manual.remote_table.schema };
     rel.columnMapping = manual.column_mapping;
+    if (manual.insertion_order) {
+      rel.insertionOrder = manual.insertion_order;
+    }
   }
 
   return rel;

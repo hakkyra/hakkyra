@@ -185,13 +185,14 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   buildAllAggregateOrderByTypes(tables, enumNames, orderByTypes);
 
   const mutationInputsByTable = new Map<string, MutationInputTypes>();
+  const insertInputTypes = new Map<string, import('graphql').GraphQLInputObjectType>();
 
   for (const table of tables) {
     const key = tableKey(table.schema, table.name);
     const objectType = typeRegistry.get(key)!;
     const filterType = filterTypes.get(key);
     const mutInputs = buildMutationInputTypes(
-      table, objectType, enumTypes, enumNames, filterType, orderByTypes, tables, functions,
+      table, objectType, enumTypes, enumNames, filterType, orderByTypes, tables, functions, insertInputTypes,
     );
     mutationInputsByTable.set(key, mutInputs);
     // Register orderBy types for use in array relationship args

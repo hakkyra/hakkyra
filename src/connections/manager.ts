@@ -35,6 +35,15 @@ export interface ConnectionManager {
     session: SessionVariables,
     intent: 'read' | 'write',
   ): Promise<{ rows: unknown[]; rowCount: number }>;
+  /**
+   * Execute multiple queries within a single transaction with session variable injection.
+   * Each step receives the results of all prior steps, enabling FK value propagation
+   * for nested inserts.
+   */
+  transactionalQueryWithSession(
+    queries: Array<{ sql: string; params: unknown[] }>,
+    session: SessionVariables,
+  ): Promise<Array<{ rows: unknown[]; rowCount: number }>>;
   /** Check that all pools can connect successfully. */
   healthCheck(): Promise<boolean>;
   /** Gracefully close all pool connections. */
@@ -195,6 +204,45 @@ export function createConnectionManager(
         await client.query('ROLLBACK').catch(() => {
           // Ignore rollback errors
         });
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+
+    async transactionalQueryWithSession(
+      queries: Array<{ sql: string; params: unknown[] }>,
+      session: SessionVariables,
+    ): Promise<Array<{ rows: unknown[]; rowCount: number }>> {
+      const pool = selectPool('write', session.userId);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        const sessionJson = JSON.stringify(session.claims);
+        await client.query(`SELECT set_config('hasura.user', $1, true)`, [sessionJson]);
+        if (session.userId) {
+          await client.query(`SELECT set_config('${schemaName}.user_id', $1, true)`, [session.userId]);
+        }
+        await client.query(`SELECT set_config('${schemaName}.role', $1, true)`, [session.role]);
+
+        const results: Array<{ rows: unknown[]; rowCount: number }> = [];
+        for (const q of queries) {
+          const result = stmtManager
+            ? await client.query(stmtManager.prepare(q.sql, q.params))
+            : await client.query(q.sql, q.params);
+          results.push({ rows: result.rows as unknown[], rowCount: result.rowCount ?? 0 });
+        }
+
+        await client.query('COMMIT');
+
+        if (session.userId && consistencyTracker) {
+          consistencyTracker.markMutation(session.userId);
+        }
+
+        return results;
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
         throw err;
       } finally {
         client.release();

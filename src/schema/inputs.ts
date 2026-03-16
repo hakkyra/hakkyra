@@ -381,11 +381,13 @@ export function buildMutationInputTypes(
   orderByTypes?: Map<string, GraphQLInputObjectType>,
   allTables?: TableInfo[],
   functions?: FunctionInfo[],
+  insertInputTypes?: Map<string, GraphQLInputObjectType>,
 ): MutationInputTypes {
   const typeName = getTypeName(table);
   // ── InsertInput ────────────────────────────────────────────────────────
   // All fields are optional in the schema because different roles have different
   // presets and allowed columns. Strict per-role validation happens at runtime.
+  // Includes nested relationship fields for object and array relationships.
   const insertInput = new GraphQLInputObjectType({
     name: `${typeName}InsertInput`,
     description: `Input type for inserting a row into ${typeName}.`,
@@ -400,9 +402,40 @@ export function buildMutationInputTypes(
           description: column.comment,
         };
       }
+
+      // Add nested insert fields for relationships
+      if (insertInputTypes) {
+        for (const rel of table.relationships) {
+          const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
+          const relInsertInput = insertInputTypes.get(relKey);
+          if (relInsertInput) {
+            const relFieldName = toCamelCase(rel.name);
+            if (rel.type === 'object') {
+              // Object relationship: single nested object
+              fields[relFieldName] = {
+                type: relInsertInput,
+                description: `Nested insert for ${rel.name} object relationship.`,
+              };
+            } else {
+              // Array relationship: array of nested objects
+              fields[relFieldName] = {
+                type: new GraphQLList(new GraphQLNonNull(relInsertInput)),
+                description: `Nested insert for ${rel.name} array relationship.`,
+              };
+            }
+          }
+        }
+      }
+
       return fields;
     },
   });
+
+  // Register this insert input type so other tables can reference it
+  if (insertInputTypes) {
+    const thisKey = tableKey(table.schema, table.name);
+    insertInputTypes.set(thisKey, insertInput);
+  }
 
   // ── Constraint, UpdateColumn, and SelectColumn enums ─────────────────
   const constraintEnum = buildConstraintEnum(table, typeName);
