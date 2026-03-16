@@ -13,12 +13,15 @@ import {
   GraphQLObjectType,
   GraphQLNonNull,
   GraphQLList,
+  GraphQLInputObjectType,
+  GraphQLEnumType,
 } from 'graphql';
 import type {
   GraphQLFieldConfig,
   GraphQLFieldConfigArgumentMap,
   GraphQLOutputType,
   GraphQLScalarType,
+  GraphQLInputType,
 } from 'graphql';
 import {
   GraphQLInt,
@@ -39,6 +42,7 @@ import {
   resolveSessionVar,
   DEFAULT_SESSION_NAMESPACE,
 } from '../auth/session-namespace.js';
+import { OrderByDirection } from './inputs.js';
 
 // ─── Type Mapping ────────────────────────────────────────────────────────────
 
@@ -92,6 +96,103 @@ function scalarToGraphQL(typeName: string): GraphQLScalarType {
 
   // Fallback to String
   return asScalar(GraphQLString);
+}
+
+// ─── Logical Model Query Arg Types ──────────────────────────────────────────
+
+/** Cache for comparison input types used in logical model BoolExp */
+const lmComparisonTypeCache = new Map<string, GraphQLInputObjectType>();
+
+function getOrCreateComparisonType(scalarType: GraphQLScalarType): GraphQLInputObjectType {
+  const name = `${scalarType.name}ComparisonExpLm`;
+  const cached = lmComparisonTypeCache.get(name);
+  if (cached) return cached;
+
+  const inputScalar = asInputType(scalarType);
+  const fields: Record<string, { type: GraphQLInputType }> = {
+    _eq: { type: inputScalar },
+    _neq: { type: inputScalar },
+    _in: { type: new GraphQLList(new GraphQLNonNull(inputScalar)) },
+    _nin: { type: new GraphQLList(new GraphQLNonNull(inputScalar)) },
+    _isNull: { type: asInputType(asScalar(GraphQLBoolean)) },
+    _gt: { type: inputScalar },
+    _lt: { type: inputScalar },
+    _gte: { type: inputScalar },
+    _lte: { type: inputScalar },
+  };
+
+  const compType = new GraphQLInputObjectType({ name, fields });
+  lmComparisonTypeCache.set(name, compType);
+  return compType;
+}
+
+/**
+ * Build a BoolExp input type for a logical model.
+ * Supports per-field comparison operators and _and / _or / _not combinators.
+ */
+function buildLogicalModelBoolExp(model: LogicalModel): GraphQLInputObjectType {
+  const typeName = `${model.name}BoolExp`;
+  return new GraphQLInputObjectType({
+    name: typeName,
+    description: `Boolean expression to filter ${model.name} results.`,
+    fields: () => {
+      const fields: Record<string, { type: GraphQLInputType }> = {};
+      for (const field of model.fields) {
+        const scalarType = scalarToGraphQL(field.type);
+        fields[field.name] = { type: getOrCreateComparisonType(scalarType) };
+      }
+      // Logical combinators
+      const selfType = logicalModelBoolExpCache.get(typeName)!;
+      fields['_and'] = { type: new GraphQLList(new GraphQLNonNull(selfType)) };
+      fields['_or'] = { type: new GraphQLList(new GraphQLNonNull(selfType)) };
+      fields['_not'] = { type: selfType };
+      return fields;
+    },
+  });
+}
+
+/** Cache for logical model BoolExp types */
+const logicalModelBoolExpCache = new Map<string, GraphQLInputObjectType>();
+
+function getOrCreateLogicalModelBoolExp(model: LogicalModel): GraphQLInputObjectType {
+  const key = `${model.name}BoolExp`;
+  const cached = logicalModelBoolExpCache.get(key);
+  if (cached) return cached;
+  const boolExp = buildLogicalModelBoolExp(model);
+  logicalModelBoolExpCache.set(key, boolExp);
+  return boolExp;
+}
+
+/**
+ * Build an OrderBy input type for a logical model.
+ */
+function buildLogicalModelOrderBy(model: LogicalModel): GraphQLInputObjectType {
+  const fields: Record<string, { type: GraphQLInputType }> = {};
+  for (const field of model.fields) {
+    fields[field.name] = { type: OrderByDirection };
+  }
+  return new GraphQLInputObjectType({
+    name: `${model.name}OrderBy`,
+    description: `Ordering options for ${model.name} results.`,
+    fields,
+  });
+}
+
+/**
+ * Build a SelectColumn enum for a logical model.
+ */
+function buildLogicalModelSelectColumnEnum(model: LogicalModel): GraphQLEnumType {
+  const values: Record<string, { value: string }> = {};
+  for (const field of model.fields) {
+    // Hasura uses SCREAMING_SNAKE_CASE for enum values
+    const enumKey = field.name.replace(/[A-Z]/g, (m) => `_${m}`).toUpperCase();
+    values[enumKey] = { value: field.name };
+  }
+  return new GraphQLEnumType({
+    name: `${model.name}SelectColumn`,
+    description: `Select columns of ${model.name}.`,
+    values,
+  });
 }
 
 // ─── SQL Parameter Parsing ──────────────────────────────────────────────────
@@ -256,6 +357,7 @@ export function buildNativeQueryFields(
 ): NativeQueryFields {
   const queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
   const outputTypes: GraphQLObjectType[] = [];
+  const inputTypes: GraphQLInputObjectType[] = [];
   const logicalModelMap = new Map<string, LogicalModel>();
 
   for (const lm of logicalModels) {
@@ -274,28 +376,52 @@ export function buildNativeQueryFields(
       outputTypes.push(outputType);
     }
 
-    // Build arguments
-    const args: GraphQLFieldConfigArgumentMap = {};
-    for (const arg of nq.arguments) {
-      const gqlType = scalarToGraphQL(arg.type);
-      args[arg.name] = {
-        type: arg.nullable ? asInputType(gqlType) : new GraphQLNonNull(asInputType(gqlType)),
-        description: `Argument: ${arg.name} (${arg.type})`,
-      };
+    // Build field arguments — Hasura wraps native query params in an *_arguments input type
+    const fieldArgs: GraphQLFieldConfigArgumentMap = {};
+
+    if (nq.arguments.length > 0) {
+      const argsFields: Record<string, { type: GraphQLInputType; description?: string }> = {};
+      for (const arg of nq.arguments) {
+        const gqlType = scalarToGraphQL(arg.type);
+        argsFields[arg.name] = {
+          type: arg.nullable ? asInputType(gqlType) : new GraphQLNonNull(asInputType(gqlType)),
+          description: `Argument: ${arg.name} (${arg.type})`,
+        };
+      }
+      const argsInputType = new GraphQLInputObjectType({
+        name: `${nq.rootFieldName}_arguments`,
+        description: `Arguments for native query ${nq.rootFieldName}`,
+        fields: argsFields,
+      });
+      inputTypes.push(argsInputType);
+      fieldArgs['args'] = { type: new GraphQLNonNull(argsInputType) };
     }
+
+    // Add standard query args: distinctOn, limit, offset, orderBy, where
+    const boolExpType = getOrCreateLogicalModelBoolExp(logicalModel);
+    fieldArgs['where'] = { type: boolExpType };
+
+    const orderByType = buildLogicalModelOrderBy(logicalModel);
+    fieldArgs['orderBy'] = { type: new GraphQLList(new GraphQLNonNull(orderByType)) };
+
+    fieldArgs['limit'] = { type: GraphQLInt };
+    fieldArgs['offset'] = { type: GraphQLInt };
+
+    const selectColumnEnum = buildLogicalModelSelectColumnEnum(logicalModel);
+    fieldArgs['distinctOn'] = { type: new GraphQLList(new GraphQLNonNull(selectColumnEnum)) };
 
     // Native queries always return [LogicalModel!]!
     const returnType = new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(outputType)));
 
     queryFields[nq.rootFieldName] = {
       type: returnType,
-      args,
+      args: fieldArgs,
       resolve: makeNativeQueryResolver(nq, logicalModel),
       description: `Native query: ${nq.rootFieldName}`,
     };
   }
 
-  return { queryFields, outputTypes };
+  return { queryFields, outputTypes, inputTypes };
 }
 
 function getOrCreateLogicalModelType(model: LogicalModel): GraphQLObjectType {
@@ -333,6 +459,9 @@ function makeNativeQueryResolver(
   return async (_parent, args, context) => {
     const { auth, queryWithSession } = context;
 
+    // Extract native query arguments from the `args` wrapper (Hasura convention)
+    const nqArgs = (args.args ?? {}) as Record<string, unknown>;
+
     // ── Permission check ──────────────────────────────────────────────
     if (!auth.isAdmin) {
       const perm = logicalModel.selectPermissions.find((p) => p.role === auth.role);
@@ -343,7 +472,7 @@ function makeNativeQueryResolver(
       }
 
       // Build parameter values
-      const params: unknown[] = paramNames.map((name) => args[name] ?? null);
+      const params: unknown[] = paramNames.map((name) => nqArgs[name] ?? null);
 
       // Check if there is a row-level filter
       const filterKeys = Object.keys(perm.filter);
@@ -378,7 +507,7 @@ function makeNativeQueryResolver(
     }
 
     // Admin path — no permission filtering
-    const params: unknown[] = paramNames.map((name) => args[name] ?? null);
+    const params: unknown[] = paramNames.map((name) => nqArgs[name] ?? null);
     const result = await queryWithSession(parameterizedSQL, params, auth, 'read');
     return result.rows;
   };
@@ -389,6 +518,7 @@ function makeNativeQueryResolver(
 export interface NativeQueryFields {
   queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>>;
   outputTypes: GraphQLObjectType[];
+  inputTypes: GraphQLInputObjectType[];
 }
 
 /**
@@ -396,4 +526,6 @@ export interface NativeQueryFields {
  */
 export function resetLogicalModelTypeCache(): void {
   logicalModelTypes.clear();
+  logicalModelBoolExpCache.clear();
+  lmComparisonTypeCache.clear();
 }

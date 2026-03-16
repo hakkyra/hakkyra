@@ -763,13 +763,13 @@ describe('Computed Fields — BoolExp (WHERE)', () => {
     expect(fields['isOwn']).toBeDefined();
   });
 
-  it('BoolExp type does NOT include set-returning computed fields', () => {
+  it('BoolExp type includes set-returning computed fields as relationship filters (P11.11)', () => {
     const typeMap = schema.getTypeMap();
     const clientBoolExp = typeMap['ClientBoolExp'] as GraphQLInputObjectType | undefined;
     expect(clientBoolExp).toBeDefined();
     const fields = clientBoolExp!.getFields();
-    // activeAccounts is a SETOF computed field — should NOT be in BoolExp
-    expect(fields['activeAccounts']).toBeUndefined();
+    // activeAccounts is a SETOF computed field returning tracked table — in BoolExp as relationship filter
+    expect(fields['activeAccounts']).toBeDefined();
   });
 
   it('account BoolExp type includes total computed field', () => {

@@ -425,6 +425,42 @@ export function buildFilterTypes(
           }
         }
 
+        // Computed fields that return a tracked table type get relationship-like
+        // BoolExp filters (overwriting any scalar comparison that may have been
+        // added above). This matches Hasura's behavior: e.g. Player.data returning
+        // SETOF json_result gets JsonResultBoolExp, not StringComparisonExp.
+        if (table.computedFields && functions) {
+          for (const cf of table.computedFields) {
+            const fnSchema = cf.function.schema ?? 'public';
+            const fn = functions.find(
+              (f) => f.name === cf.function.name && f.schema === fnSchema,
+            );
+            if (!fn) continue;
+
+            // Check if the function returns a tracked table type
+            let returnTableKey: string | undefined;
+            const sameSchemaKey = tableKey(fnSchema, fn.returnType);
+            if (filterTypes.has(sameSchemaKey)) {
+              returnTableKey = sameSchemaKey;
+            } else {
+              for (const key of filterTypes.keys()) {
+                if (key.endsWith(`.${fn.returnType}`)) {
+                  returnTableKey = key;
+                  break;
+                }
+              }
+            }
+
+            if (returnTableKey) {
+              const relBoolExp = filterTypes.get(returnTableKey);
+              if (relBoolExp) {
+                const fieldName = toCamelCase(cf.name);
+                fields[fieldName] = { type: relBoolExp };
+              }
+            }
+          }
+        }
+
         return fields;
       },
     });

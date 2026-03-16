@@ -207,6 +207,16 @@ export function pgEnumToGraphQLName(pgName: string): string {
 }
 
 /**
+ * Check if a PostgreSQL type name is a known scalar type (not a table/composite).
+ * Returns true for types like int4, text, jsonb, uuid, etc.
+ * Returns false for unknown types (e.g., table names like 'player_risk').
+ */
+export function isKnownPgScalarType(pgType: string): boolean {
+  const baseType = pgType.startsWith('_') ? pgType.slice(1) : pgType;
+  return baseType in PG_TO_GRAPHQL;
+}
+
+/**
  * Returns the set of all custom scalar names used in the type map.
  * Useful for registering custom scalars in the GraphQL schema.
  */

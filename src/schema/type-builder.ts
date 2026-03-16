@@ -4,7 +4,7 @@
  * Handles:
  * - Column → field mapping with correct GraphQL types
  * - Object relationships (→ nullable related type)
- * - Array relationships (→ nullable [RelatedType!] with where/orderBy/limit args)
+ * - Array relationships (→ non-null [RelatedType!]! with where/orderBy/limit args)
  * - Circular reference resolution via TypeRegistry thunks
  * - PascalCase type names, camelCase field names
  */
@@ -246,11 +246,26 @@ export function buildObjectType(
         }
 
         if (rel.type === 'object') {
-          // Object relationship — non-null when all local FK columns are NOT NULL
-          // (matching Hasura behavior: if the FK column is required, the related
-          // object is guaranteed to exist)
+          // Object relationship — non-null ONLY when:
+          // 1. It's a forward-FK (a real FK constraint on THIS table → remote table)
+          // 2. All local FK columns are NOT NULL
+          //
+          // Reverse-FK relationships (FK on the remote table referencing this
+          // table) and manual_configuration relationships are ALWAYS nullable,
+          // matching Hasura behavior: the existence of a matching row in the
+          // remote table cannot be guaranteed by a constraint on this table.
           const localCols = rel.localColumns ?? [];
-          const allFkColumnsRequired = localCols.length > 0 && localCols.every((colName) => {
+
+          // Determine if a forward-FK constraint exists on the local table
+          // that maps localColumns to the remote table.
+          const isForwardFK = localCols.length > 0 && table.foreignKeys.some((fk) =>
+            fk.referencedSchema === rel.remoteTable.schema &&
+            fk.referencedTable === rel.remoteTable.name &&
+            fk.columns.length === localCols.length &&
+            localCols.every((col) => fk.columns.includes(col)),
+          );
+
+          const allFkColumnsRequired = isForwardFK && localCols.every((colName) => {
             const col = table.columns.find((c) => c.name === colName);
             return col != null && !col.isNullable;
           });
@@ -271,7 +286,7 @@ export function buildObjectType(
             },
           };
         } else {
-          // Array relationship — [RelatedType!] with optional filtering/ordering
+          // Array relationship — [RelatedType!]! with optional filtering/ordering
           const args: GraphQLFieldConfigArgumentMap = {};
 
           // distinctOn argument
@@ -302,7 +317,7 @@ export function buildObjectType(
           args['offset'] = { type: GraphQLInt };
 
           fields[getRelFieldName(rel)] = {
-            type: new GraphQLList(new GraphQLNonNull(relatedType)),
+            type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(relatedType))),
             args,
             description: `Array relationship to ${rel.remoteTable.name}`,
             extensions: {
@@ -319,6 +334,25 @@ export function buildObjectType(
           const aggType = aggregateTypes?.get(relKey);
           if (aggType) {
             const aggArgs: GraphQLFieldConfigArgumentMap = {};
+
+            // distinctOn argument
+            if (relSelectColumnEnum) {
+              aggArgs['distinctOn'] = {
+                type: new GraphQLList(new GraphQLNonNull(relSelectColumnEnum)),
+                description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
+              };
+            }
+
+            // limit / offset arguments
+            aggArgs['limit'] = { type: GraphQLInt };
+            aggArgs['offset'] = { type: GraphQLInt };
+
+            // orderBy argument
+            if (relOrderByType) {
+              aggArgs['orderBy'] = {
+                type: new GraphQLList(new GraphQLNonNull(relOrderByType)),
+              };
+            }
 
             // where argument
             if (relFilterType) {

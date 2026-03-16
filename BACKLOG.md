@@ -1273,7 +1273,7 @@ Hasura's `update{Table}Many` mutations return `[{Table}MutationResponse]` (array
 - [x] Update resolver to return array of results
 - [x] Test: `updateMany` returns an array
 
-### P10.3 — Action Argument Scalar Types (High) ✅
+### P10.3 — Action Argument Scalar Types (High) ⚠️ PARTIAL
 
 Hakkyra uses `String` for all action input arguments. Hasura uses the specific scalar types from the action's GraphQL type definitions (`Bigint`, `Numeric`, `Uuid`, `Jsonb`, `Timestamptz`, `PaymentType`, `Json`, `_text`, `Bpchar`). 30 arguments affected.
 
@@ -1283,6 +1283,7 @@ Examples: `AcceptPlayerContractArgs.playerid` (String→Bigint), `CreatePaymentA
 - [x] Custom scalar types (`numeric`, `Json`, `_text`) should map to their corresponding GraphQL scalars
 - [x] SDL-defined enums and PG enum types resolve correctly in action types
 - [x] Test: action args use correct scalar types
+- [ ] **26 args still use `String`** — see P11.4 for details
 
 ### P10.4 — Missing Table Columns (Medium)
 
@@ -1326,7 +1327,7 @@ Notable missing columns:
 - [x] Expose async action result queries as subscription fields
 - [x] Test: tracked function aggregates available as subscriptions
 
-### P10.7 — Nullability Mismatches (Low) ✅
+### P10.7 — Nullability Mismatches (Low) ⚠️ REGRESSION
 
 14 relationship fields have different nullability between Hakkyra and Hasura. Hakkyra marks some as non-null (`!`) where Hasura allows null.
 
@@ -1335,14 +1336,16 @@ Affected: `Balance.player`, `BigWin.currency`, `CurrentCampaignContent.campaignP
 - [x] Array relationships changed from `[Type!]!` to `[Type!]` (nullable list)
 - [x] Object relationship nullability based on FK column NOT NULL status (already implemented in P9.7c)
 - [x] `Player.data` and `Game.brands` are array relationships — now nullable `[Type!]`
+- [ ] **WRONG DIRECTION**: Hasura array relationships are `[Type!]!` (non-null list), not `[Type!]` — see P11.2
+- [ ] **11 object relationship nullability mismatches remain** — see P11.3
 
-### P10.8 — `Player.lock` Cardinality (Medium) ✅
+### P10.8 — `Player.lock` Cardinality (Medium) ⚠️ STILL BROKEN
 
 Hakkyra: `Player.lock: [PlayerLock!]!` (array relationship). Hasura: `Player.lock: PlayerLock` (object relationship). The metadata likely defines `lock` as an object relationship, but Hakkyra may be interpreting it as an array.
 
 - [x] Fixed reverse-FK object relationship column mapping in config loader
 - [x] Extended merger to infer localColumns for all relationship types with remoteColumns
-- [x] Test: `Player.lock` is an object relationship returning single value
+- [ ] **Still array**: SDL shows `Player.lock(...): [PlayerLock!]` with array args — still not an object relationship
 
 ### P10.9 — Enum Comparison Operators `_gt`/`_gte`/`_lt`/`_lte` (Low) ✅
 
@@ -1361,13 +1364,14 @@ Hakkyra returns `String` for array columns (e.g., `tags`, `currencies`) in `MaxF
 - [x] Aggregate type builder: use array type `[ScalarType!]` for array columns in min/max fields
 - [x] Test: aggregate min/max on array columns returns array type
 
-### P10.11 — Aggregate Stat Return Types (Low) ✅
+### P10.11 — Aggregate Stat Return Types (Low) ⚠️ PARTIAL
 
 Hakkyra uses `Float` for all aggregate stat fields (avg, stddev, variance, etc.). Hasura uses `Numeric` for `numeric`/`bigint` columns and `Int` for `integer`/`smallint` columns. 44 occurrences.
 
 - [x] Aggregate stat type builder: use `Numeric` return type for `numeric`/`bigint` source columns
 - [x] Use `Int` return type for `integer`/`smallint` source columns in sum fields
 - [x] Test: aggregate stat fields use correct return types
+- [ ] **Incomplete**: `avg`/`stddev`/`variance` fields on `int`/`bigint` columns return `Numeric`, but Hasura returns `Float` — see P11.1
 
 ### P10.12 — `Timestamp` vs `Timestamptz` (Low) ✅
 
@@ -1401,12 +1405,14 @@ Hakkyra generates `updategameSessionMany` (lowercase `g`). Hasura generates `upd
 - [x] Fix: capitalize first letter of `typeName` after verb prefixes for all 7 prefixed root fields
 - [x] Same fix applied to insert*, update*, delete* prefixed names
 
-### P10.16 — Async Action Query/Subscription Return Types (Low) ✅
+### P10.16 — Async Action Query/Subscription Return Types (Low) ⚠️ PARTIAL
 
 Hakkyra returns `AsyncActionId!` for async mutation results and `GenerateTestDataAsyncResult`/`UpdateGamesAsyncResult` for result queries. Hasura returns `uuid!` for mutations and uses the action name directly for result queries/subscriptions (e.g., `generateTestData`, `updateGames`).
 
 - [x] Mutation return: use `uuid!` scalar instead of custom `AsyncActionId` type
 - [x] Result query return: use action handler return type, not custom `*AsyncResult` wrapper
+- [ ] **Scalar case**: Mutation returns `Uuid!` but Hasura returns `uuid!` (lowercase) — see P11.9
+- [ ] **Result type names**: Query returns `OkResult` but Hasura returns types named after the action (`generateTestData`, `updateGames`) — see P11.9
 
 ### P10.17 — `playerDataReport`/`playerProfile` Return Types (Low) ✅
 
@@ -1422,6 +1428,152 @@ Hasura generates `*SelectColumn*AggregateBoolExpBool_andArgumentsColumns` and `*
 
 - [ ] Generate `AggregateBoolExpBool_and` and `AggregateBoolExpBool_or` types with column-specific enum arguments
 - [ ] Only needed for tables with boolean columns used in aggregate bool expressions
+
+---
+
+## Phase 11: API Parity III (Live SDL Comparison 2026-03-16)
+
+Third-round schema comparison of Hakkyra SDL (localhost:8081/sdl) vs Hasura introspection (localhost:8080) against the neofix database. Types: hakkyra ~2,140 object/input types vs hasura ~4,571. Identifies regressions from P10 fixes and new gaps.
+
+### P11.1 — Aggregate Avg/Stddev/Variance Return `Numeric` Instead of `Float` (High) ✅
+
+P10.11 fixed `sum` field types but `avg`, `stddev`, `stddevPop`, `stddevSamp`, `variance`, `varPop`, `varSamp` fields on `int`/`bigint` columns still return `Numeric`. Hasura returns `Float` for these statistical functions regardless of source column type (only `sum` uses source-dependent types).
+
+**Rule**: `avg`/`stddev*`/`var*` → always `Float`. Only `sum` uses source-dependent return types.
+
+- [x] Simplified `resolveStatAggReturnType()` in `inputs.ts` to always return `GraphQLFloat`
+- [x] Updated 6 tests expecting `Numeric` to expect `Float`
+
+### P11.2 — Array Relationship Nullability Reversed (High) ✅
+
+P10.7 changed array relationships from `[Type!]!` to `[Type!]` (nullable list). But Hasura uses `[Type!]!` (non-null list). The fix went the wrong direction. 55 array relationship fields affected.
+
+- [x] Wrapped outer list in `GraphQLNonNull` in `type-builder.ts:305` → `[Type!]!`
+- [x] Updated 2 tests to expect non-null list
+
+### P11.3 — Object Relationship Nullability Mismatches (Medium) ✅
+
+11 object relationships have wrong nullability. Root cause: reverse-FK and manual_configuration relationships were using local PK column nullability (always NOT NULL) instead of being unconditionally nullable.
+
+- [x] Systemic fix in `type-builder.ts`: only forward-FK relationships (with real FK constraint on local table) use column nullability; reverse-FK and manual_configuration relationships are always nullable
+- [x] Also fixed P10.8 `Player.lock`: added dedup in `loader.ts` — object relationships take precedence over array relationships with same name
+
+### P11.4 — Action Arg Types Still `String` (High) ✅
+
+P10.3 resolved some but 26 action arguments still use `String` instead of proper scalar types:
+
+| Arg | Hakkyra | Hasura |
+|---|---|---|
+| `AcceptContractWithTokenArgs.contractToken` | `String` | `Uuid` |
+| `AcceptPlayerContractArgs.playerid` | `String` | `Bigint` |
+| `BackofficeSetContractArgs.playerid` | `String` | `Bigint` |
+| `CompleteCounterProgressArgs.counterProgressId` | `String` | `Bigint` |
+| `ContentEventArgs.parameters` | `String` | `Jsonb` |
+| `CreatePaymentArgs.amount` | `String` | `Numeric` |
+| `CreatePaymentArgs.paymentType` | `String` | `PaymentType` |
+| `CreatePaymentArgs.playerId` | `String` | `Bigint` |
+| `CreatePlayerRiskArgs.parameters` | `String` | `Json` |
+| `CreateTaskArgs.parameters` | `String` | `Json` |
+| `FnRewardJackpotArgs.pIncrease` | `String` | `Numeric` |
+| `FnRewardJackpotArgs.pInitialValue` | `String` | `Numeric` |
+| `FnRewardJackpotArgs.pMinimumJackpot` | `String` | `Numeric` |
+| `GetCounterProgressArgs.playerid` | `String` | `Bigint` |
+| `GetGameSessionSummaryArgs.gamesessionid` | `String` | `Bigint` |
+| `GetGameSessionSummaryArgs.playerid` | `String` | `Bigint` |
+| `LatestWinsArgs.cutoff` | `String` | `Numeric` |
+| `LockPlayerArgs.playerid` | `String` | `Bigint` |
+| `RemoveArgs.playerid` | `String` | `Bigint` |
+| `StealArgs.playerid` | `String` | `Bigint` |
+| `TriggerContentDeliveryArgs.brandid` | `String` | `Bpchar` |
+| `TriggerContentDeliveryArgs.params` | `String` | `Jsonb` |
+
+**Root cause**: These are tracked function args, not action SDL args. `PG_ARG_TYPE_MAP` in `tracked-functions.ts` had wrong scalar name keys (e.g., `'BigInt'` vs `'Bigint'`, `'UUID'` vs `'Uuid'`).
+
+- [x] Fixed 8 wrong scalar name mappings in `PG_ARG_TYPE_MAP`
+- [x] Added enum type resolution to `pgArgTypeToGraphQL()` (for types like `PaymentType`)
+- [x] Added 6 test cases verifying scalar arg type resolution
+
+### P11.5 — Nested Aggregate Fields Missing Args (Medium) ✅
+
+All nested `*Aggregate` fields on object types were missing `distinctOn`, `limit`, `offset`, `orderBy` arguments.
+
+- [x] Added all 4 args to aggregate relationship fields in `type-builder.ts`
+- [x] Added test verifying args on aggregate relationship fields
+
+### P11.6 — Tracked Function Args Should Be Non-Null (Medium) ✅
+
+Hakkyra makes tracked function `args` parameters nullable. Hasura makes them non-null.
+
+- [x] Wrapped `args` in `GraphQLNonNull` in `tracked-functions.ts` (main + aggregate variant)
+- [x] Updated tests to verify `args` is required
+
+### P11.7 — Tracked Function Return Type Mismatches (High) ✅
+
+Several tracked functions return `String!` because `pgTypeToGraphQL` falls back to `String` for unknown types (untracked tables).
+
+- [x] Added `isKnownPgScalarType()` in `type-map.ts` to distinguish real scalars from untracked table types
+- [x] Functions returning untracked tables now skip with warning instead of falling back to `String!`
+- [x] The 5 affected functions will auto-expose once P11.13 tables are tracked
+
+### P11.8 — Native Query / Computed Field Args Structure (Medium) ✅
+
+Native queries used inline args. Hasura wraps them in `*_arguments` input type with standard query args.
+
+- [x] Wrapped native query params in `*_arguments` input types in `native-queries.ts`
+- [x] Added `where`, `orderBy`, `limit`, `offset`, `distinctOn` args
+- [x] Generated `BoolExp`, `OrderBy`, `SelectColumn` types for logical models
+- [x] Updated resolver to extract args from wrapper object
+
+### P11.9 — Async Action Scalar Case and Result Type Names (Low) ✅
+
+- [x] Added lowercase `uuid` scalar in `scalars.ts`, changed async action mutations/queries/subscriptions to use `uuid` instead of `Uuid` in `actions/schema.ts`
+- [x] Result queries already use the action's output type (not `OkResult`) — was fixed by P10.16
+
+### P11.10 — PG Enum Types: Enum vs Scalar (Low)
+
+15 PG enum types are exposed as GraphQL `enum` in Hakkyra but as `scalar` in Hasura. Hasura treats PG enums as opaque scalars with `*ComparisonExp` for filtering.
+
+Affected: `AffiliateCommissionBase`, `AffiliateCommissionType`, `ContentChannelSource`, `CounterType`, `FunctionStatus`, `FunctionTriggerType`, `PaymentApprovalType`, `PaymentState`, `PaymentType`, `PlayerBonusStatus`, `RewardStatus`, `RewardType`, `TaskStatus`, `TaskTriggerFrequency`, `WalletStatus`.
+
+Hakkyra's approach (real GraphQL enums with values) is arguably better for type safety. This may be intentional divergence.
+
+- [ ] Decide: keep as enums (better DX) or match Hasura's scalar approach (strict compat)?
+
+### P11.11 — Computed Field BoolExp Type Mismatch (Low) ✅
+
+Computed fields returning tracked table types (SETOF) were not included in BoolExp filters, causing column-level filters to take precedence.
+
+- [x] Added computed field BoolExp handling in `filters.ts` — SETOF computed fields returning tracked tables now use the table's BoolExp
+- [x] Added 2 tests verifying computed field relationship filters
+
+### P11.12 — `authenticate(amount)` Scalar Case (Low)
+
+- Hakkyra: `amount: Numeric` (PascalCase)
+- Hasura: `amount: numeric` (lowercase)
+
+Hasura uses lowercase `numeric` scalar for some action args.
+
+- [ ] Investigate if this is a general issue with action arg scalar casing or specific to `authenticate`
+
+### P11.13 — 50 Missing Table Types (Critical — Investigation)
+
+50 table types present in Hasura are completely missing from Hakkyra's schema. This accounts for ~960 missing types (object types, input types, enums, mutation responses, stream cursors, etc.) and ~1,130 missing root fields.
+
+Missing tables: `AuthenticationMethodProvider`, `BrandAuthenticationProvider`, `BrandCurrency`, `CampaignContentQueue`, `CampaignEventType`, `CampaignPlayerPayment`, `CampaignPlayerStateType`, `CampaignRewardTriggerType`, `CampaignSelectionType`, `CampaignState`, `ContentType`, `ExchangeRate`, `GameIntegrationBrand`, `GameProfile`, `GameProviderReference`, `GameSessionSummary`, `Jurisdiction`, `KycLevel`, `PlayerAuthentication`, `PlayerAuthenticationFactor`, `PlayerBonus`, `PlayerCoinBalance`, `PlayerDailyAmountPerType`, `PlayerDailyAmountPerTypeRt`, `PlayerDailyNetRevenue`, `PlayerEventGrouped`, `PlayerEventRemoved`, `PlayerLimitCounter`, `PlayerQuestionnaire`, `PlayerQuestionnaireFile`, `PlayerRisk`, `PlayerTask`, `PlayerTopGames`, `Promotion`, `Questionnaire`, `Risk`, `RiskCategory`, `Role`, `Setting`, `Task`, `TaskType`, `TempFile`, `TinyUrl`, `TransactionSummary`, `TransactionWithGameRound`, `UserEvent`, `VPlayer`, `VPlayerDaily`, `WageringRequirementResult`, `gameSession`.
+
+**Investigation result**: NOT a code bug. All 50 tables have valid Hasura metadata YAML in `server/hasura/metadata/databases/default/tables/`. Hakkyra reads the same metadata directory (confirmed in Dockerfile). The merger (`src/introspection/merger.ts:337-339`) correctly drops tables that exist in metadata but not in the connected PostgreSQL database (emitting `missing_table` warnings). The 50 tables were absent from the DB that hakkyra connected to during the comparison, while Hasura was likely connected to a different/fuller DB instance (or generates types from metadata alone without requiring DB presence).
+
+- [x] Investigate: root cause is DB mismatch, not code or metadata bug
+- [ ] Re-run comparison with both services connected to the same fully-migrated database
+- [ ] If Hasura generates types for metadata-only tables (no DB presence required), consider doing the same in hakkyra
+
+### P11.14 — `groupedAggregates` Extension (Low)
+
+Hakkyra exposes `groupedAggregates` fields on all `*Aggregate` types (~61 fields). Hasura does not have this. This is a Hakkyra-only extension.
+
+Not a bug — but for strict SDL compatibility, consider making this opt-in or removing it.
+
+- [ ] Decide: keep as extension (document divergence) or make configurable?
 
 ---
 

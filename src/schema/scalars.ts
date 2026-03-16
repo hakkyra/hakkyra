@@ -68,6 +68,24 @@ export const GraphQLUuid = new GraphQLScalarType({
   },
 });
 
+/**
+ * Lowercase `uuid` scalar — Hasura uses this name for async action mutation
+ * return types and result query arguments.
+ */
+export const GraphQLUuidLower = new GraphQLScalarType({
+  name: 'uuid',
+  description: 'A UUID scalar type conforming to RFC 4122.',
+
+  serialize: validateUUID as GraphQLScalarSerializer<string>,
+  parseValue: validateUUID as GraphQLScalarValueParser<string>,
+  parseLiteral(ast) {
+    if (ast.kind !== Kind.STRING) {
+      throw new TypeError(`uuid must be a string, got: ${ast.kind}`);
+    }
+    return validateUUID(ast.value);
+  },
+});
+
 // ─── Timestamptz ─────────────────────────────────────────────────────────────
 
 const ISO_DATETIME_REGEX = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
@@ -434,6 +452,7 @@ export const GraphQLTextArray = new GraphQLScalarType({
  */
 export const customScalars: Record<string, GraphQLScalarType> = {
   Uuid: GraphQLUuid,
+  uuid: GraphQLUuidLower,
   Timestamptz: GraphQLTimestamptz,
   Timestamp: GraphQLTimestamp,
   Date: GraphQLDate,

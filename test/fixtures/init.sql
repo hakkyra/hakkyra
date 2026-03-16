@@ -422,6 +422,20 @@ RETURNS json AS $$
   ) t
 $$ LANGUAGE SQL STABLE;
 
+-- ─── Tracked function: diverse scalar arg types (P11.4) ──────────────────
+
+CREATE OR REPLACE FUNCTION search_clients_advanced(
+  p_id uuid,
+  p_min_balance numeric DEFAULT 0,
+  p_metadata jsonb DEFAULT '{}'::jsonb,
+  p_extra json DEFAULT '{}'::json,
+  p_limit bigint DEFAULT 100,
+  p_brand_code bpchar DEFAULT NULL
+)
+RETURNS SETOF client AS $$
+  SELECT * FROM client WHERE id = p_id LIMIT p_limit
+$$ LANGUAGE SQL STABLE;
+
 -- ─── Non-public schema function (P6.5i) ─────────────────────────────────
 
 CREATE SCHEMA IF NOT EXISTS utils;
