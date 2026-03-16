@@ -82,6 +82,25 @@ export class BullMQAdapter implements JobQueue {
         ...(this.redis.password ? { password: this.redis.password } : {}),
       };
     }
+
+    // Verify Redis connectivity (surfaces auth errors at startup instead of at first job)
+    let IORedis: any;
+    try {
+      const mod = await import('ioredis');
+      IORedis = mod.default;
+    } catch {
+      // ioredis not installed — BullMQ will handle its own connection errors
+      return;
+    }
+    const probe = new IORedis(this.connectionOpts);
+    probe.on('error', () => {}); // suppress unhandled error during probe
+    try {
+      await probe.ping();
+    } catch (err) {
+      probe.disconnect();
+      throw new Error(`Redis connection failed: ${(err as Error).message}. Check your Redis password/URL configuration.`);
+    }
+    probe.disconnect();
   }
 
   async stop(): Promise<void> {
