@@ -40,6 +40,18 @@ export interface WebhookWorkerCallbacks<T extends JobData> {
   resolveWebhook(job: Job<T>): Promise<WebhookJobConfig<T> | null> | WebhookJobConfig<T> | null;
 
   /**
+   * Optional custom delivery function that replaces the default `deliverWebhook()`.
+   *
+   * Use this when the consumer needs custom delivery logic (e.g. async actions
+   * use `executeAction()` which wraps `deliverWebhook()` with request/response
+   * transforms and error parsing).
+   *
+   * Must return a `WebhookDeliveryResult` so the factory can handle
+   * success/failure uniformly.
+   */
+  deliver?(config: WebhookJobConfig<T>, job: Job<T>): Promise<WebhookDeliveryResult>;
+
+  /**
    * Called after a successful webhook delivery.
    * Use this to update DB status, log success, etc.
    */
@@ -105,12 +117,14 @@ export async function registerWebhookWorker<T extends JobData>(
         `Delivering ${label} webhook`,
       );
 
-      const result = await deliverWebhook({
-        url,
-        headers,
-        payload,
-        timeoutMs: timeoutMs ?? 30000,
-      });
+      const result = callbacks.deliver
+        ? await callbacks.deliver(webhookConfig, job)
+        : await deliverWebhook({
+            url,
+            headers,
+            payload,
+            timeoutMs: timeoutMs ?? 30000,
+          });
 
       if (result.success) {
         await callbacks.onSuccess(job, result);
