@@ -610,6 +610,36 @@ export function makeSubscriptionSelectAggregateSubscribe(
       }
     }
 
+    // Extract distinctOn — enum values resolve to PG column names directly
+    const rawDistinctOn = args.distinctOn as string[] | undefined;
+    let distinctOn: string[] | undefined;
+    if (rawDistinctOn && rawDistinctOn.length > 0) {
+      const allowedColumns = perm?.columns === '*'
+        ? table.columns.map((c) => c.name)
+        : (perm?.columns ?? table.columns.map((c) => c.name));
+      distinctOn = rawDistinctOn.filter((col) => allowedColumns.includes(col));
+      if (distinctOn.length === 0) distinctOn = undefined;
+    }
+
+    // When distinctOn is present, also request sum/avg/stddev/variance for numeric columns
+    if (distinctOn) {
+      const numericCols = table.columns
+        .filter((c) => isNumericColumn(c))
+        .map((c) => c.name);
+      if (numericCols.length > 0) {
+        aggregate.sum = numericCols;
+        aggregate.avg = numericCols;
+        aggregate.min = numericCols;
+        aggregate.max = numericCols;
+        aggregate.stddev = numericCols;
+        aggregate.stddevPop = numericCols;
+        aggregate.stddevSamp = numericCols;
+        aggregate.variance = numericCols;
+        aggregate.varPop = numericCols;
+        aggregate.varSamp = numericCols;
+      }
+    }
+
     // Add numeric computed fields to aggregates
     if (numericCFRefs.length > 0) {
       aggregate.computedFields = {
@@ -626,7 +656,95 @@ export function makeSubscriptionSelectAggregateSubscribe(
       };
     }
 
-    // Compile the aggregate SQL
+    if (distinctOn) {
+      // Grouped aggregate path (using distinctOn as groupBy)
+      const compiled = compileSelectAggregate({
+        table,
+        where,
+        aggregate,
+        groupBy: distinctOn,
+        permission: perm ? {
+          filter: perm.filter,
+          columns: perm.columns,
+          limit: perm.limit,
+        } : undefined,
+        session: auth,
+      });
+
+      const wrappedSql = `SELECT row_to_json("_agg_") AS "data" FROM (${compiled.sql}) "_agg_"`;
+
+      const relatedTableKeys = nodesParsed ? collectRelatedTableKeys(nodesParsed) : [];
+      const queue = createAsyncQueue<unknown>();
+      const subscriptionId = randomUUID();
+
+      function processGroupedData(data: unknown): unknown {
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+          return { aggregate: { count: 0 }, nodes: [], groupedAggregates: [] };
+        }
+
+        const row = data as Record<string, unknown>;
+        const groupedData = row.groupedAggregates as Record<string, unknown>[] | undefined;
+
+        const remappedGroups = (groupedData ?? []).map((group) => {
+          const keys = group.keys as Record<string, unknown> | undefined;
+          const remappedKeys: Record<string, unknown> = {};
+          if (keys) {
+            for (const [k, v] of Object.entries(keys)) {
+              remappedKeys[toCamelCase(k)] = v;
+            }
+          }
+
+          const result: Record<string, unknown> = { keys: remappedKeys };
+          if ('count' in group) result.count = group.count;
+          for (const aggKey of ['sum', 'avg', 'min', 'max', 'stddev', 'stddevPop', 'stddevSamp', 'variance', 'varPop', 'varSamp'] as const) {
+            if (group[aggKey]) {
+              const obj = group[aggKey] as Record<string, unknown>;
+              const remapped: Record<string, unknown> = {};
+              for (const [k, v] of Object.entries(obj)) {
+                remapped[toCamelCase(k)] = v;
+              }
+              result[aggKey] = remapped;
+            }
+          }
+
+          return result;
+        });
+
+        return {
+          aggregate: { count: 0 },
+          nodes: [],
+          groupedAggregates: remappedGroups,
+        };
+      }
+
+      async function* generate(): AsyncGenerator<unknown> {
+        try {
+          const initialData = await subscriptionManager!.register({
+            id: subscriptionId,
+            tableKey: tableKeyStr,
+            query: { sql: wrappedSql, params: compiled.params },
+            session: auth,
+            relatedTableKeys: relatedTableKeys.length > 0 ? relatedTableKeys : undefined,
+            push: (data: unknown) => {
+              queue.push(processGroupedData(data));
+            },
+          });
+
+          yield processGroupedData(initialData);
+
+          for await (const value of queue.iterator) {
+            yield value;
+          }
+        } finally {
+          subscriptionManager!.unregister(subscriptionId);
+          queue.done();
+        }
+      }
+
+      return generate();
+    }
+
+    // Standard (non-grouped) aggregate path
     const compiled = compileSelectAggregate({
       table,
       where,
