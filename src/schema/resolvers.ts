@@ -552,7 +552,7 @@ function getReturningColumns(table: TableInfo): string[] {
 /**
  * Resolve the most restrictive limit among user-provided, permission-defined, and global max.
  */
-function resolveLimit(userLimit?: number, permLimit?: number, globalMaxLimit?: number): number | undefined {
+export function resolveLimit(userLimit?: number, permLimit?: number, globalMaxLimit?: number): number | undefined {
   let limit: number | undefined;
   if (userLimit !== undefined && permLimit !== undefined) {
     limit = Math.min(userLimit, permLimit);

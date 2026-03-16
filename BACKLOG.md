@@ -906,8 +906,8 @@ Covers all recent commits (e654f3b through 1518030). All 1194 tests passing.
 
 #### High
 
-- [ ] **No GraphQL batching limit** — Mercurius doesn't limit batched operations. An attacker can send hundreds of queries in one request.
-- [ ] **`resolveLimit` bypass in subscriptions and tracked functions** — `resolveLimit` in `subscription-resolvers.ts` and `tracked-functions.ts` doesn't accept the global `graphql.maxLimit` cap. Only `schema/resolvers.ts` properly enforces it.
+- [x] **No GraphQL batching limit** — Mercurius doesn't limit batched operations. An attacker can send hundreds of queries in one request.
+- [x] **`resolveLimit` bypass in subscriptions and tracked functions** — `resolveLimit` in `subscription-resolvers.ts` and `tracked-functions.ts` doesn't accept the global `graphql.maxLimit` cap. Only `schema/resolvers.ts` properly enforces it.
 
 #### Medium
 
