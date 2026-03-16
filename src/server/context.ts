@@ -13,7 +13,7 @@ import type { PermissionLookup } from '../permissions/lookup.js';
 import type { QueryCache } from '../sql/cache.js';
 import type { SubscriptionManager } from '../subscriptions/manager.js';
 import type { JobQueue } from '../shared/job-queue/types.js';
-import type { ResolverPermissionLookup, ResolverContext } from '../schema/resolvers.js';
+import type { ResolverPermissionLookup, ResolverContext } from '../schema/resolvers/index.js';
 import type { Pool } from 'pg';
 
 // ─── Permission adapters ─────────────────────────────────────────────────────

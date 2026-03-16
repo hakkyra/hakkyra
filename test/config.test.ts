@@ -269,7 +269,7 @@ describe('Config Loading', () => {
 
   describe('Root field visibility helpers', () => {
     it('isQueryRootFieldAllowed: undefined queryRootFields allows all', async () => {
-      const { isQueryRootFieldAllowed } = await import('../src/schema/resolvers.js');
+      const { isQueryRootFieldAllowed } = await import('../src/schema/resolvers/index.js');
       expect(isQueryRootFieldAllowed(undefined, 'select')).toBe(true);
       expect(isQueryRootFieldAllowed(null, 'select')).toBe(true);
       expect(isQueryRootFieldAllowed({}, 'select')).toBe(true);
@@ -277,14 +277,14 @@ describe('Config Loading', () => {
     });
 
     it('isQueryRootFieldAllowed: empty array denies all', async () => {
-      const { isQueryRootFieldAllowed } = await import('../src/schema/resolvers.js');
+      const { isQueryRootFieldAllowed } = await import('../src/schema/resolvers/index.js');
       expect(isQueryRootFieldAllowed({ queryRootFields: [] }, 'select')).toBe(false);
       expect(isQueryRootFieldAllowed({ queryRootFields: [] }, 'select_by_pk')).toBe(false);
       expect(isQueryRootFieldAllowed({ queryRootFields: [] }, 'select_aggregate')).toBe(false);
     });
 
     it('isQueryRootFieldAllowed: specific list allows only listed operations', async () => {
-      const { isQueryRootFieldAllowed } = await import('../src/schema/resolvers.js');
+      const { isQueryRootFieldAllowed } = await import('../src/schema/resolvers/index.js');
       const perm = { queryRootFields: ['select', 'select_by_pk'] };
       expect(isQueryRootFieldAllowed(perm, 'select')).toBe(true);
       expect(isQueryRootFieldAllowed(perm, 'select_by_pk')).toBe(true);
@@ -292,19 +292,19 @@ describe('Config Loading', () => {
     });
 
     it('isSubscriptionRootFieldAllowed: undefined allows all', async () => {
-      const { isSubscriptionRootFieldAllowed } = await import('../src/schema/resolvers.js');
+      const { isSubscriptionRootFieldAllowed } = await import('../src/schema/resolvers/index.js');
       expect(isSubscriptionRootFieldAllowed(undefined, 'select')).toBe(true);
       expect(isSubscriptionRootFieldAllowed({}, 'select_stream')).toBe(true);
     });
 
     it('isSubscriptionRootFieldAllowed: empty array denies all', async () => {
-      const { isSubscriptionRootFieldAllowed } = await import('../src/schema/resolvers.js');
+      const { isSubscriptionRootFieldAllowed } = await import('../src/schema/resolvers/index.js');
       expect(isSubscriptionRootFieldAllowed({ subscriptionRootFields: [] }, 'select')).toBe(false);
       expect(isSubscriptionRootFieldAllowed({ subscriptionRootFields: [] }, 'select_stream')).toBe(false);
     });
 
     it('isSubscriptionRootFieldAllowed: specific list allows only listed operations', async () => {
-      const { isSubscriptionRootFieldAllowed } = await import('../src/schema/resolvers.js');
+      const { isSubscriptionRootFieldAllowed } = await import('../src/schema/resolvers/index.js');
       const perm = { subscriptionRootFields: ['select', 'select_stream'] };
       expect(isSubscriptionRootFieldAllowed(perm, 'select')).toBe(true);
       expect(isSubscriptionRootFieldAllowed(perm, 'select_stream')).toBe(true);
