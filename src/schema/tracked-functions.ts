@@ -412,6 +412,7 @@ function compileTrackedFunctionCall(opts: {
     limit?: number;
   };
   session: SessionVariables;
+  globalMaxLimit?: number;
 }): { sql: string; params: unknown[] } {
   const params = new ParamCollector();
   const aliasCounter = new AliasCounter();
@@ -477,7 +478,7 @@ function compileTrackedFunctionCall(opts: {
 
     // LIMIT / OFFSET
     let limitOffsetClause = '';
-    const effectiveLimit = resolveLimit(opts.limit, opts.permission?.limit);
+    const effectiveLimit = resolveLimit(opts.limit, opts.permission?.limit, opts.globalMaxLimit);
     if (effectiveLimit !== undefined) {
       limitOffsetClause += ` LIMIT ${params.add(effectiveLimit)}`;
     }
@@ -533,11 +534,21 @@ function buildNamedFuncCall(
   return `${quoteIdentifier(schema)}.${quoteIdentifier(name)}(${parts.join(', ')})`;
 }
 
-function resolveLimit(userLimit?: number, permLimit?: number): number | undefined {
+function resolveLimit(userLimit?: number, permLimit?: number, globalMaxLimit?: number): number | undefined {
+  let limit: number | undefined;
   if (userLimit !== undefined && permLimit !== undefined) {
-    return Math.min(userLimit, permLimit);
+    limit = Math.min(userLimit, permLimit);
+  } else {
+    limit = userLimit ?? permLimit;
   }
-  return userLimit ?? permLimit;
+  if (globalMaxLimit !== undefined && globalMaxLimit > 0) {
+    if (limit !== undefined) {
+      limit = Math.min(limit, globalMaxLimit);
+    } else {
+      limit = globalMaxLimit;
+    }
+  }
+  return limit;
 }
 
 // ─── Row remapping (snake_case → camelCase) ─────────────────────────────
@@ -779,6 +790,7 @@ function makeTrackedFunctionResolver(
         limit: perm.limit,
       } : undefined,
       session: auth,
+      globalMaxLimit: context.graphqlMaxLimit,
     });
 
     // ── Execute query ────────────────────────────────────────────────

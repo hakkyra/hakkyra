@@ -1149,6 +1149,14 @@ export function makeInsertResolver(
       throw permissionDenied('insert', `${table.schema}.${table.name}`, auth.role);
     }
 
+    // Enforce backend_only: the insert is only allowed from admin-secret-authenticated
+    // clients or requests with the x-hasura-use-backend-only-permissions header
+    if (perm?.backendOnly && !auth.useBackendOnlyPermissions) {
+      throw new Error(
+        `Permission denied: insert on "${table.schema}"."${table.name}" for role "${auth.role}" is backend_only`,
+      );
+    }
+
     const rawObjects = args.objects as Record<string, unknown>[];
     const objects = rawObjects.map((obj) => remapKeys(obj, columnMap) ?? {});
 
@@ -1273,6 +1281,14 @@ export function makeInsertOneResolver(
 
     if (!perm && !auth.isAdmin) {
       throw permissionDenied('insert', `${table.schema}.${table.name}`, auth.role);
+    }
+
+    // Enforce backend_only: the insert is only allowed from admin-secret-authenticated
+    // clients or requests with the x-hasura-use-backend-only-permissions header
+    if (perm?.backendOnly && !auth.useBackendOnlyPermissions) {
+      throw new Error(
+        `Permission denied: insert on "${table.schema}"."${table.name}" for role "${auth.role}" is backend_only`,
+      );
     }
 
     const obj = remapKeys(args.object as Record<string, unknown>, columnMap) ?? {};

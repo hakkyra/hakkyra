@@ -285,6 +285,8 @@ export interface SessionVariables {
   allowedRoles: string[];
   isAdmin: boolean;
   claims: Record<string, string | string[]>;
+  /** True when the request was authenticated via admin secret or has the x-hasura-use-backend-only-permissions header. */
+  useBackendOnlyPermissions?: boolean;
 }
 
 // ─── ON CONFLICT (Upsert) ────────────────────────────────────────────────────
@@ -316,6 +318,7 @@ export interface CompiledPermission {
     check: CompiledFilter;
     columns: string[] | '*';
     presets: Record<string, string>;
+    backendOnly?: boolean;
   };
   update?: {
     filter: CompiledFilter;
