@@ -11,8 +11,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import pg from 'pg';
 import pino from 'pino';
 import { MockWebhookServer } from './helpers/mock-webhook.js';
-import { createPgBossManager } from '../src/shared/pg-boss-manager.js';
-import type { PgBossManager } from '../src/shared/pg-boss-manager.js';
+import { PgBossAdapter } from '../src/shared/job-queue/pg-boss-adapter.js';
+import type { JobQueue } from '../src/shared/job-queue/types.js';
 import { ensureEventSchema } from '../src/events/schema.js';
 import { installEventTriggers, removeEventTriggers } from '../src/events/triggers.js';
 import { enqueuePendingEvents, registerEventWorkers } from '../src/events/delivery.js';
@@ -115,7 +115,7 @@ async function waitFor(
 
 describe('Event Triggers', () => {
   let pool: InstanceType<typeof Pool>;
-  let bossManager: PgBossManager;
+  let jobQueue: JobQueue;
   let webhook: MockWebhookServer;
   let testTable: TableInfo;
 
@@ -126,9 +126,9 @@ describe('Event Triggers', () => {
     // Create pool
     pool = new Pool({ connectionString: TEST_DB_URL, max: 5 });
 
-    // Initialize pg-boss via shared manager
-    bossManager = createPgBossManager(TEST_DB_URL);
-    await bossManager.start();
+    // Initialize pg-boss via JobQueue adapter
+    jobQueue = new PgBossAdapter(TEST_DB_URL);
+    await jobQueue.start();
 
     // Start mock webhook server
     webhook = new MockWebhookServer();
@@ -144,7 +144,7 @@ describe('Event Triggers', () => {
     await installEventTriggers(pool, [testTable]);
 
     // Register pg-boss workers for our test triggers
-    await registerEventWorkers(bossManager.boss, pool, [testTable], logger);
+    await registerEventWorkers(jobQueue, pool, [testTable], logger);
   }, 30_000);
 
   afterAll(async () => {
@@ -153,9 +153,9 @@ describe('Event Triggers', () => {
       await removeEventTriggers(pool, [testTable]);
     }
 
-    // Cleanup pg-boss
-    if (bossManager) {
-      await bossManager.stop();
+    // Cleanup job queue
+    if (jobQueue) {
+      await jobQueue.stop();
     }
 
     // Cleanup hakkyra_boss schema
@@ -202,7 +202,7 @@ describe('Event Triggers', () => {
       );
 
       // Enqueue pending events
-      const enqueued = await enqueuePendingEvents(pool, bossManager.boss, logger);
+      const enqueued = await enqueuePendingEvents(pool, jobQueue, logger);
       expect(enqueued).toBeGreaterThanOrEqual(1);
 
       // Wait for webhook delivery
@@ -281,7 +281,7 @@ describe('Event Triggers', () => {
       expect(eventResult.rows[0].operation).toBe('UPDATE');
 
       // Enqueue and deliver
-      const enqueued = await enqueuePendingEvents(pool, bossManager.boss, logger);
+      const enqueued = await enqueuePendingEvents(pool, jobQueue, logger);
       expect(enqueued).toBe(1);
 
       const requests = await webhook.waitForRequests(1, 15000);
@@ -356,7 +356,7 @@ describe('Event Triggers', () => {
       );
 
       // Enqueue pending events
-      await enqueuePendingEvents(pool, bossManager.boss, logger);
+      await enqueuePendingEvents(pool, jobQueue, logger);
 
       // Wait for the first (failing) delivery attempt
       await webhook.waitForRequests(1, 15000);
@@ -387,7 +387,7 @@ describe('Event Triggers', () => {
       // The event should still be 'pending' (not yet exhausted retries)
       await waitFor(async () => {
         // Try to re-enqueue events that are back in pending state
-        const count = await enqueuePendingEvents(pool, bossManager.boss, logger);
+        const count = await enqueuePendingEvents(pool, jobQueue, logger);
         return count > 0;
       }, 15000);
 
@@ -438,7 +438,7 @@ describe('Event Triggers', () => {
       });
 
       // Register a worker for this special trigger
-      await registerEventWorkers(bossManager.boss, pool, [deadLetterTable], logger);
+      await registerEventWorkers(jobQueue, pool, [deadLetterTable], logger);
 
       // Configure webhook to always fail
       webhook.responseCode = 500;
@@ -459,7 +459,7 @@ describe('Event Triggers', () => {
       );
 
       // Enqueue and let the worker process it
-      await enqueuePendingEvents(pool, bossManager.boss, logger);
+      await enqueuePendingEvents(pool, jobQueue, logger);
 
       // Wait for the first attempt
       await webhook.waitForRequests(1, 15000);
@@ -514,7 +514,7 @@ describe('Event Triggers', () => {
       expect(pendingResult.rows[0].status).toBe('pending');
 
       // Step 2: Enqueue - this should set status to 'processing'
-      const enqueued = await enqueuePendingEvents(pool, bossManager.boss, logger);
+      const enqueued = await enqueuePendingEvents(pool, jobQueue, logger);
       expect(enqueued).toBe(1);
 
       const processingResult = await pool.query(
@@ -572,7 +572,7 @@ describe('Event Triggers', () => {
       expect(pendingResult.rows[0].status).toBe('pending');
 
       // Enqueue
-      await enqueuePendingEvents(pool, bossManager.boss, logger);
+      await enqueuePendingEvents(pool, jobQueue, logger);
 
       // Verify processing
       const processingResult = await pool.query(
@@ -656,7 +656,7 @@ describe('Event Triggers', () => {
       expect(vars['x-hasura-user-id']).toBe('d0000000-0000-0000-0000-000000000001');
 
       // Enqueue and deliver
-      await enqueuePendingEvents(pool, bossManager.boss, logger);
+      await enqueuePendingEvents(pool, jobQueue, logger);
 
       // Wait for webhook delivery; filter for the correct event by checking
       // the payload ID, since pg-boss retries from earlier tests may also
@@ -726,7 +726,7 @@ describe('Event Triggers', () => {
       expect(vars).toBeNull();
 
       // Verify the webhook payload has empty session_variables ({})
-      await enqueuePendingEvents(pool, bossManager.boss, logger);
+      await enqueuePendingEvents(pool, jobQueue, logger);
 
       const expectedEventId = result.rows[0].id;
       await waitFor(async () => {

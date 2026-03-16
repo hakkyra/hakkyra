@@ -844,6 +844,79 @@ Findings from comprehensive code review of permissions, relationships, computed 
 
 ---
 
+## Phase 7: Code Review Findings (2026-03-16)
+
+Comprehensive review of permissions, relations, computed fields, tracked functions, and security.
+Covers all recent commits (e654f3b through 1518030). All 1194 tests passing.
+
+### Bugs Fixed During Review
+
+- **`delivered` column missing from event_log** — `CREATE TABLE IF NOT EXISTS` doesn't add columns to existing tables; added `ADD COLUMN IF NOT EXISTS` migration in `ensureEventSchema`
+- **Events test used raw PgBoss instead of PgBossAdapter** — `bossManager.boss` (raw PgBoss) passed to `registerEventWorkers` which calls `work(queue, handler, { concurrency })` with 3 args; raw PgBoss misinterprets the arg order. Switched to `PgBossAdapter`.
+- **Zod schema test missing `httpConcurrency` default** — New config field added without updating test expectation
+
+### P7.1 — Security Issues
+
+#### Critical
+
+- [ ] **Async action status IDOR** — `GET /v1/actions/:actionId/status` only checks authentication, not authorization. Any authenticated user can read any other user's async action output by guessing the UUID. Fix: store `user_id` in `async_action_log` and filter by it.
+- [ ] **`backend_only` permission not enforced** — The `backendOnly` flag is parsed from metadata but never checked at runtime. Roles with `backend_only: true` on insert permissions can still insert from any client. Affects: invoice, appointment, account, ledger_entry, service_plan_client, client_service.
+
+#### High
+
+- [ ] **No query complexity/cost analysis** — Only depth limiting exists. A query within the depth limit can request many aliases, wide relationships at each level, combine aggregates. A single request could generate dozens of heavy SQL queries.
+- [ ] **No GraphQL batching limit** — Mercurius doesn't limit batched operations. An attacker can send hundreds of queries in one request.
+- [ ] **`resolveLimit` bypass in subscriptions and tracked functions** — `resolveLimit` in `subscription-resolvers.ts` and `tracked-functions.ts` doesn't accept the global `graphql.maxLimit` cap. Only `schema/resolvers.ts` properly enforces it.
+
+#### Medium
+
+- [ ] **DNS rebinding for webhook SSRF** — IP validation happens before `fetch()`, but DNS rebinding can return a public IP during validation and a private IP during the actual request (TOCTOU).
+
+### P7.2 — Missing Test Coverage: Recent Commits
+
+These recent commits have no regression tests for the specific fix:
+
+- [ ] **e654f3b** — Non-set-returning computed fields returning table types: NO test for composite-return-without-SETOF scenario
+- [ ] **db5e112** — Relationship where filters on tracked functions: NO test using relationship-based where filter on tracked function query (e.g., `where: { branch: { name: { _eq: "HQ" } } }`)
+- [ ] **eeab354** — FK relationships with custom names: NO test for name-mismatch FK resolution by localColumns in merger
+- [ ] **71b10f2** — Table alias in ByPk compilers for computed field permission filters: NO test combining updateByPk/deleteByPk with computed-field-based permission filter
+- [ ] **81da417** — stringify_numeric_types schema types: NO test asserting GraphQL type names remain Bigint/Numeric (not String) when enabled
+- [ ] **e8ef889** — Create queue before scheduling cleanup: NO test for `registerEventCleanup`
+- [ ] **8a04019** — Concurrency control: NO unit tests for concurrency pass-through in adapters
+
+### P7.3 — Permission Test Gaps
+
+- [ ] **Root field visibility E2E** — Unit-tested in config.test.ts but no E2E test verifying `queryRootFields: []` actually denies queries at the GraphQL endpoint
+- [ ] **Computed field permission denial** — No test verifying a role without a computed field in `computedFields` list is denied access
+- [ ] **Update presets via GraphQL** — REST tests cover presets, but no GraphQL E2E test for update presets being applied
+- [ ] **Bulk mutation check constraints** — No test for `insertClient(objects: [...])` where some objects pass check and some fail; no atomicity test
+- [ ] **Delete with permission filter** — No E2E test for delete where filter restricts which rows can be deleted
+- [ ] **Upsert permission enforcement** — No E2E test verifying upsert respects insert/update column permissions
+- [ ] **Session variable arrays** — No test for `_in` operator with session variable resolving to array
+- [ ] **Missing session variable returns null** — No test for behavior when permission filter references absent JWT claim
+- [ ] **Subscription root field visibility** — No E2E test for `subscriptionRootFields: []` or streaming subscription permission enforcement
+
+### P7.4 — Relationship Test Gaps
+
+- [ ] **Cross-schema relationships** — No test for relationship between tables in different schemas
+- [ ] **Nested relationship traversal in where filters** — No test for `accounts(where: { client: { status: { _eq: ACTIVE } } })` — filtering array relationship by nested relationship field
+- [ ] **Object relationship ordering with NULL FK** — No test for ORDER BY on relationship when FK column is NULL for some rows
+- [ ] **Relationship aggregates as nested query** — No test for `clientByPk { invoicesAggregate { aggregate { count } } }`
+- [ ] **Permissions blocking nested relationship entirely** — No test where role has NO select permission on remote table (relationship silently omitted)
+- [ ] **Relationship data in updateMany RETURNING** — Not tested for `updateMany` mutations
+- [ ] **Config-defined relationship overriding auto-detected** — No test for YAML relationship replacing auto-detected one with same name
+
+### P7.5 — Computed Field & Function Test Gaps
+
+- [ ] **Aggregate E2E execution of computed fields** — Only schema introspection verified; no test running `clientsAggregate { aggregate { sum { totalBalance } } }`
+- [ ] **INSERT RETURNING with computed fields** — UPDATE/DELETE RETURNING tested, INSERT not
+- [ ] **SETOF computed field with where/orderBy/limit** — Source code supports these args but no test exercises them
+- [ ] **Computed field WHERE with arguments** — `compileWhere` emits function call without passing user args or session args; filtering by argument-bearing computed fields may use wrong defaults
+- [ ] **Tracked function aggregate with where filter** — No test for `searchClientsAggregate(args: ..., where: { status: { _eq: ACTIVE } })`
+- [ ] **Tracked function return-table row-level filter** — Code applies `perm.filter` but no E2E test confirms row-level filtering on function results
+
+---
+
 ## Test Summary
 
 | Suite | Tests | Status |

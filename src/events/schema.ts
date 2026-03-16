@@ -58,10 +58,24 @@ function quoteIdent(name: string): string {
 }
 
 /**
+ * Ensure all columns exist on an already-created event_log table.
+ * Uses ADD COLUMN IF NOT EXISTS to be idempotent.
+ */
+export function migrateEventLogSQL(schemaName: string): string {
+  return `
+DO $$ BEGIN
+  ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS delivered BOOLEAN DEFAULT false;
+  ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS response_status INTEGER;
+END $$
+`;
+}
+
+/**
  * Ensure the internal schema and event_log table exist.
  */
 export async function ensureEventSchema(pool: Pool, schemaName: string = 'hakkyra'): Promise<void> {
   await pool.query(createSchemaSQL(schemaName));
   await pool.query(createEventLogSQL(schemaName));
+  await pool.query(migrateEventLogSQL(schemaName));
   await pool.query(createIndexesSQL(schemaName));
 }
