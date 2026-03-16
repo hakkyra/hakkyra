@@ -3,6 +3,7 @@ table:
   name: fiscal_period
 
 configuration:
+  custom_name: fiscalPeriod
   custom_root_fields:
     select: fiscalPeriods
     select_by_pk: fiscalPeriodByPk

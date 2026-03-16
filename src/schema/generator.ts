@@ -83,7 +83,8 @@ interface RootFieldNames {
 }
 
 function getRootFieldNames(table: TableInfo): RootFieldNames {
-  const base = toCamelCase(table.alias ?? table.name);
+  // When custom_name (alias) is set, use it verbatim — Hasura does NOT camelCase it.
+  const base = table.alias ?? toCamelCase(table.name);
   const typeName = getTypeName(table);
   const custom = table.customRootFields;
 
