@@ -80,8 +80,7 @@ export function registerRESTWithManager(
     getPool: (intent) => connectionManager.getPool(intent),
     getPermission: createPermissionGetter(permissionLookup),
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerRESTRoutes(server as any, tables, config.rest, routerDeps);
+  registerRESTRoutes(server, tables, config.rest, routerDeps);
 }
 
 // ─── Hasura REST endpoints ───────────────────────────────────────────────────
@@ -99,8 +98,7 @@ export function registerHasuraREST(
       return buildResolverContext(contextDeps, auth, request.headers as Record<string, string>) as unknown as Record<string, unknown>;
     },
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerHasuraRestEndpoints(server as any, config.queryCollections, config.hasuraRestEndpoints, hasuraRestDeps);
+  registerHasuraRestEndpoints(server, config.queryCollections, config.hasuraRestEndpoints, hasuraRestDeps);
 }
 
 // ─── Health / readiness endpoints ────────────────────────────────────────────

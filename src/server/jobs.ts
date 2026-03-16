@@ -26,6 +26,7 @@ import type { RedisFanoutBridge } from '../subscriptions/redis-fanout.js';
 import { ensureAsyncActionSchema, registerAsyncActionWorkers } from '../actions/index.js';
 import { registerInvokeRoute } from '../events/invoke.js';
 import { registerAsyncActionStatusRoute } from '../actions/rest.js';
+import type { Logger } from 'pino';
 import type { SubscriptionRef, AsyncActionRef } from './context.js';
 
 // ─── Phase 2 initialization ─────────────────────────────────────────────────
@@ -75,8 +76,8 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
   let subscriptionMgr: SubscriptionManager | undefined;
   let redisFanout: RedisFanoutBridge | undefined;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const log = server.log as any;
+  // FastifyBaseLogger is a compatible subset of pino.Logger — safe upcast
+  const log = server.log as unknown as Logger;
 
   if (!primaryConnectionString) {
     server.log.warn(
@@ -140,16 +141,14 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
   }
 
   // Manual event invocation route
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerInvokeRoute(server as any, {
+  registerInvokeRoute(server, {
     pool: primaryPool,
     jobQueue,
     tables,
   });
 
   // Async action status REST endpoint
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  registerAsyncActionStatusRoute(server as any, {
+  registerAsyncActionStatusRoute(server, {
     pool: primaryPool,
     actions: config.actions,
   });
@@ -160,8 +159,7 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
     const subReconcile = await reconcileTriggers(
       primaryPool,
       desiredSubTriggers,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      server.log as any,
+      server.log as unknown as Logger,
       { triggerPrefix: `${schemaName}_notify_`, schemaName },
     );
     server.log.info(
