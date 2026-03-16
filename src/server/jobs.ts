@@ -29,8 +29,8 @@ import { createRedisFanoutBridge } from '../subscriptions/redis-fanout.js';
 import type { RedisFanoutBridge } from '../subscriptions/redis-fanout.js';
 import { registerInvokeRoute } from '../events/invoke.js';
 import { registerAsyncActionStatusRoute } from '../actions/rest.js';
-import type { Logger } from 'pino';
 import type { SubscriptionRef, AsyncActionRef } from './context.js';
+import { asPinoLogger } from './types.js';
 
 // ─── Phase 2 initialization ─────────────────────────────────────────────────
 
@@ -83,8 +83,7 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
   let subscriptionMgr: SubscriptionManager | undefined;
   let redisFanout: RedisFanoutBridge | undefined;
 
-  // FastifyBaseLogger is a compatible subset of pino.Logger — safe upcast
-  const log = server.log as unknown as Logger;
+  const log = asPinoLogger(server.log);
 
   if (!primaryConnectionString) {
     server.log.warn(
@@ -178,7 +177,7 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
     const subReconcile = await reconcileTriggers(
       primaryPool,
       desiredSubTriggers,
-      server.log as unknown as Logger,
+      asPinoLogger(server.log),
       { triggerPrefix: `${schemaName}_notify_`, schemaName },
     );
     server.log.info(

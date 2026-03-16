@@ -7,21 +7,23 @@
  * GraphQL query through Mercurius's app.graphql() API.
  */
 
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { QueryCollection, HasuraRestEndpoint } from '../types.js';
+import type { MercuriusFastifyInstance, MercuriusExecutionError } from '../server/types.js';
 
 const BASE_PATH = '/api/rest';
 
 export interface HasuraRestDeps {
   /** Build the Mercurius/resolver context object from a Fastify request */
-  buildContext: (request: FastifyRequest) => Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  buildContext: (request: FastifyRequest) => Record<string, any>;
 }
 
 /**
  * Register Hasura-style REST endpoint routes on the Fastify instance.
  */
 export function registerHasuraRestEndpoints(
-  fastify: FastifyInstance,
+  fastify: MercuriusFastifyInstance,
   queryCollections: QueryCollection[],
   endpoints: HasuraRestEndpoint[],
   deps: HasuraRestDeps,
@@ -80,17 +82,15 @@ export function registerHasuraRestEndpoints(
           const context = deps.buildContext(request);
 
           // Execute the GraphQL query through Mercurius
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const result = await (fastify as any).graphql(queryString, context, variables);
+          const result = await fastify.graphql(queryString, context, variables);
 
           void reply.code(200).send(result);
         } catch (err) {
           request.log.error({ err, endpoint: endpoint.name }, 'Error executing Hasura REST endpoint');
           // Mercurius throws errors with statusCode and errors properties for
           // validation failures — return them as standard GraphQL error responses
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const mercErr = err as any;
-          if (mercErr?.statusCode && mercErr?.errors) {
+          const mercErr = err as MercuriusExecutionError;
+          if (mercErr.statusCode && mercErr.errors) {
             void reply.code(200).send({
               data: null,
               errors: mercErr.errors,
