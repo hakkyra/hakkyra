@@ -44,10 +44,10 @@ import type {
   BoolExp,
 } from '../types.js';
 import { customScalars, asScalar } from './scalars.js';
-import { toCamelCase, toPascalCase, getColumnFieldName, tableKey } from './type-builder.js';
+import { toCamelCase, toPascalCase, tableKey } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import type { ResolverContext, ResolverPermissionLookup } from './resolvers/index.js';
-import { remapBoolExp as remapBoolExpFull, resolveLimit } from './resolvers/index.js';
+import { remapBoolExp as remapBoolExpFull, resolveLimit, camelToColumnMap } from './remap.js';
 import { parseResolveInfo } from './resolve-info.js';
 import {
   compileSelect,
@@ -566,48 +566,7 @@ function remapRowToCamel(
   return result;
 }
 
-// ─── camelCase / snake_case helpers ──────────────────────────────────────
-
-function camelToColumnMap(table: TableInfo): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const col of table.columns) {
-    map.set(getColumnFieldName(table, col.name), col.name);
-  }
-  return map;
-}
-
-function remapBoolExp(
-  boolExp: BoolExp | undefined | null,
-  columnMap: Map<string, string>,
-): BoolExp | undefined {
-  if (!boolExp || typeof boolExp !== 'object') return undefined;
-
-  const keys = Object.keys(boolExp);
-  if (keys.length === 0) return boolExp;
-
-  if ('_and' in boolExp) {
-    const typed = boolExp as { _and: BoolExp[] };
-    return { _and: typed._and.map((sub) => remapBoolExp(sub, columnMap) ?? ({} as BoolExp)) };
-  }
-  if ('_or' in boolExp) {
-    const typed = boolExp as { _or: BoolExp[] };
-    return { _or: typed._or.map((sub) => remapBoolExp(sub, columnMap) ?? ({} as BoolExp)) };
-  }
-  if ('_not' in boolExp) {
-    const typed = boolExp as { _not: BoolExp };
-    return { _not: remapBoolExp(typed._not, columnMap) ?? ({} as BoolExp) };
-  }
-  if ('_exists' in boolExp) {
-    return boolExp;
-  }
-
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(boolExp as Record<string, unknown>)) {
-    const pgName = columnMap.get(key) ?? key;
-    result[pgName] = value;
-  }
-  return result as BoolExp;
-}
+// camelToColumnMap and remapBoolExp are imported from ./remap.js
 
 function remapOrderBy(
   orderBy: Array<Record<string, string>> | undefined | null,

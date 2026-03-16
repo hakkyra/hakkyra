@@ -1,10 +1,10 @@
 /**
  * Permissions module.
  *
- * Re-exports the permission filter compiler and the permission lookup table builder.
+ * Re-exports the permission lookup table builder.
+ * Note: compileFilter is only used internally by lookup.ts (which imports it
+ * directly from compiler.ts), so it is not re-exported here.
  */
-
-export { compileFilter } from './compiler.js';
 
 export { buildPermissionLookup } from './lookup.js';
 export type { PermissionLookup } from './lookup.js';
