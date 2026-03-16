@@ -34,6 +34,7 @@ import type {
   GraphQLFieldConfig,
   GraphQLFieldConfigArgumentMap,
   GraphQLInputType,
+  GraphQLOutputType,
   GraphQLScalarType,
 } from 'graphql';
 import type {
@@ -43,7 +44,8 @@ import type {
   SessionVariables,
   BoolExp,
 } from '../types.js';
-import { customScalars, asScalar } from './scalars.js';
+import { customScalars, asScalar, asOutputType } from './scalars.js';
+import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { toCamelCase, toPascalCase, tableKey } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import type { ResolverContext, ResolverPermissionLookup } from './resolvers/index.js';
@@ -128,6 +130,20 @@ export function pgArgTypeToGraphQL(pgType: string): GraphQLInputType {
   return asScalar(GraphQLString);
 }
 
+/**
+ * Map a PG scalar return type to a GraphQL output type.
+ * Uses the canonical pgTypeToGraphQL mapping from type-map.ts
+ * so that e.g. jsonb → Jsonb!, json → json!, text → String!, etc.
+ */
+export function pgScalarReturnTypeToGraphQL(pgType: string): GraphQLOutputType {
+  const gqlType = pgTypeToGraphQL(pgType, false);
+  const builtin = BUILTIN_SCALARS[gqlType.name];
+  if (builtin) return asOutputType(builtin);
+  const custom = customScalars[gqlType.name];
+  if (custom) return asOutputType(custom);
+  return asOutputType(asScalar(GraphQLString));
+}
+
 // ─── Naming ──────────────────────────────────────────────────────────────
 
 /**
@@ -153,6 +169,8 @@ export interface TrackedFunctionInfo {
   functionInfo: FunctionInfo;
   /** The table this function returns rows from (for SETOF functions). */
   returnTable?: TableInfo;
+  /** For functions returning scalar types (e.g., jsonb, text, int), the PG return type name. */
+  scalarReturnType?: string;
   /** The function arguments, excluding the table-row argument (for computed fields)
    *  and the session argument. */
   userArgs: Array<{ name: string; pgType: string }>;
@@ -181,6 +199,7 @@ export function resolveTrackedFunctions(
     }
 
     let returnTable: TableInfo | undefined;
+    let scalarReturnType: string | undefined;
     if (fn.isSetReturning) {
       // Find the return table by matching the return type against tracked tables
       returnTable = tables.find(
@@ -197,13 +216,19 @@ export function resolveTrackedFunctions(
       returnTable = tables.find(
         (t) => t.name === fn.returnType || `${t.schema}.${t.name}` === fn.returnType,
       );
-      // If it returns a non-table type (e.g., text, int), we skip for now
-      // since Hasura requires tracked functions to return table types
+      // If it returns a non-table type (e.g., jsonb, text, int), treat as scalar return
       if (!returnTable) {
-        console.warn(
-          `[hakkyra:tracked-functions] Return type "${fn.returnType}" for function "${config.name}" is not a tracked table — skipping`,
-        );
-        continue;
+        const gqlType = pgTypeToGraphQL(fn.returnType, false);
+        // If it maps to a known GraphQL type (not just the fallback 'String' for unknown composite types),
+        // treat it as a scalar-returning function
+        if (gqlType.name) {
+          scalarReturnType = fn.returnType;
+        } else {
+          console.warn(
+            `[hakkyra:tracked-functions] Return type "${fn.returnType}" for function "${config.name}" is not a tracked table or known scalar — skipping`,
+          );
+          continue;
+        }
       }
     }
 
@@ -234,7 +259,7 @@ export function resolveTrackedFunctions(
       ? config
       : { ...config, exposedAs: fn.volatility === 'volatile' ? 'mutation' as const : 'query' as const };
 
-    result.push({ config: resolvedConfig, functionInfo: fn, returnTable, userArgs });
+    result.push({ config: resolvedConfig, functionInfo: fn, returnTable, scalarReturnType, userArgs });
   }
 
   return result;
@@ -264,12 +289,7 @@ export function buildTrackedFunctionFields(
   const inputTypes: GraphQLInputObjectType[] = [];
 
   for (const trackedFn of trackedFunctions) {
-    const { config, functionInfo: fn, returnTable, userArgs } = trackedFn;
-    if (!returnTable) continue;
-
-    const key = tableKey(returnTable.schema, returnTable.name);
-    const objectType = typeRegistry.get(key);
-    if (!objectType) continue;
+    const { config, functionInfo: fn, returnTable, scalarReturnType, userArgs } = trackedFn;
 
     // Derive field names
     const fieldName = config.customRootFields?.function ?? functionFieldName(config.name);
@@ -297,6 +317,32 @@ export function buildTrackedFunctionFields(
       // Hasura makes args optional even when there are user arguments
       fieldArgs['args'] = { type: argsInputType };
     }
+
+    // ── Scalar-returning functions (jsonb, json, text, int, etc.) ──────
+    if (scalarReturnType && !returnTable) {
+      const scalarType = pgScalarReturnTypeToGraphQL(scalarReturnType);
+      // Hasura returns ScalarType! (non-null) for scalar functions
+      const fieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
+        type: new GraphQLNonNull(scalarType),
+        args: fieldArgs,
+        resolve: makeScalarFunctionResolver(trackedFn),
+        description: `Execute function ${config.schema}.${config.name}`,
+      };
+
+      if (config.exposedAs === 'mutation') {
+        mutationFields[fieldName] = fieldConfig;
+      } else {
+        queryFields[fieldName] = fieldConfig;
+      }
+      continue;
+    }
+
+    // ── Table-returning functions ──────────────────────────────────────
+    if (!returnTable) continue;
+
+    const key = tableKey(returnTable.schema, returnTable.name);
+    const objectType = typeRegistry.get(key);
+    if (!objectType) continue;
 
     if (fn.isSetReturning) {
       // SETOF function: add query-like args (where, orderBy, limit, offset, distinctOn)
@@ -759,6 +805,48 @@ function makeTrackedFunctionResolver(
       const data = row?.data ?? null;
       return data ? remapTrackedFnRowToCamel(data as Record<string, unknown>, returnTable) : null;
     }
+  };
+}
+
+/**
+ * Resolver for scalar-returning tracked functions (e.g., functions returning jsonb, json, text, int).
+ * Calls the function directly and returns the scalar value.
+ */
+function makeScalarFunctionResolver(
+  trackedFn: TrackedFunctionInfo,
+): (parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: import('graphql').GraphQLResolveInfo) => Promise<unknown> {
+  return async (_parent, args, context) => {
+    const { auth, queryWithSession, inheritedRoles } = context;
+    const { config, functionInfo: fn } = trackedFn;
+
+    // ── Function-level permission check ──────────────────────────────
+    if (!auth.isAdmin) {
+      if (!config.permissions || config.permissions.length === 0) {
+        throw new Error(
+          `Permission denied: no roles have access to function "${config.name}"`,
+        );
+      }
+      const hasPerm = hasRolePermission(auth.role, config.permissions, inheritedRoles);
+      if (!hasPerm) {
+        throw new Error(
+          `Permission denied: role "${auth.role}" does not have access to function "${config.name}"`,
+        );
+      }
+    }
+
+    // ── Extract function arguments ──────────────────────────────────
+    const funcArgs = extractFuncArgs(trackedFn, args, auth);
+
+    // ── Build SQL: SELECT "schema"."func"($1, $2) AS "data" ─────────
+    const params = new ParamCollector();
+    const funcCall = buildNamedFuncCall(fn.schema, fn.name, funcArgs, params);
+    const sql = `SELECT ${funcCall} AS "data"`;
+
+    // ── Execute query ────────────────────────────────────────────────
+    const intent = fn.volatility === 'volatile' ? 'write' : 'read';
+    const result = await queryWithSession(sql, params.getParams(), auth, intent);
+    const row = result.rows[0] as { data: unknown } | undefined;
+    return row?.data ?? null;
   };
 }
 

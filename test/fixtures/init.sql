@@ -385,6 +385,27 @@ RETURNS SETOF client AS $$
   SELECT * FROM client WHERE id = (hasura_session->>'x-hasura-user-id')::uuid
 $$ LANGUAGE SQL STABLE;
 
+-- ─── Scalar-returning tracked functions (P10.17) ─────────────────────────
+
+CREATE OR REPLACE FUNCTION player_data_report(player_id uuid)
+RETURNS jsonb AS $$
+  SELECT jsonb_build_object(
+    'playerId', player_id,
+    'totalBalance', COALESCE(SUM(a.balance), 0),
+    'accountCount', COUNT(a.id)
+  )
+  FROM account a
+  WHERE a.client_id = player_id AND a.active = true
+$$ LANGUAGE SQL STABLE;
+
+CREATE OR REPLACE FUNCTION player_profile(player_id uuid)
+RETURNS json AS $$
+  SELECT row_to_json(t) FROM (
+    SELECT c.id, c.username, c.email, c.status::text
+    FROM client c WHERE c.id = player_id
+  ) t
+$$ LANGUAGE SQL STABLE;
+
 -- ─── Non-public schema function (P6.5i) ─────────────────────────────────
 
 CREATE SCHEMA IF NOT EXISTS utils;

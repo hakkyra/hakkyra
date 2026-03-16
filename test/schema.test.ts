@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { GraphQLSchema, GraphQLObjectType, GraphQLInputObjectType, GraphQLEnumType, GraphQLNonNull, GraphQLList } from 'graphql';
+import { GraphQLSchema, GraphQLObjectType, GraphQLInputObjectType, GraphQLEnumType, GraphQLNonNull, GraphQLList, GraphQLScalarType } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel, resolveTableEnums } from '../src/introspection/merger.js';
@@ -990,6 +990,56 @@ describe('GraphQL Schema Generation', () => {
       expect(fields['insertAccount']).toBeDefined();
       expect(fields['updateAccount']).toBeDefined();
       expect(fields['deleteAccount']).toBeDefined();
+    });
+  });
+
+  describe('Scalar-returning tracked functions (P10.17)', () => {
+    it('should expose playerDataReport as a query field returning Jsonb!', () => {
+      const queryType = schema.getQueryType()!;
+      const fields = queryType.getFields();
+      expect(fields['playerDataReport']).toBeDefined();
+      // Return type should be Jsonb! (NonNull<Jsonb>)
+      const returnType = fields['playerDataReport'].type;
+      expect(returnType).toBeInstanceOf(GraphQLNonNull);
+      const innerType = (returnType as GraphQLNonNull<any>).ofType;
+      expect(innerType).toBeInstanceOf(GraphQLScalarType);
+      expect(innerType.name).toBe('Jsonb');
+    });
+
+    it('should expose playerProfile as a query field returning json!', () => {
+      const queryType = schema.getQueryType()!;
+      const fields = queryType.getFields();
+      expect(fields['playerProfile']).toBeDefined();
+      // Return type should be json! (NonNull<json>)
+      const returnType = fields['playerProfile'].type;
+      expect(returnType).toBeInstanceOf(GraphQLNonNull);
+      const innerType = (returnType as GraphQLNonNull<any>).ofType;
+      expect(innerType).toBeInstanceOf(GraphQLScalarType);
+      expect(innerType.name).toBe('json');
+    });
+
+    it('should have args input type for scalar-returning functions', () => {
+      const queryType = schema.getQueryType()!;
+      const field = queryType.getFields()['playerDataReport'];
+      expect(field).toBeDefined();
+      const argsArg = field.args.find((a) => a.name === 'args');
+      expect(argsArg).toBeDefined();
+      // The args input type should have a playerId field
+      const argsType = argsArg!.type as GraphQLInputObjectType;
+      const argsFields = argsType.getFields();
+      expect(argsFields['playerId']).toBeDefined();
+    });
+
+    it('should NOT have where/orderBy/limit/offset args on scalar-returning functions', () => {
+      const queryType = schema.getQueryType()!;
+      const field = queryType.getFields()['playerDataReport'];
+      expect(field).toBeDefined();
+      const argNames = field.args.map((a) => a.name);
+      expect(argNames).not.toContain('where');
+      expect(argNames).not.toContain('orderBy');
+      expect(argNames).not.toContain('limit');
+      expect(argNames).not.toContain('offset');
+      expect(argNames).not.toContain('distinctOn');
     });
   });
 });
