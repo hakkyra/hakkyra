@@ -395,7 +395,7 @@ export function buildTrackedFunctionFields(
  * For scalar: SELECT json_build_object(...) AS "data"
  *             FROM "schema"."func"($1, $2) "t0" LIMIT 1
  */
-function compileTrackedFunctionCall(opts: {
+export function compileTrackedFunctionCall(opts: {
   trackedFn: TrackedFunctionInfo;
   funcArgs: NamedArg[];
   table: TableInfo;
@@ -526,7 +526,7 @@ function compileTrackedFunctionCall(opts: {
  * Build a function call using named parameter notation so that omitted
  * arguments fall back to their PostgreSQL DEFAULT values.
  */
-function buildNamedFuncCall(
+export function buildNamedFuncCall(
   schema: string,
   name: string,
   namedArgs: NamedArg[],
@@ -546,7 +546,7 @@ function buildNamedFuncCall(
  * Remap row keys from snake_case to camelCase for GraphQL response.
  * Matches the remapping done by regular table resolvers.
  */
-function remapRowToCamel(
+export function remapTrackedFnRowToCamel(
   row: Record<string, unknown>,
   table: TableInfo,
 ): Record<string, unknown> {
@@ -601,12 +601,12 @@ function remapDistinctOn(
 
 // ─── Resolver Factories ─────────────────────────────────────────────────
 
-interface NamedArg {
+export interface NamedArg {
   name: string;
   value: unknown;
 }
 
-function extractFuncArgs(
+export function extractFuncArgs(
   trackedFn: TrackedFunctionInfo,
   args: Record<string, unknown>,
   session: SessionVariables,
@@ -653,7 +653,7 @@ function extractFuncArgs(
  * Check if a role has permission for a tracked function, including inherited roles.
  * An inherited role has access if any of its constituent roles has access.
  */
-function hasRolePermission(
+export function hasRolePermission(
   role: string,
   permissions: { role: string }[],
   inheritedRoles: Record<string, string[]>,
@@ -749,12 +749,12 @@ function makeTrackedFunctionResolver(
       const row = result.rows[0] as { data: unknown } | undefined;
       const data = row?.data ?? [];
       return Array.isArray(data)
-        ? data.map((r: Record<string, unknown>) => remapRowToCamel(r, returnTable))
+        ? data.map((r: Record<string, unknown>) => remapTrackedFnRowToCamel(r, returnTable))
         : data;
     } else {
       const row = result.rows[0] as { data: unknown } | undefined;
       const data = row?.data ?? null;
-      return data ? remapRowToCamel(data as Record<string, unknown>, returnTable) : null;
+      return data ? remapTrackedFnRowToCamel(data as Record<string, unknown>, returnTable) : null;
     }
   };
 }
@@ -881,7 +881,7 @@ function makeTrackedFunctionAggregateResolver(
  * Parse aggregate selection from GraphQL resolve info.
  * Looks for the "aggregate" field and its sub-fields (count, sum, avg, min, max).
  */
-function parseAggregateFromInfo(info: import('graphql').GraphQLResolveInfo): AggregateSelection {
+export function parseAggregateFromInfo(info: import('graphql').GraphQLResolveInfo): AggregateSelection {
   const agg: AggregateSelection = {};
   const fieldNode = info.fieldNodes[0];
   if (!fieldNode.selectionSet) return { count: {} };

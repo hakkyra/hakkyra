@@ -10,8 +10,8 @@ export { installEventTriggers, removeEventTriggers, generateEventTriggerSQL } fr
 export type { GeneratedEventTrigger } from './triggers.js';
 export { enqueuePendingEvents, registerEventWorkers, buildEventPayload } from './delivery.js';
 export type { EventLogRow } from './delivery.js';
-export { initEventTriggers, createEventManager } from './manager.js';
-export type { EventManager, EventManagerDeps } from './manager.js';
+export { createEventManager } from './manager.js';
+export type { EventManagerDeps } from './manager.js';
 export { registerEventCleanup } from './cleanup.js';
 export { registerInvokeRoute } from './invoke.js';
 export type { InvokeRouteDeps } from './invoke.js';

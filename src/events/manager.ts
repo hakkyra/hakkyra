@@ -19,11 +19,6 @@ import { ensureEventSchema } from './schema.js';
 import { enqueuePendingEvents, registerEventWorkers } from './delivery.js';
 import { reconcileTriggers, buildDesiredEventTriggers } from '../shared/trigger-reconciler.js';
 
-// ─── Types ─────────────────────────────────────────────────────────────────
-
-/** @deprecated Use ServiceManager instead. Kept for backwards compatibility. */
-export type EventManager = ServiceManager;
-
 // ─── Initialization ────────────────────────────────────────────────────────
 
 export interface EventTriggerOptions {
@@ -131,35 +126,3 @@ export function createEventManager(deps: EventManagerDeps): ServiceManager {
   };
 }
 
-/**
- * Initialize the event trigger system.
- *
- * @deprecated Use createEventManager() + manager.init() instead.
- * Kept for backwards compatibility with existing code.
- *
- * @param pool - Primary database connection pool
- * @param jobQueue - Job queue instance (must already be started)
- * @param tables - All tracked tables (only those with eventTriggers are processed)
- * @param connectionString - Connection string for pg-listen
- * @param logger - Pino logger instance
- * @returns An EventManager for lifecycle control
- */
-export async function initEventTriggers(
-  pool: Pool,
-  jobQueue: JobQueue,
-  tables: TableInfo[],
-  connectionString: string,
-  logger: Logger,
-  options?: EventTriggerOptions,
-): Promise<ServiceManager> {
-  const manager = createEventManager({
-    pool,
-    jobQueue,
-    tables,
-    connectionString,
-    logger,
-    options,
-  });
-  await manager.init();
-  return manager;
-}

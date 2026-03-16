@@ -104,6 +104,16 @@ actions:
     permissions:
       - role: client
 
+  # Sync mutation: accept contract with token — exercises ID, numeric, Numeric, Uuid scalars
+  - name: acceptContractWithToken
+    definition:
+      kind: synchronous
+      handler: "{{TEST_SERVER_URL}}/actions/accept-contract"
+      forward_client_headers: true
+      timeout: 15
+    permissions:
+      - role: client
+
 custom_types:
   input_objects:
     - name: CreatePaymentInput
@@ -112,6 +122,7 @@ custom_types:
     - name: CheckDiscountEligibilityInput
     - name: ScheduleConsultationInput
     - name: ProcessServiceInput
+    - name: AcceptContractInput
   objects:
     - name: PaymentResult
     - name: AdjustAccountResult
@@ -119,3 +130,4 @@ custom_types:
     - name: DiscountEligibilityResult
     - name: ScheduleConsultationResult
     - name: ProcessServiceResult
+    - name: AcceptContractResult

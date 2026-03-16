@@ -1071,6 +1071,7 @@ function transformAction(raw: RawAction): ActionConfig {
       contentType: rt.content_type,
       queryParams: rt.query_params,
       headers: rt.headers,
+      templateEngine: rt.template_engine,
     };
   }
 
@@ -1078,6 +1079,7 @@ function transformAction(raw: RawAction): ActionConfig {
   if (raw.definition.response_transform) {
     responseTransform = {
       body: raw.definition.response_transform.body,
+      templateEngine: raw.definition.response_transform.template_engine,
     };
   }
 

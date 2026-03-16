@@ -348,6 +348,8 @@ const RequestTransformSchema = z
 const ResponseTransformSchema = z
   .object({
     body: z.union([z.string(), z.record(z.string(), z.unknown())]).optional(),
+    template_engine: z.string().optional(),
+    version: z.number().optional(),
   })
   .strict();
 

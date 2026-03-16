@@ -59,6 +59,8 @@ import {
   makeSubscriptionSelectByPkSubscribe,
   makeSubscriptionSelectAggregateSubscribe,
   makeSubscriptionStreamSubscribe,
+  makeTrackedFunctionSubscriptionSubscribe,
+  makeTrackedFunctionAggregateSubscriptionSubscribe,
 } from './subscription-resolvers.js';
 import { buildNativeQueryFields } from './native-queries.js';
 import { resolveTrackedFunctions, buildTrackedFunctionFields } from './tracked-functions.js';
@@ -615,6 +617,49 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       resolve: (payload: unknown) => payload,
       subscribe: makeSubscriptionStreamSubscribe(table),
     };
+  }
+
+  // Add tracked function subscription fields (query-exposed functions only)
+  for (const trackedFn of resolvedTrackedFunctions) {
+    const { config, functionInfo: fn, returnTable } = trackedFn;
+    if (!returnTable) continue;
+    // Only query-exposed functions get subscriptions (not mutations)
+    if (config.exposedAs === 'mutation') continue;
+
+    const key = tableKey(returnTable.schema, returnTable.name);
+    const objectType = typeRegistry.get(key);
+    if (!objectType) continue;
+
+    const fieldName = config.customRootFields?.function ?? toCamelCase(config.name);
+
+    // Mirror the query field's args for the subscription
+    const queryField = trackedFunctionFields.queryFields[fieldName];
+    if (!queryField) continue;
+
+    // List subscription
+    subscriptionFields[fieldName] = {
+      type: queryField.type!,
+      args: queryField.args,
+      description: `Subscribe to function ${config.schema}.${config.name}`,
+      resolve: (payload: unknown) => payload,
+      subscribe: makeTrackedFunctionSubscriptionSubscribe(trackedFn),
+    };
+
+    // Aggregate subscription for SETOF functions
+    if (fn.isSetReturning) {
+      const aggFieldName = config.customRootFields?.functionAggregate
+        ?? `${fieldName}Aggregate`;
+      const aggQueryField = trackedFunctionFields.queryFields[aggFieldName];
+      if (aggQueryField) {
+        subscriptionFields[aggFieldName] = {
+          type: aggQueryField.type!,
+          args: aggQueryField.args,
+          description: `Subscribe to aggregate of function ${config.schema}.${config.name}`,
+          resolve: (payload: unknown) => payload,
+          subscribe: makeTrackedFunctionAggregateSubscriptionSubscribe(trackedFn),
+        };
+      }
+    }
   }
 
   // Only create subscription type if there are subscription fields

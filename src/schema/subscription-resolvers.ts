@@ -23,6 +23,17 @@ import { toCamelCase, getColumnFieldName } from './type-builder.js';
 import type { ResolverContext } from './resolvers/index.js';
 import { isSubscriptionRootFieldAllowed, isNumericColumn, buildComputedFieldSelections, buildSetReturningComputedFieldSelections, resolveLimit, camelToColumnAndCFMap, remapBoolExp as remapBoolExpFull, remapOrderBy as remapOrderByFull, getAllowedColumns as getAllowedColumnsFull, remapRowsToCamel as remapRowsToCamelFull } from './resolvers/index.js';
 import { parseResolveInfo, parseAggregateNodesInfo, parseAggregateCountArgs, type ParsedSelection, type SetReturningComputedFieldParsed } from './resolve-info.js';
+import type { TrackedFunctionInfo } from './tracked-functions.js';
+import {
+  extractFuncArgs,
+  hasRolePermission,
+  compileTrackedFunctionCall,
+  remapTrackedFnRowToCamel,
+  buildNamedFuncCall,
+  parseAggregateFromInfo,
+} from './tracked-functions.js';
+import { ParamCollector, quoteIdentifier } from '../sql/utils.js';
+import { compileWhere } from '../sql/where.js';
 
 // ─── Async Queue (push-to-pull adapter) ─────────────────────────────────────
 
@@ -1033,6 +1044,309 @@ export function makeSubscriptionStreamSubscribe(
         }
 
         // Yield subsequent updates from the queue
+        for await (const value of queue.iterator) {
+          yield value;
+        }
+      } finally {
+        subscriptionManager!.unregister(subscriptionId);
+        queue.done();
+      }
+    }
+
+    return generate();
+  };
+}
+
+function remapTrackedFnDistinctOn(
+  distinctOn: string[] | undefined | null,
+  columnMap: Map<string, string>,
+): string[] | undefined {
+  if (!distinctOn || distinctOn.length === 0) return undefined;
+  return distinctOn.map((camelKey) => columnMap.get(camelKey) ?? camelKey);
+}
+
+// ─── Subscription Subscribe: Tracked Function (list) ─────────────────────────
+
+/**
+ * Creates a `subscribe` function for tracked function subscription fields.
+ *
+ * Subscribes to changes on the return table and re-executes the function SQL
+ * when the table changes. Same pattern as table subscriptions but with the
+ * function call as the FROM source.
+ */
+export function makeTrackedFunctionSubscriptionSubscribe(
+  trackedFn: TrackedFunctionInfo,
+): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: GraphQLResolveInfo) => AsyncIterableIterator<unknown> {
+  if (!trackedFn.returnTable) throw new Error(`No return table for tracked function ${trackedFn.config.name}`);
+  const returnTable: import('../types.js').TableInfo = trackedFn.returnTable;
+  const tableKeyStr = `${returnTable.schema}.${returnTable.name}`;
+
+  return (_parent, args, context, info) => {
+    const { auth, permissionLookup, subscriptionManager, inheritedRoles, tables, functions } = context;
+
+    if (!subscriptionManager) {
+      throw new Error('Subscription manager is not available');
+    }
+
+    const { config, functionInfo: fn } = trackedFn;
+
+    // ── Function-level permission check ──────────────────────────────
+    if (!auth.isAdmin) {
+      if (!config.permissions || config.permissions.length === 0) {
+        throw new Error(
+          `Permission denied: no roles have access to function "${config.name}"`,
+        );
+      }
+      if (!hasRolePermission(auth.role, config.permissions, inheritedRoles)) {
+        throw new Error(
+          `Permission denied: role "${auth.role}" does not have access to function "${config.name}"`,
+        );
+      }
+    }
+
+    // ── Return-table permission check ────────────────────────────────
+    const perm = auth.isAdmin
+      ? undefined
+      : permissionLookup.getSelect(returnTable.schema, returnTable.name, auth.role);
+
+    if (!auth.isAdmin && !perm) {
+      throw new Error(
+        `Permission denied: role "${auth.role}" does not have select access to "${returnTable.schema}.${returnTable.name}"`,
+      );
+    }
+
+    // ── Parse resolve info for requested columns + relationships ─────
+    const parsed = parseResolveInfo(info, returnTable, tables, permissionLookup, auth, functions);
+
+    // ── Extract function arguments ──────────────────────────────────
+    const funcArgs = extractFuncArgs(trackedFn, args, auth);
+
+    // ── Remap camelCase args to snake_case ────────────────────────────
+    const colMap = camelToColumnMap(returnTable);
+    const where = remapBoolExp(args.where as BoolExp | undefined, colMap);
+    const orderBy = remapOrderBy(
+      args.orderBy as Array<Record<string, string>> | undefined,
+      colMap,
+    );
+    const distinctOn = remapTrackedFnDistinctOn(
+      args.distinctOn as string[] | undefined,
+      colMap,
+    );
+
+    // ── Compile SQL ──────────────────────────────────────────────────
+    const compiled = compileTrackedFunctionCall({
+      trackedFn,
+      funcArgs,
+      table: returnTable,
+      columns: parsed.columns,
+      where,
+      orderBy,
+      limit: args.limit as number | undefined,
+      offset: args.offset as number | undefined,
+      distinctOn,
+      relationships: parsed.relationships.length > 0 ? parsed.relationships : undefined,
+      permission: perm ? {
+        filter: perm.filter,
+        columns: perm.columns,
+        limit: perm.limit,
+      } : undefined,
+      session: auth,
+      globalMaxLimit: context.graphqlMaxLimit,
+    });
+
+    const queue = createAsyncQueue<unknown>();
+    const subscriptionId = randomUUID();
+
+    async function* generate(): AsyncGenerator<unknown> {
+      try {
+        const initialData = await subscriptionManager!.register({
+          id: subscriptionId,
+          tableKey: tableKeyStr,
+          query: { sql: compiled.sql, params: compiled.params },
+          session: auth,
+          push: (data: unknown) => {
+            if (Array.isArray(data)) {
+              queue.push(data.map((r: Record<string, unknown>) =>
+                remapTrackedFnRowToCamel(r, returnTable),
+              ));
+            } else {
+              queue.push(data);
+            }
+          },
+        });
+
+        // Yield the initial result (remapped)
+        if (Array.isArray(initialData)) {
+          yield initialData.map((r: Record<string, unknown>) =>
+            remapTrackedFnRowToCamel(r, returnTable),
+          );
+        } else {
+          yield initialData;
+        }
+
+        // Yield subsequent updates from the queue
+        for await (const value of queue.iterator) {
+          yield value;
+        }
+      } finally {
+        subscriptionManager!.unregister(subscriptionId);
+        queue.done();
+      }
+    }
+
+    return generate();
+  };
+}
+
+// ─── Subscription Subscribe: Tracked Function Aggregate ──────────────────────
+
+/**
+ * Creates a `subscribe` function for tracked function aggregate subscription fields.
+ *
+ * Re-runs the function aggregate SQL when the return table changes.
+ */
+export function makeTrackedFunctionAggregateSubscriptionSubscribe(
+  trackedFn: TrackedFunctionInfo,
+): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: GraphQLResolveInfo) => AsyncIterableIterator<unknown> {
+  if (!trackedFn.returnTable) throw new Error(`No return table for tracked function ${trackedFn.config.name}`);
+  const returnTable: import('../types.js').TableInfo = trackedFn.returnTable;
+  const tableKeyStr = `${returnTable.schema}.${returnTable.name}`;
+
+  return (_parent, args, context, info) => {
+    const { auth, permissionLookup, subscriptionManager, inheritedRoles } = context;
+
+    if (!subscriptionManager) {
+      throw new Error('Subscription manager is not available');
+    }
+
+    const { config, functionInfo: fn } = trackedFn;
+
+    // ── Function-level permission check ──────────────────────────────
+    if (!auth.isAdmin) {
+      if (!config.permissions || config.permissions.length === 0) {
+        throw new Error(
+          `Permission denied: no roles have access to function "${config.name}"`,
+        );
+      }
+      if (!hasRolePermission(auth.role, config.permissions, inheritedRoles)) {
+        throw new Error(
+          `Permission denied: role "${auth.role}" does not have access to function "${config.name}"`,
+        );
+      }
+    }
+
+    // ── Return-table permission check ────────────────────────────────
+    const perm = auth.isAdmin
+      ? undefined
+      : permissionLookup.getSelect(returnTable.schema, returnTable.name, auth.role);
+
+    if (!auth.isAdmin && !perm) {
+      throw new Error(
+        `Permission denied: role "${auth.role}" does not have select access to "${returnTable.schema}.${returnTable.name}"`,
+      );
+    }
+
+    // Check aggregation permission
+    if (!auth.isAdmin && perm && !perm.allowAggregations) {
+      throw new Error(
+        `Permission denied: role "${auth.role}" does not have aggregation access to "${returnTable.schema}.${returnTable.name}"`,
+      );
+    }
+
+    // ── Extract function arguments ──────────────────────────────────
+    const funcArgs = extractFuncArgs(trackedFn, args, auth);
+
+    // ── Remap camelCase args to snake_case ────────────────────────────
+    const colMap = camelToColumnMap(returnTable);
+    const where = remapBoolExp(args.where as BoolExp | undefined, colMap);
+
+    // ── Build aggregate SQL using function as source ─────────────────
+    const params = new ParamCollector();
+    const alias = 't0';
+
+    const funcCall = buildNamedFuncCall(fn.schema, fn.name, funcArgs, params);
+
+    // Build WHERE
+    const whereParts: string[] = [];
+    const userWhere = compileWhere(where, params, alias, auth);
+    if (userWhere) whereParts.push(userWhere);
+
+    if (perm?.filter) {
+      const permResult = perm.filter.toSQL(
+        auth,
+        params.getOffset(),
+        alias,
+      );
+      if (permResult.sql) {
+        for (const p of permResult.params) {
+          params.add(p);
+        }
+        whereParts.push(permResult.sql);
+      }
+    }
+
+    const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+
+    // Parse the aggregate field from resolve info
+    const aggSelection = parseAggregateFromInfo(info);
+
+    // Build aggregate expressions
+    const aggFields: string[] = [];
+    if (aggSelection.count !== undefined) {
+      aggFields.push(`'count', count(*)`);
+    }
+    for (const aggFn of ['sum', 'avg', 'min', 'max'] as const) {
+      const fieldCols = aggSelection[aggFn];
+      if (fieldCols && fieldCols.length > 0) {
+        const fnFields = fieldCols.map((camelName) => {
+          const snakeName = camelName.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase());
+          return `'${camelName}', ${aggFn}(${quoteIdentifier(alias)}.${quoteIdentifier(snakeName)})`;
+        }).join(', ');
+        aggFields.push(`'${aggFn}', json_build_object(${fnFields})`);
+      }
+    }
+
+    const selectParts: string[] = [];
+    if (aggFields.length > 0) {
+      selectParts.push(`json_build_object(${aggFields.join(', ')}) AS "aggregate"`);
+    } else {
+      selectParts.push(`json_build_object('count', count(*)) AS "aggregate"`);
+    }
+
+    const sql = [
+      `SELECT ${selectParts.join(', ')}`,
+      `FROM ${funcCall} ${quoteIdentifier(alias)}`,
+      whereClause ? whereClause.trim() : null,
+    ].filter(Boolean).join('\n');
+
+    // Wrap so the result is in a "data" column (compatible with subscription manager's executeQuery)
+    const wrappedSql = `SELECT row_to_json("_agg_") AS "data" FROM (${sql}) "_agg_"`;
+
+    const queue = createAsyncQueue<unknown>();
+    const subscriptionId = randomUUID();
+
+    function processAggregateData(data: unknown): unknown {
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        return { aggregate: { count: 0 } };
+      }
+      const row = data as Record<string, unknown>;
+      return { aggregate: row.aggregate ?? { count: 0 } };
+    }
+
+    async function* generate(): AsyncGenerator<unknown> {
+      try {
+        const initialData = await subscriptionManager!.register({
+          id: subscriptionId,
+          tableKey: tableKeyStr,
+          query: { sql: wrappedSql, params: params.getParams() },
+          session: auth,
+          push: (data: unknown) => {
+            queue.push(processAggregateData(data));
+          },
+        });
+
+        yield processAggregateData(initialData);
+
         for await (const value of queue.iterator) {
           yield value;
         }

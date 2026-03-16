@@ -1128,8 +1128,9 @@ Schema comparison (hakkyra vs Hasura on neofix DB) found missing comparison oper
 
 ### P9.7c — Nullability Parity (Low)
 
-- [ ] Investigate nullability mismatch: `Country.currency` and `Country.language` are nullable in hakkyra but non-null in Hasura — may depend on FK constraint NOT NULL vs nullable
-- [ ] `BigWin.currency` — nullable in Hasura, non-null in Hakkyra
+- [x] Investigate nullability mismatch: `Country.currency` and `Country.language` are nullable in hakkyra but non-null in Hasura — may depend on FK constraint NOT NULL vs nullable
+- [x] `BigWin.currency` — nullable in Hasura, non-null in Hakkyra
+  - **Resolved**: Object relationship nullability is determined by FK column NOT NULL status. NOT NULL FK → non-null relationship, nullable FK → nullable relationship. Implemented in `type-builder.ts` lines 248-259 with tests in `schema.test.ts`.
 
 ### P9.7 — Tracked Function Aggregate Variants for Non-SETOF Functions (Low)
 
@@ -1219,7 +1220,8 @@ Hasura's `*AggregateFields.count` field accepts `columns` (select column enum) a
 
 ### P9.14 — Missing Table Fields (Low)
 
-- [ ] `AuthenticationProvider.method` — exists in Hasura but not in Hakkyra; investigate whether this is a column visibility or introspection issue
+- [x] `AuthenticationProvider.method` — exists in Hasura but not in Hakkyra; investigate whether this is a column visibility or introspection issue
+  - **Investigated**: No `authentication_provider` table in test fixtures (production-only). Verified that columns with FK to `is_enum` tables are properly exposed as enum scalar fields (tested with `Appointment.priority` → `PriorityTypeEnum!`). Column visibility logic (`getVisibleColumns`) and enum table resolution (`resolveTableEnums`) both work correctly. Most likely cause: column not included in select permission column lists, or table not tracked in metadata.
 
 ### P9.15 — Order-By Type Field Parity (Medium)
 

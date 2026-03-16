@@ -22,6 +22,7 @@ import {
   GraphQLFloat,
   GraphQLBoolean,
   GraphQLInt,
+  GraphQLID,
   GraphQLError,
   GraphQLEnumType,
 } from 'graphql';
@@ -68,11 +69,13 @@ export interface ActionSchemaOptions {
 
 /** Map of scalar names used in actions.graphql → GraphQL types */
 const SCALAR_MAP: Record<string, GraphQLOutputType & GraphQLInputType> = {
+  // Built-in GraphQL scalars
   String: GraphQLString,
   Int: GraphQLInt,
   Float: GraphQLFloat,
   Boolean: GraphQLBoolean,
-  // New canonical names
+  ID: GraphQLID,
+  // Canonical custom scalar names
   uuid: customScalars['Uuid']!,
   Uuid: customScalars['Uuid']!,
   json: customScalars['json']!,
@@ -81,8 +84,12 @@ const SCALAR_MAP: Record<string, GraphQLOutputType & GraphQLInputType> = {
   Date: customScalars['Date']!,
   Time: customScalars['Time']!,
   Bigint: customScalars['Bigint']!,
+  numeric: customScalars['Numeric']!,
   Numeric: customScalars['Numeric']!,
   Bpchar: customScalars['Bpchar']!,
+  Interval: customScalars['Interval']!,
+  Bytea: customScalars['Bytea']!,
+  Inet: customScalars['Inet']!,
   // Backwards-compat aliases for action SDL parsing
   UUID: customScalars['Uuid']!,
   JSON: customScalars['json']!,

@@ -128,6 +128,29 @@ describe('Actions', () => {
       expect(sdl).toMatch(/type PaymentResult\s*\{[^}]*redirectUrl:\s*String/);
       expect(sdl).toMatch(/type PaymentResult\s*\{[^}]*status:\s*String!/);
     });
+
+    it('preserves ID scalar type in action types', () => {
+      // Input: ID! should remain ID!, not become String!
+      expect(sdl).toMatch(/input AcceptContractInput\s*\{[^}]*contractId:\s*ID!/);
+      // Output: ID! and ID (nullable) should remain ID
+      expect(sdl).toMatch(/type AcceptContractResult\s*\{[^}]*id:\s*ID!/);
+      expect(sdl).toMatch(/type AcceptContractResult\s*\{[^}]*contractRef:\s*ID[^!]/);
+    });
+
+    it('preserves numeric (lowercase) as Numeric scalar in action types', () => {
+      // numeric in SDL should map to Numeric scalar
+      expect(sdl).toMatch(/input AcceptContractInput\s*\{[^}]*depositAmount:\s*Numeric/);
+      expect(sdl).toMatch(/type AcceptContractResult\s*\{[^}]*totalAmount:\s*Numeric!/);
+    });
+
+    it('preserves Numeric and Uuid scalars in action output types', () => {
+      expect(sdl).toMatch(/type AcceptContractResult\s*\{[^}]*balanceDue:\s*Numeric[^!]/);
+      expect(sdl).toMatch(/type AcceptContractResult\s*\{[^}]*walletId:\s*Uuid!/);
+    });
+
+    it('registers acceptContractWithToken mutation in the schema', () => {
+      expect(sdl).toContain('acceptContractWithToken(input: AcceptContractInput!): AcceptContractResult');
+    });
   });
 
   describe('mutation execution', () => {
@@ -479,6 +502,55 @@ describe('Actions', () => {
       const payload = req.body as any;
       expect(payload.action).toEqual({ name: 'updateLimit' });
       expect(payload.input).toEqual({ type: 'loss', amount: 3000 });
+    });
+  });
+
+  describe('scalar type parity execution', () => {
+    it('executes action with ID and numeric scalar types', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/accept-contract', () => ({
+        code: 200,
+        body: {
+          id: 'contract-123',
+          contractRef: 'REF-456',
+          totalAmount: '1500.50',
+          balanceDue: '750.25',
+          walletId: 'f0000000-0000-0000-0000-000000000042',
+          accepted: true,
+        },
+      }));
+
+      const { body } = await gql(
+        `mutation($input: AcceptContractInput!) {
+          acceptContractWithToken(input: $input) {
+            id
+            contractRef
+            totalAmount
+            balanceDue
+            walletId
+            accepted
+          }
+        }`,
+        {
+          input: {
+            contractId: 'contract-123',
+            token: 'abc-token',
+            depositAmount: '250.00',
+          },
+        },
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(body.errors).toBeUndefined();
+      expect((body.data as any).acceptContractWithToken).toEqual({
+        id: 'contract-123',
+        contractRef: 'REF-456',
+        totalAmount: '1500.50',
+        balanceDue: '750.25',
+        walletId: 'f0000000-0000-0000-0000-000000000042',
+        accepted: true,
+      });
     });
   });
 
