@@ -5,6 +5,7 @@
 /** GraphQL scalar names used in schema generation. */
 export type GraphQLScalarName =
   | 'Int'
+  | 'Smallint'
   | 'Float'
   | 'String'
   | 'Boolean'
@@ -14,6 +15,7 @@ export type GraphQLScalarName =
   | 'json'
   | 'Jsonb'
   | 'Timestamptz'
+  | 'Timestamp'
   | 'Date'
   | 'Time'
   | 'Interval'
@@ -74,8 +76,8 @@ export function shouldCastToText(udtName: string): boolean {
  */
 const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> = {
   // Integer types
-  int2: { name: 'Int', isCustomScalar: false },
-  smallint: { name: 'Int', isCustomScalar: false },
+  int2: { name: 'Smallint', isCustomScalar: true },
+  smallint: { name: 'Smallint', isCustomScalar: true },
   int4: { name: 'Int', isCustomScalar: false },
   integer: { name: 'Int', isCustomScalar: false },
   serial: { name: 'Int', isCustomScalar: false },
@@ -118,8 +120,8 @@ const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> =
   jsonb: { name: 'Jsonb', isCustomScalar: true },
 
   // Timestamps & dates
-  timestamp: { name: 'Timestamptz', isCustomScalar: true },
-  'timestamp without time zone': { name: 'Timestamptz', isCustomScalar: true },
+  timestamp: { name: 'Timestamp', isCustomScalar: true },
+  'timestamp without time zone': { name: 'Timestamp', isCustomScalar: true },
   timestamptz: { name: 'Timestamptz', isCustomScalar: true },
   'timestamp with time zone': { name: 'Timestamptz', isCustomScalar: true },
   date: { name: 'Date', isCustomScalar: true },
