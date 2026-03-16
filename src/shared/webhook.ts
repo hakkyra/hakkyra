@@ -6,7 +6,7 @@
  */
 
 import { lookup } from 'node:dns/promises';
-import { isIPv4 } from 'node:net';
+import { isIPv4, isIPv6 } from 'node:net';
 import type { WebhookHeader } from '../types.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -136,6 +136,96 @@ async function validateWebhookUrl(url: string): Promise<void> {
   }
 }
 
+/**
+ * Resolve DNS for a webhook URL and return a version of the URL that connects
+ * directly to the validated IP address, plus the original Host header value.
+ *
+ * This prevents DNS rebinding attacks (TOCTOU) by resolving DNS once, validating
+ * the IP, and then replacing the hostname in the URL with the validated IP so the
+ * HTTP client connects to that exact IP without a second DNS lookup.
+ *
+ * @returns Object with `resolvedUrl` (hostname replaced with IP) and `hostHeader`
+ *          (original hostname for the Host header), or null if the hostname is
+ *          already a raw IP address.
+ * @throws Error if the resolved IP is private/reserved.
+ */
+export async function resolveAndValidateDns(
+  url: string,
+  /** @internal Injectable DNS lookup for testing. Defaults to `dns.promises.lookup`. */
+  lookupFn?: (hostname: string, options: { all: true }) => Promise<Array<{ address: string; family: number }>>,
+): Promise<{
+  resolvedUrl: string;
+  hostHeader: string;
+} | null> {
+  const resolveDns = lookupFn ?? (async (h: string, opts: { all: true }) => {
+    const result = await lookup(h, opts);
+    return Array.isArray(result) ? result : [result];
+  });
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid webhook URL: ${url}`);
+  }
+
+  let hostname = parsed.hostname;
+  // Remove brackets from IPv6 literal
+  if (hostname.startsWith('[') && hostname.endsWith(']')) {
+    hostname = hostname.slice(1, -1);
+  }
+
+  // If the hostname is already a raw IP, just validate it and return null
+  // (no DNS resolution needed, no rebinding possible).
+  if (isIPv4(hostname) || isIPv6(hostname)) {
+    if (isPrivateIP(hostname)) {
+      throw new Error(`Webhook URL resolves to a private/reserved IP address: ${hostname}`);
+    }
+    return null;
+  }
+
+  // Resolve DNS
+  let resolvedAddress: string;
+  try {
+    const addresses = await resolveDns(hostname, { all: true });
+
+    // Validate ALL resolved addresses
+    for (const entry of addresses) {
+      if (isPrivateIP(entry.address)) {
+        throw new Error(
+          `Webhook URL hostname "${hostname}" resolves to private/reserved IP: ${entry.address}`,
+        );
+      }
+    }
+
+    // Use the first resolved address for the connection
+    resolvedAddress = addresses[0].address;
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('private/reserved')) {
+      throw err;
+    }
+    // DNS resolution failures — fall back to pre-flight validation only.
+    // The fetch call will perform its own DNS and fail with a descriptive error.
+    await validateWebhookUrl(url);
+    return null;
+  }
+
+  // Build a new URL with the resolved IP replacing the hostname.
+  // This ensures the HTTP client connects to the validated IP directly,
+  // preventing a second DNS lookup that could return a different (private) IP.
+  const originalHost = parsed.host; // includes port if non-default
+  const isIPv6Address = resolvedAddress.includes(':');
+
+  // Use URL constructor to safely replace the hostname
+  const pinnedUrl = new URL(url);
+  pinnedUrl.hostname = isIPv6Address ? `[${resolvedAddress}]` : resolvedAddress;
+  const resolvedUrl = pinnedUrl.toString();
+
+  // The Host header must be the original hostname so the target server
+  // can route the request correctly (virtual hosting, SNI, etc.)
+  return { resolvedUrl, hostHeader: originalHost };
+}
+
 // ─── Webhook URL resolution ────────────────────────────────────────────────
 
 /**
@@ -256,17 +346,26 @@ export async function deliverWebhook(options: WebhookDeliveryOptions): Promise<W
   const start = performance.now();
 
   try {
-    // SSRF prevention: validate URL hostname unless private URLs are allowed
+    // SSRF prevention: resolve DNS and pin to validated IP to prevent DNS rebinding.
+    // The resolved URL connects directly to the validated IP, and the original
+    // Host header is preserved for correct server-side routing.
+    let fetchUrl = url;
+    const fetchHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...headers,
+    };
+
     if (!allowPrivateUrls) {
-      await validateWebhookUrl(url);
+      const pinned = await resolveAndValidateDns(url);
+      if (pinned) {
+        fetchUrl = pinned.resolvedUrl;
+        fetchHeaders['Host'] = pinned.hostHeader;
+      }
     }
 
-    const response = await fetch(url, {
+    const response = await fetch(fetchUrl, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers,
-      },
+      headers: fetchHeaders,
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(timeoutMs),
     });
