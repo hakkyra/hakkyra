@@ -564,7 +564,7 @@ export function buildActionFields(
         description: `Check the status and result of async action "${actionConfig.name}"`,
         resolve: makeAsyncActionResultResolver(actionConfig),
       };
-      queryFields[`${parsed.name}Result`] = resultQueryFieldConfig;
+      queryFields[parsed.name] = resultQueryFieldConfig;
     } else {
       // ── Sync action: standard resolver ────────────────────────────────
       const fieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
