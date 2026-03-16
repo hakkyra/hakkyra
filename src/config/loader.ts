@@ -314,6 +314,14 @@ export async function loadConfig(
   const queryCollections = await loadQueryCollections(absMetadataDir);
   const hasuraRestEndpoints = await loadRestEndpoints(absMetadataDir, queryCollections);
 
+  // REST and docs config: prefer hakkyra.yaml (server config), fall back to api_config.yaml
+  if (serverConfig?.rest && apiConfig?.rest) {
+    log.warn('REST config found in both hakkyra.yaml and api_config.yaml; using hakkyra.yaml (server config)');
+  }
+  if (serverConfig?.docs && apiConfig?.docs) {
+    log.warn('Docs config found in both hakkyra.yaml and api_config.yaml; using hakkyra.yaml (server config)');
+  }
+
   const raw = {
     version,
     server: stripUndefined({
@@ -331,12 +339,12 @@ export async function loadConfig(
     actions,
     actionsGraphql: actionsGraphql ?? undefined,
     cronTriggers,
-    rest: transformRESTConfig(apiConfig),
+    rest: transformRESTConfig(serverConfig, apiConfig),
     queryCollections,
     hasuraRestEndpoints,
     nativeQueries,
     logicalModels,
-    apiDocs: transformDocsConfig(apiConfig),
+    apiDocs: transformDocsConfig(serverConfig, apiConfig),
     inheritedRoles,
     jobQueue: transformJobQueueConfig(serverConfig),
     redis: transformRedisConfig(serverConfig),
@@ -1149,8 +1157,9 @@ async function loadApiConfig(metadataDir: string): Promise<RawApiConfig | null> 
   return config;
 }
 
-function transformRESTConfig(apiConfig: RawApiConfig | null): RESTConfig {
-  const rest = apiConfig?.rest;
+function transformRESTConfig(serverConfig: RawServerConfig | null, apiConfig: RawApiConfig | null): RESTConfig {
+  // Prefer hakkyra.yaml (server config), fall back to api_config.yaml
+  const rest = serverConfig?.rest ?? apiConfig?.rest;
   const raw = {
     ...stripUndefined({
       autoGenerate: rest?.auto_generate,
@@ -1165,8 +1174,9 @@ function transformRESTConfig(apiConfig: RawApiConfig | null): RESTConfig {
   return InternalRESTConfigSchema.parse(raw);
 }
 
-function transformDocsConfig(apiConfig: RawApiConfig | null): APIDocsConfig {
-  const docs = apiConfig?.docs;
+function transformDocsConfig(serverConfig: RawServerConfig | null, apiConfig: RawApiConfig | null): APIDocsConfig {
+  // Prefer hakkyra.yaml (server config), fall back to api_config.yaml
+  const docs = serverConfig?.docs ?? apiConfig?.docs;
   return {
     generate: docs?.generate ?? true,
     output: docs?.output,
