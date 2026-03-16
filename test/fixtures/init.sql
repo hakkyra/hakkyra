@@ -260,6 +260,23 @@ CREATE TABLE fiscal_report (
   FOREIGN KEY (fiscal_year, fiscal_quarter) REFERENCES fiscal_period(year, quarter)
 );
 
+-- ─── 1:1 reverse-FK relationship (P10.8) ──────────────────────────────────
+-- player_lock has a unique FK to player — models a 1:1 object relationship
+-- where the FK is on the "child" table but the parent defines an object rel
+
+CREATE TABLE player (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE player_lock (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  player_id UUID NOT NULL UNIQUE REFERENCES player(id),
+  locked_at TIMESTAMPTZ DEFAULT now(),
+  reason TEXT
+);
+
 -- ─── Materialized view ─────────────────────────────────────────────────────
 
 CREATE MATERIALIZED VIEW client_summary AS
@@ -509,6 +526,14 @@ INSERT INTO fiscal_period (year, quarter, name) VALUES
 INSERT INTO fiscal_report (id, fiscal_year, fiscal_quarter, title, amount) VALUES
   ('cd000000-0000-0000-0000-000000000001', 2025, 1, 'Revenue Report Q1', 50000.00),
   ('cd000000-0000-0000-0000-000000000002', 2025, 2, 'Revenue Report Q2', 65000.00);
+
+-- Players + locks (1:1 reverse-FK)
+INSERT INTO player (id, name) VALUES
+  ('dd000000-0000-0000-0000-000000000001', 'PlayerOne'),
+  ('dd000000-0000-0000-0000-000000000002', 'PlayerTwo');
+
+INSERT INTO player_lock (id, player_id, reason) VALUES
+  ('de000000-0000-0000-0000-000000000001', 'dd000000-0000-0000-0000-000000000001', 'Maintenance');
 
 -- Refresh materialized view
 REFRESH MATERIALIZED VIEW client_summary;

@@ -291,7 +291,8 @@ export function mergeSchemaModel(
     allMergedTables.push(tableInfo);
   }
 
-  // Post-process: infer missing localColumns for array relationships.
+  // Post-process: infer missing localColumns for relationships that have
+  // remoteColumns but no localColumns (array rels and reverse-FK object rels).
   // Uses allMergedTables (including untracked tables) so FK lookups work correctly.
   const allMergedTableMap = new Map<string, TableInfo>();
   for (const t of allMergedTables) {
@@ -301,7 +302,6 @@ export function mergeSchemaModel(
   for (const table of allMergedTables) {
     for (const rel of table.relationships) {
       if (
-        rel.type === 'array' &&
         rel.remoteColumns?.length &&
         !rel.localColumns?.length
       ) {
