@@ -23,7 +23,7 @@ import {
   startServer, stopServer, closePool, waitForDb,
   graphqlRequest, restRequest,
   tokens, ADMIN_SECRET,
-  ALICE_ID, BOB_ID, TEST_DB_URL,
+  ALICE_ID, BOB_ID, BRANCH_TEST_ID, TEST_DB_URL,
   getServerAddress, getPool,
 } from './setup.js';
 import { resolveWebhookHeaders, deliverWebhook } from '../src/shared/webhook.js';
@@ -819,6 +819,33 @@ describe('Security', () => {
       // Cleanup
       const pool = getPool();
       await pool.query(`DELETE FROM account WHERE id = $1`, [data.insertAccountOne.id]);
+    });
+
+    it('non-backend_only insert works normally for JWT user', async () => {
+      // The backoffice role has insert permission on the client table WITHOUT backend_only.
+      // This verifies that the backend_only guard does not inadvertently block normal inserts.
+      const token = await tokens.backoffice();
+      const uniqueUsername = `security_test_${Date.now()}`;
+      const { status, body } = await graphqlRequest(
+        `mutation($obj: ClientInsertInput!) {
+          insertClient(object: $obj) {
+            id
+            username
+          }
+        }`,
+        { obj: { username: uniqueUsername, email: `${uniqueUsername}@test.com`, branchId: BRANCH_TEST_ID, currencyId: 'EUR' } },
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+      const data = body.data as { insertClient: { id: string; username: string } };
+      expect(data.insertClient.id).toBeDefined();
+      expect(data.insertClient.username).toBe(uniqueUsername);
+
+      // Cleanup
+      const pool = getPool();
+      await pool.query(`DELETE FROM client WHERE id = $1`, [data.insertClient.id]);
     });
   });
 
