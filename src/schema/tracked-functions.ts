@@ -47,7 +47,7 @@ import { customScalars } from './scalars.js';
 import { toCamelCase, toPascalCase, getColumnFieldName, tableKey } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import type { ResolverContext, ResolverPermissionLookup } from './resolvers.js';
-import { remapBoolExp as remapBoolExpFull } from './resolvers.js';
+import { remapBoolExp as remapBoolExpFull, resolveLimit } from './resolvers.js';
 import { parseResolveInfo } from './resolve-info.js';
 import {
   compileSelect,
@@ -538,22 +538,7 @@ function buildNamedFuncCall(
   return `${quoteIdentifier(schema)}.${quoteIdentifier(name)}(${parts.join(', ')})`;
 }
 
-function resolveLimit(userLimit?: number, permLimit?: number, globalMaxLimit?: number): number | undefined {
-  let limit: number | undefined;
-  if (userLimit !== undefined && permLimit !== undefined) {
-    limit = Math.min(userLimit, permLimit);
-  } else {
-    limit = userLimit ?? permLimit;
-  }
-  if (globalMaxLimit !== undefined && globalMaxLimit > 0) {
-    if (limit !== undefined) {
-      limit = Math.min(limit, globalMaxLimit);
-    } else {
-      limit = globalMaxLimit;
-    }
-  }
-  return limit;
-}
+// resolveLimit is imported from resolvers.ts (single source of truth)
 
 // ─── Row remapping (snake_case → camelCase) ─────────────────────────────
 

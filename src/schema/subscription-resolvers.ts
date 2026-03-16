@@ -21,7 +21,7 @@ import type { OrderByItem, RelationshipSelection } from '../sql/select.js';
 import { compileSelect, compileSelectByPk } from '../sql/select.js';
 import { toCamelCase, getColumnFieldName } from './type-builder.js';
 import type { ResolverContext } from './resolvers.js';
-import { isSubscriptionRootFieldAllowed, buildComputedFieldSelections, buildSetReturningComputedFieldSelections } from './resolvers.js';
+import { isSubscriptionRootFieldAllowed, buildComputedFieldSelections, buildSetReturningComputedFieldSelections, resolveLimit } from './resolvers.js';
 import { parseResolveInfo, type ParsedSelection, type SetReturningComputedFieldParsed } from './resolve-info.js';
 
 // ─── Async Queue (push-to-pull adapter) ─────────────────────────────────────
@@ -197,22 +197,7 @@ function getAllowedColumns(
   return allColumns.filter((c) => permColumns.includes(c));
 }
 
-function resolveLimit(userLimit?: number, permLimit?: number, globalMaxLimit?: number): number | undefined {
-  let limit: number | undefined;
-  if (userLimit !== undefined && permLimit !== undefined) {
-    limit = Math.min(userLimit, permLimit);
-  } else {
-    limit = userLimit ?? permLimit;
-  }
-  if (globalMaxLimit !== undefined && globalMaxLimit > 0) {
-    if (limit !== undefined) {
-      limit = Math.min(limit, globalMaxLimit);
-    } else {
-      limit = globalMaxLimit;
-    }
-  }
-  return limit;
-}
+// resolveLimit is imported from resolvers.ts (single source of truth)
 
 function remapRowToCamel(
   row: Record<string, unknown>,
@@ -595,7 +580,11 @@ export function makeSubscriptionStreamSubscribe(
       auth.isAdmin,
     );
 
-    const batchSize = args.batchSize as number;
+    const rawBatchSize = args.batchSize as number;
+    const globalMaxLimit = context.graphqlMaxLimit;
+    const batchSize = (globalMaxLimit !== undefined && globalMaxLimit > 0 && rawBatchSize > globalMaxLimit)
+      ? globalMaxLimit
+      : rawBatchSize;
     const cursorArgs = args.cursor as Array<{
       initialValue: Record<string, unknown>;
       ordering?: string;
