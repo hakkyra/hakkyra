@@ -783,6 +783,7 @@ function transformRelationship(
     name: raw.name,
     type,
     remoteTable: { name: '', schema: 'public' },
+    fromMetadata: true,
   };
 
   const fk = raw.using.foreign_key_constraint_on;

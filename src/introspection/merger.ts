@@ -238,8 +238,8 @@ export function mergeSchemaModel(
     }
   }
 
-  // Build the merged table list
-  const mergedTables: TableInfo[] = [];
+  // Build the merged table list (all introspected tables, needed for FK/relationship resolution)
+  const allMergedTables: TableInfo[] = [];
 
   for (const introspected of introspection.tables) {
     const key = `${introspected.schema}.${introspected.name}`;
@@ -288,20 +288,17 @@ export function mergeSchemaModel(
       isView: introspected.tableType !== 'BASE TABLE' || undefined,
     };
 
-    mergedTables.push(tableInfo);
+    allMergedTables.push(tableInfo);
   }
 
   // Post-process: infer missing localColumns for array relationships.
-  // When a config-defined array relationship has remoteColumns (the FK columns
-  // on the remote table) but no localColumns (the referenced PK/unique columns
-  // on this table), look up the FK constraint on the remote table to fill in
-  // the gap.
-  const mergedTableMap = new Map<string, TableInfo>();
-  for (const t of mergedTables) {
-    mergedTableMap.set(`${t.schema}.${t.name}`, t);
+  // Uses allMergedTables (including untracked tables) so FK lookups work correctly.
+  const allMergedTableMap = new Map<string, TableInfo>();
+  for (const t of allMergedTables) {
+    allMergedTableMap.set(`${t.schema}.${t.name}`, t);
   }
 
-  for (const table of mergedTables) {
+  for (const table of allMergedTables) {
     for (const rel of table.relationships) {
       if (
         rel.type === 'array' &&
@@ -310,7 +307,7 @@ export function mergeSchemaModel(
       ) {
         // Find the remote table's FK constraints
         const remoteKey = `${rel.remoteTable.schema}.${rel.remoteTable.name}`;
-        const remoteTable = mergedTableMap.get(remoteKey);
+        const remoteTable = allMergedTableMap.get(remoteKey);
         if (!remoteTable) continue;
 
         // Find the FK on the remote table whose columns match rel.remoteColumns
@@ -332,6 +329,13 @@ export function mergeSchemaModel(
       }
     }
   }
+
+  // Filter to only tables tracked in metadata config.
+  // Untracked tables were needed above for FK/relationship resolution but
+  // should not be exposed in the final schema model.
+  const mergedTables = allMergedTables.filter((t) =>
+    configTableMap.has(`${t.schema}.${t.name}`),
+  );
 
   const model: SchemaModel = {
     tables: mergedTables,

@@ -31,10 +31,10 @@ import type { TableInfo, ColumnInfo, FunctionInfo, ComputedFieldConfig } from '.
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
 import { pgArgTypeToGraphQL } from './tracked-functions.js';
-import { toCamelCase, toPascalCase } from '../shared/naming.js';
+import { toCamelCase, toPascalCase, getRelFieldName } from '../shared/naming.js';
 
 // Re-export naming utilities so existing consumers don't break
-export { toCamelCase, toPascalCase } from '../shared/naming.js';
+export { toCamelCase, toPascalCase, getRelFieldName } from '../shared/naming.js';
 
 // ─── Type Registry ───────────────────────────────────────────────────────────
 
@@ -208,7 +208,7 @@ export function buildObjectType(
 
         if (rel.type === 'object') {
           // Object relationship — nullable single related object
-          fields[toCamelCase(rel.name)] = {
+          fields[getRelFieldName(rel)] = {
             type: relatedType,
             description: `Object relationship to ${rel.remoteTable.name}`,
             extensions: {
@@ -242,7 +242,7 @@ export function buildObjectType(
           args['limit'] = { type: GraphQLInt };
           args['offset'] = { type: GraphQLInt };
 
-          fields[toCamelCase(rel.name)] = {
+          fields[getRelFieldName(rel)] = {
             type: new GraphQLNonNull(
               new GraphQLList(new GraphQLNonNull(relatedType)),
             ),
@@ -268,7 +268,7 @@ export function buildObjectType(
               aggArgs['where'] = { type: relFilterType };
             }
 
-            fields[`${toCamelCase(rel.name)}Aggregate`] = {
+            fields[`${getRelFieldName(rel)}Aggregate`] = {
               type: new GraphQLNonNull(aggType),
               args: aggArgs,
               description: `Aggregated array relationship to ${rel.remoteTable.name}`,
