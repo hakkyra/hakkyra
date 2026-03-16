@@ -16,3 +16,14 @@ export { extractSessionVariables } from './claims.js';
 export { createAuthHook } from './middleware.js';
 
 export { authenticateWsConnection } from './ws-auth.js';
+
+export {
+  DEFAULT_SESSION_NAMESPACE,
+  HASURA_METADATA_NAMESPACE,
+  DEFAULT_JWT_CLAIMS_NAMESPACE,
+  WELL_KNOWN_SUFFIXES,
+  nsKey,
+  isSessionVariable,
+  extractSuffix,
+  resolveSessionVar,
+} from './session-namespace.js';

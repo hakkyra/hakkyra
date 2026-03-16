@@ -22,7 +22,11 @@ import { compileWhere } from './where.js';
 import { AliasCounter, filterColumns, buildJsonFields } from './select.js';
 import type { RelationshipSelection, ComputedFieldSelection, SetReturningComputedFieldSelection } from './select.js';
 import { toCamelCase } from '../shared/naming.js';
-import { resolveSessionValue } from '../shared/session-resolution.js';
+import {
+  isSessionVariable,
+  resolveSessionVar,
+  DEFAULT_SESSION_NAMESPACE,
+} from '../auth/session-namespace.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -98,12 +102,13 @@ export interface OnConflictClause {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Resolve a preset value. If it's a session variable reference (x-hasura-*),
+ * Resolve a preset value. If it's a session variable reference (x-hasura-* or {ns}-*),
  * resolve it from the session. Otherwise use the literal value.
  * Delegates to the shared resolveSessionValue utility.
  */
 function resolvePreset(value: string, session: SessionVariables): unknown {
-  return resolveSessionValue(value, session);
+  if (!isSessionVariable(value, DEFAULT_SESSION_NAMESPACE)) return value;
+  return resolveSessionVar(value, session, DEFAULT_SESSION_NAMESPACE) ?? undefined;
 }
 
 /**

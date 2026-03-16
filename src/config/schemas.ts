@@ -598,6 +598,7 @@ export const RawServerConfigSchema = z
           .optional(),
         admin_secret_from_env: z.string().optional(),
         unauthorized_role: z.string().optional(),
+        session_namespace: z.string().optional(),
         webhook: z
           .object({
             url: z.string().optional(),

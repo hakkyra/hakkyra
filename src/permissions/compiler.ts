@@ -4,8 +4,10 @@
  * Compiles Hasura-compatible BoolExp objects into parameterized SQL WHERE clauses.
  * All values are parameterized ($1, $2, ...) to prevent SQL injection.
  *
- * Session variable resolution: string values starting with `x-hasura-` (case-insensitive)
- * are resolved from `session.claims` at query time.
+ * Session variable resolution: string values starting with `x-hasura-` (from YAML metadata)
+ * or the configured namespace prefix are resolved from `session.claims` at query time.
+ * YAML permissions always use `x-hasura-*` for Hasura metadata compatibility; at runtime
+ * they are mapped to the configured namespace for claim lookup.
  */
 
 import type {
@@ -17,8 +19,12 @@ import type {
   RelationshipConfig,
   SessionVariables,
 } from '../types.js';
+import {
+  isSessionVariable as isSessionVar,
+  resolveSessionVar,
+  DEFAULT_SESSION_NAMESPACE,
+} from '../auth/session-namespace.js';
 import { quoteIdentifier as quoteIdent } from '../sql/utils.js';
-import { resolveSessionValue } from '../shared/session-resolution.js';
 
 // ─── SQL operator mapping ──────────────────────────────────────────────────
 
@@ -83,31 +89,33 @@ const COLUMN_OPERATOR_KEYS = new Set(Object.keys(OPERATOR_MAP));
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /**
- * Check whether a value is a session variable reference (x-hasura-*).
+ * Check whether a value is a session variable reference.
+ * Accepts both `x-hasura-*` (from YAML metadata) and the configured namespace prefix.
  */
-function isSessionVariable(value: unknown): value is string {
-  return typeof value === 'string' && value.toLowerCase().startsWith('x-hasura-');
+function isSessionVariable(value: unknown, namespace: string): value is string {
+  return isSessionVar(value, namespace);
 }
 
 /**
  * Resolve a value: if it is a session variable reference, look it up in the session claims.
  * Otherwise return the value as-is.
  *
- * Delegates core lookup to resolveSessionValue, then applies permission-specific
- * post-processing: null fallback for missing claims, single-element array unwrap.
+ * Supports both the configured namespace and the Hasura metadata namespace (`x-hasura-*`),
+ * so that YAML permission filters work regardless of the configured namespace.
  */
-function resolveValue(value: unknown, session: SessionVariables): unknown {
-  if (!isSessionVariable(value)) return value;
-
-  const resolved = resolveSessionValue(value, session);
-  if (resolved === undefined) {
-    return null;
+function resolveValue(value: unknown, session: SessionVariables, namespace: string): unknown {
+  if (isSessionVariable(value, namespace)) {
+    const resolved = resolveSessionVar(value as string, session, namespace);
+    if (resolved === undefined) {
+      return null;
+    }
+    // If the claim is an array but a single value is expected, return the first element.
+    if (Array.isArray(resolved) && resolved.length === 1) {
+      return resolved[0];
+    }
+    return resolved;
   }
-  // If the claim is an array but a single value is expected, return the first element.
-  if (Array.isArray(resolved) && resolved.length === 1) {
-    return resolved[0];
-  }
-  return resolved;
+  return value;
 }
 
 /**
@@ -303,6 +311,7 @@ function comparisonNode(
   operatorKey: string,
   rawValue: unknown,
   computedField?: ComputedFieldConfig,
+  namespace: string = DEFAULT_SESSION_NAMESPACE,
 ): FilterNode {
   const op = OPERATOR_MAP[operatorKey];
   if (!op) {
@@ -327,7 +336,7 @@ function comparisonNode(
       // ── IN / NOT IN ─────────────────────────────────────────────────
       if (op.mode === 'in') {
         const values = Array.isArray(rawValue) ? rawValue : [rawValue];
-        const resolvedValues = values.map(v => resolveValue(v, session));
+        const resolvedValues = values.map(v => resolveValue(v, session, namespace));
         // Flatten any session variable arrays into individual values.
         const flatValues: unknown[] = [];
         for (const v of resolvedValues) {
@@ -358,7 +367,7 @@ function comparisonNode(
       // ── JSONB key array operators (?| and ?&) ───────────────────────
       if (op.mode === 'jsonb_keys_array') {
         const keys = Array.isArray(rawValue) ? rawValue : [rawValue];
-        const resolvedKeys = keys.map(k => resolveValue(k, session));
+        const resolvedKeys = keys.map(k => resolveValue(k, session, namespace));
         const placeholder = `$${paramOffset + 1}`;
         return {
           sql: `${col} ${op.sql} ${placeholder}`,
@@ -368,7 +377,7 @@ function comparisonNode(
 
       // ── JSONB single key operator (?) ───────────────────────────────
       if (op.mode === 'jsonb_keys') {
-        const resolved = resolveValue(rawValue, session);
+        const resolved = resolveValue(rawValue, session, namespace);
         const placeholder = `$${paramOffset + 1}`;
         return {
           sql: `${col} ${op.sql} ${placeholder}`,
@@ -377,7 +386,7 @@ function comparisonNode(
       }
 
       // ── Standard comparison / pattern operators ─────────────────────
-      const resolved = resolveValue(rawValue, session);
+      const resolved = resolveValue(rawValue, session, namespace);
       const placeholder = `$${paramOffset + 1}`;
 
       // JSONB containment operators: serialize objects to JSON
@@ -421,11 +430,13 @@ function isColumnOperators(value: unknown): value is ColumnOperators {
  *   instead of column references.
  * @param relationshipMap - Optional map of relationship name → config,
  *   so that BoolExp keys referencing relationships emit EXISTS subqueries.
+ * @param namespace - Session variable namespace for resolving x-hasura-* references.
  */
 function parseBoolExp(
   filter: BoolExp,
   computedFieldMap?: Map<string, ComputedFieldConfig>,
   relationshipMap?: Map<string, RelationshipConfig>,
+  namespace: string = DEFAULT_SESSION_NAMESPACE,
 ): FilterNode {
   // Empty object = no restriction
   const keys = Object.keys(filter);
@@ -436,27 +447,27 @@ function parseBoolExp(
   // ── Logical operators ─────────────────────────────────────────────────
   if ('_and' in filter) {
     const children = (filter as { _and: BoolExp[] })._and.map(
-      (sub) => parseBoolExp(sub, computedFieldMap, relationshipMap),
+      (sub) => parseBoolExp(sub, computedFieldMap, relationshipMap, namespace),
     );
     return andNode(children);
   }
 
   if ('_or' in filter) {
     const children = (filter as { _or: BoolExp[] })._or.map(
-      (sub) => parseBoolExp(sub, computedFieldMap, relationshipMap),
+      (sub) => parseBoolExp(sub, computedFieldMap, relationshipMap, namespace),
     );
     return orNode(children);
   }
 
   if ('_not' in filter) {
-    const child = parseBoolExp((filter as { _not: BoolExp })._not, computedFieldMap, relationshipMap);
+    const child = parseBoolExp((filter as { _not: BoolExp })._not, computedFieldMap, relationshipMap, namespace);
     return notNode(child);
   }
 
   // ── _exists ───────────────────────────────────────────────────────────
   if ('_exists' in filter) {
     const existsExp = (filter as { _exists: ExistsExp })._exists;
-    const whereNode = parseBoolExp(existsExp._where);
+    const whereNode = parseBoolExp(existsExp._where, undefined, undefined, namespace);
     return existsNode(existsExp._table.name, existsExp._table.schema, whereNode);
   }
 
@@ -472,7 +483,7 @@ function parseBoolExp(
       // Column with one or more comparison operators
       for (const [opKey, opValue] of Object.entries(ops as Record<string, unknown>)) {
         if (COLUMN_OPERATOR_KEYS.has(opKey) && opValue !== undefined) {
-          children.push(comparisonNode(column, opKey, opValue, cf));
+          children.push(comparisonNode(column, opKey, opValue, cf, namespace));
         }
       }
     } else {
@@ -480,11 +491,11 @@ function parseBoolExp(
       const rel = relationshipMap?.get(column);
       if (rel) {
         // Compile as EXISTS subquery with proper join conditions
-        const nestedFilter = parseBoolExp(ops as BoolExp);
+        const nestedFilter = parseBoolExp(ops as BoolExp, undefined, undefined, namespace);
         children.push(relationshipExistsNode(rel, nestedFilter));
       } else {
         // No relationship info — fall back to nested column filter on same table
-        const nestedFilter = parseBoolExp(ops as BoolExp);
+        const nestedFilter = parseBoolExp(ops as BoolExp, undefined, undefined, namespace);
         children.push({
           toSQL(session, paramOffset, _tableAlias) {
             return nestedFilter.toSQL(session, paramOffset, column);
@@ -521,6 +532,7 @@ export function compileFilter(
   filter: BoolExp,
   computedFields?: ComputedFieldConfig[],
   relationships?: RelationshipConfig[],
+  namespace: string = DEFAULT_SESSION_NAMESPACE,
 ): CompiledFilter {
   const cfMap = computedFields && computedFields.length > 0
     ? new Map(computedFields.map((cf) => [cf.name, cf]))
@@ -529,7 +541,7 @@ export function compileFilter(
     ? new Map(relationships.map((r) => [r.name, r]))
     : undefined;
   relAliasCounter = 0;
-  const node = parseBoolExp(filter, cfMap, relMap);
+  const node = parseBoolExp(filter, cfMap, relMap, namespace);
   return {
     toSQL(session: SessionVariables, paramOffset: number, tableAlias?: string) {
       return node.toSQL(session, paramOffset, tableAlias);

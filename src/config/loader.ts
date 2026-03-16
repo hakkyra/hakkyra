@@ -1251,7 +1251,7 @@ function transformRedisConfig(serverConfig: RawServerConfig | null) {
 
 function transformAuth(serverConfig: RawServerConfig | null): AuthConfig {
   const auth = serverConfig?.auth;
-  if (!auth) return {};
+  if (!auth) return InternalAuthConfigSchema.parse({});
 
   const raw: Record<string, unknown> = {};
 
@@ -1276,6 +1276,10 @@ function transformAuth(serverConfig: RawServerConfig | null): AuthConfig {
 
   if (auth.unauthorized_role) {
     raw.unauthorizedRole = auth.unauthorized_role;
+  }
+
+  if (auth.session_namespace) {
+    raw.sessionNamespace = auth.session_namespace;
   }
 
   if (auth.webhook) {

@@ -280,6 +280,7 @@ export const AuthConfigSchema = z.object({
     .optional(),
   adminSecretEnv: z.string().optional(),
   unauthorizedRole: z.string().optional(),
+  sessionNamespace: z.string().default('x-hk'),
   webhook: z
     .object({
       url: z.string(),
