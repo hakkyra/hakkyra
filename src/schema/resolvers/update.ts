@@ -43,7 +43,8 @@ export function makeUpdateResolver(
     }
 
     const setValues = remapKeys(args._set as Record<string, unknown> | undefined, columnMap);
-    if (!setValues || Object.keys(setValues).length === 0) {
+    const incValues = remapKeys(args._inc as Record<string, unknown> | undefined, columnMap);
+    if ((!setValues || Object.keys(setValues).length === 0) && (!incValues || Object.keys(incValues).length === 0)) {
       return { affectedRows: 0, returning: [] };
     }
 
@@ -69,7 +70,8 @@ export function makeUpdateResolver(
     const compiled = compileUpdate({
       table,
       where,
-      _set: setValues,
+      _set: setValues ?? {},
+      _inc: incValues,
       returningColumns,
       returningRelationships,
       returningComputedFields: returningComputedFields.length > 0 ? returningComputedFields : undefined,
@@ -137,8 +139,9 @@ export function makeUpdateByPkResolver(
 
     const pkValues = remapKeys(args.pkColumns as Record<string, unknown>, columnMap) ?? {};
     const setValues = remapKeys(args._set as Record<string, unknown> | undefined, columnMap);
+    const incValues = remapKeys(args._inc as Record<string, unknown> | undefined, columnMap);
 
-    if (!setValues || Object.keys(setValues).length === 0) {
+    if ((!setValues || Object.keys(setValues).length === 0) && (!incValues || Object.keys(incValues).length === 0)) {
       return null;
     }
 
@@ -163,7 +166,8 @@ export function makeUpdateByPkResolver(
     const compiled = compileUpdateByPk({
       table,
       pkValues,
-      _set: setValues,
+      _set: setValues ?? {},
+      _inc: incValues,
       returningColumns,
       returningRelationships,
       returningComputedFields: returningComputedFields.length > 0 ? returningComputedFields : undefined,
@@ -208,7 +212,7 @@ export function makeUpdateManyResolver(
       throw permissionDenied('update', `${table.schema}.${table.name}`, auth.role);
     }
 
-    const rawUpdates = args.updates as Array<{ where: Record<string, unknown>; _set: Record<string, unknown> }>;
+    const rawUpdates = args.updates as Array<{ where: Record<string, unknown>; _set: Record<string, unknown>; _inc?: Record<string, unknown> }>;
     if (!rawUpdates || rawUpdates.length === 0) {
       return [];
     }
@@ -235,6 +239,7 @@ export function makeUpdateManyResolver(
     const updates = rawUpdates.map((entry) => ({
       where: remapBoolExp(entry.where as BoolExp | undefined, columnMap) ?? ({} as BoolExp),
       _set: remapKeys(entry._set as Record<string, unknown>, columnMap) ?? {},
+      _inc: remapKeys(entry._inc as Record<string, unknown> | undefined, columnMap),
     }));
 
     const compiledQueries = compileUpdateMany({

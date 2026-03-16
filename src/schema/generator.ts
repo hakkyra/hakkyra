@@ -180,7 +180,13 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
   // Create a shared selectColumnEnums map that will be populated during buildMutationInputTypes.
   // The filter types use thunks (lazy fields), so the map will be populated by the time they execute.
   const selectColumnEnums = new Map<string, GraphQLEnumType>();
-  const filterTypes = buildFilterTypes(tables, typeRegistry, enumTypes, enumNames, selectColumnEnums, functions);
+  // Build the set of table-based enum GraphQL names (is_enum: true tables).
+  // Table-based enums get only base comparison operators (no _gt/_gte/_lt/_lte),
+  // whereas PG native enums get ordered comparison operators.
+  const tableEnumGraphQLNames = new Set(
+    tables.filter((t) => t.isEnum).map((t) => pgEnumToGraphQLName(`${t.name}_enum`)),
+  );
+  const filterTypes = buildFilterTypes(tables, typeRegistry, enumTypes, enumNames, selectColumnEnums, functions, tableEnumGraphQLNames);
 
   // ── Step 3: Build OrderBy types for each table (needed by array rel args)
   const orderByTypes = new Map<string, GraphQLInputObjectType>();
@@ -435,6 +441,9 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
         updateArgs['where'] = { type: new GraphQLNonNull(filterType) };
       }
       updateArgs['_set'] = { type: mutInputs.setInput };
+      if (mutInputs.incInput) {
+        updateArgs['_inc'] = { type: mutInputs.incInput };
+      }
 
       mutationFields[names.update] = {
         type: mutInputs.mutationResponse,
@@ -446,12 +455,16 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
     // update_by_pk
     if (isOpEnabled(table, 'updateByPk') && table.primaryKey.length > 0 && mutInputs.pkColumnsInput) {
+      const updateByPkArgs: GraphQLFieldConfigArgumentMap = {
+        pkColumns: { type: new GraphQLNonNull(mutInputs.pkColumnsInput) },
+        _set: { type: mutInputs.setInput },
+      };
+      if (mutInputs.incInput) {
+        updateByPkArgs['_inc'] = { type: mutInputs.incInput };
+      }
       mutationFields[names.updateByPk] = {
         type: objectType,
-        args: {
-          pkColumns: { type: new GraphQLNonNull(mutInputs.pkColumnsInput) },
-          _set: { type: new GraphQLNonNull(mutInputs.setInput) },
-        },
+        args: updateByPkArgs,
         resolve: makeUpdateByPkResolver(table),
         description: `Update a single row in ${table.schema}.${table.name} by primary key`,
       };

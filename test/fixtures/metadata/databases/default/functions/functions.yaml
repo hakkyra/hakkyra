@@ -6,4 +6,5 @@
 - "!include utils_count_active_clients.yaml"
 - "!include public_player_data_report.yaml"
 - "!include public_player_profile.yaml"
+- "!include public_latest_clients.yaml"
 - "!include public_search_clients_advanced.yaml"
