@@ -40,6 +40,7 @@ import type {
   InheritedRolesRef,
   ContextFactoryDeps,
 } from './server/context.js';
+import type { SubscriptionConnectionContext } from './server/types.js';
 import { buildCjsSchema, registerIntrospectionControl } from './server/schema.js';
 import { initPhase2 } from './server/jobs.js';
 import {
@@ -241,9 +242,9 @@ export async function createServer(
       },
       context(_connection, context) {
         // Mercurius stores onConnect results on _connectionInit or directly on context
-        const ctx = context as unknown as Record<string, unknown>;
-        const connectResult = (ctx._connectionInit ?? ctx) as Record<string, unknown>;
-        const session = (connectResult.session ?? ctx.session) as import('./types.js').SessionVariables | undefined;
+        const ctx = context as unknown as SubscriptionConnectionContext;
+        const connectResult = ctx._connectionInit ?? ctx;
+        const session = connectResult.session ?? ctx.session;
         const auth = session ?? ANONYMOUS_SESSION;
         return buildResolverContext(contextDeps, auth);
       },

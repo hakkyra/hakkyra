@@ -95,7 +95,7 @@ export function registerHasuraREST(
   const hasuraRestDeps: HasuraRestDeps = {
     buildContext: (request) => {
       const auth = request.session ?? ANONYMOUS_SESSION;
-      return buildResolverContext(contextDeps, auth, request.headers as Record<string, string>) as unknown as Record<string, unknown>;
+      return buildResolverContext(contextDeps, auth, request.headers as Record<string, string>);
     },
   };
   registerHasuraRestEndpoints(server, config.queryCollections, config.hasuraRestEndpoints, hasuraRestDeps);
