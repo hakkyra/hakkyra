@@ -1258,20 +1258,20 @@ Generate comprehensive API documentation for all YAML configuration files from Z
 
 ### Approach
 
-- [ ] Add `.describe()` to all Zod fields in `src/config/schemas.ts` (raw YAML schemas) and `src/config/schemas-internal.ts` (internal schemas)
-- [ ] Build doc generator that walks Zod schemas and emits structured documentation (field name, type, default, required/optional, description)
-- [ ] `hakkyra docs-config` CLI command — outputs generated config reference (Markdown or JSON)
-- [ ] Cover all config files: `hakkyra.yaml`, `databases.yaml`, table YAML, `actions.yaml`, `cron_triggers.yaml`, `functions.yaml`, `query_collections.yaml`, `rest_endpoints.yaml`, `inherited_roles.yaml`
+- [x] Add `.describe()` to all Zod fields in `src/config/schemas.ts` (raw YAML schemas) and `src/config/schemas-internal.ts` (internal schemas)
+- [x] Build doc generator that walks Zod schemas and emits structured documentation (field name, type, default, required/optional, description)
+- [x] `hakkyra docs-config` CLI command — outputs generated config reference (Markdown or JSON)
+- [x] Cover all config files: `hakkyra.yaml`, `databases.yaml`, table YAML, `actions.yaml`, `cron_triggers.yaml`, `functions.yaml`, `query_collections.yaml`, `rest_endpoints.yaml`, `inherited_roles.yaml`
 
 ### Scope
 
-- [ ] `hakkyra.yaml` — server, auth, graphql, rest, docs, schema, webhook, redis, job_queue sections
-- [ ] `databases.yaml` — connection config, pools, replicas, session, native_queries, logical_models
-- [ ] Table YAML — table config, permissions (select/insert/update/delete), relationships, computed fields, event triggers, `is_enum`, `configuration` block
-- [ ] `actions.yaml` + `actions.graphql` — action definitions, permissions, transforms, async config
-- [ ] `cron_triggers.yaml` — schedule, webhook, retry config, headers
-- [ ] `functions.yaml` — tracked function config, exposed_as, custom_root_fields, permissions
-- [ ] `query_collections.yaml` + `rest_endpoints.yaml` — collection definitions, endpoint routing
+- [x] `hakkyra.yaml` — server, auth, graphql, rest, docs, schema, webhook, redis, job_queue sections
+- [x] `databases.yaml` — connection config, pools, replicas, session, native_queries, logical_models
+- [x] Table YAML — table config, permissions (select/insert/update/delete), relationships, computed fields, event triggers, `is_enum`, `configuration` block
+- [x] `actions.yaml` + `actions.graphql` — action definitions, permissions, transforms, async config
+- [x] `cron_triggers.yaml` — schedule, webhook, retry config, headers
+- [x] `functions.yaml` — tracked function config, exposed_as, custom_root_fields, permissions
+- [x] `query_collections.yaml` + `rest_endpoints.yaml` — collection definitions, endpoint routing
 
 ---
 
