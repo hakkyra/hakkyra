@@ -23,6 +23,7 @@ import {
   GraphQLBoolean,
   GraphQLInt,
   GraphQLID,
+  GraphQLEnumType,
   GraphQLError,
 } from 'graphql';
 import type {
@@ -606,7 +607,7 @@ export function buildActionFields(
       // Hasura exposes async action result queries as subscription fields,
       // allowing clients to subscribe to action completion.
       subscriptionFields[parsed.name] = {
-        type: asyncResultType,
+        type: returnType,
         args: {
           id: { type: new GraphQLNonNull(customScalars['Uuid']!) },
         },

@@ -1,0 +1,6 @@
+function:
+  name: player_profile
+  schema: public
+permissions:
+  - role: backoffice
+  - role: administrator

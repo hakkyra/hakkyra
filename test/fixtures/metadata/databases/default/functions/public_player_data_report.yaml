@@ -1,0 +1,6 @@
+function:
+  name: player_data_report
+  schema: public
+permissions:
+  - role: backoffice
+  - role: administrator

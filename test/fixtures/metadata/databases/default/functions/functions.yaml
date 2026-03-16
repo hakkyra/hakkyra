@@ -4,3 +4,5 @@
 - "!include public_search_clients_by_trust.yaml"
 - "!include public_my_clients.yaml"
 - "!include utils_count_active_clients.yaml"
+- "!include public_player_data_report.yaml"
+- "!include public_player_profile.yaml"
