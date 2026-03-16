@@ -8,12 +8,12 @@
 import type { Pool } from 'pg';
 import type { Logger } from 'pino';
 import type { TableInfo } from '../types.js';
-import type { JobQueue, Job } from '../shared/job-queue/types.js';
+import type { JobQueue } from '../shared/job-queue/types.js';
 import {
-  deliverWebhook,
   resolveWebhookUrl,
   resolveWebhookHeaders,
 } from '../shared/webhook.js';
+import { registerWebhookWorker } from '../shared/webhook-worker.js';
 import { quoteIdentifier as quoteIdent } from '../sql/utils.js';
 import { buildTriggerLookup } from './shared.js';
 
@@ -124,73 +124,60 @@ export async function registerEventWorkers(
     const queueName = `event/${triggerName}`;
     const concurrency = trigger.concurrency ?? defaultConcurrency;
 
-    // Configure the queue with retry settings
-    await jobQueue.createQueue(queueName, {
-      retryLimit: trigger.retryConf.numRetries,
-      retryDelay: trigger.retryConf.intervalSec,
-      retryBackoff: true,
-      expireInSeconds: trigger.retryConf.timeoutSec,
-    });
+    await registerWebhookWorker<{ eventId: string; payload: unknown }>(
+      jobQueue,
+      logger,
+      {
+        queueName,
+        label: `event/${triggerName}`,
+        queueOptions: {
+          retryLimit: trigger.retryConf.numRetries,
+          retryDelay: trigger.retryConf.intervalSec,
+          retryBackoff: true,
+          expireInSeconds: trigger.retryConf.timeoutSec,
+        },
+        workOptions: { concurrency },
+        callbacks: {
+          resolveWebhook(job) {
+            const { payload } = job.data;
+            return {
+              url: resolveWebhookUrl(trigger.webhook, trigger.webhookFromEnv),
+              headers: resolveWebhookHeaders(trigger.headers),
+              payload,
+              timeoutMs: trigger.retryConf.timeoutSec * 1000,
+            };
+          },
 
-    await jobQueue.work<{ eventId: string; payload: unknown }>(queueName, async (jobs: Job<{ eventId: string; payload: unknown }>[]) => {
-      for (const job of jobs) {
-      const { eventId, payload } = job.data;
+          async onSuccess(job, result) {
+            const { eventId } = job.data;
+            await pool.query(
+              `UPDATE ${quoteIdent(schemaName)}.event_log SET status = 'delivered', delivered = true, delivered_at = now(),
+               response_status = $2 WHERE id = $1`,
+              [eventId, result.statusCode],
+            );
+          },
 
-      const url = resolveWebhookUrl(trigger.webhook, trigger.webhookFromEnv);
-      const headers = resolveWebhookHeaders(trigger.headers);
-
-      logger.info(
-        { trigger: triggerName, eventId, url, jobId: job.id },
-        'Delivering event trigger webhook',
-      );
-
-      const result = await deliverWebhook({
-        url,
-        headers,
-        payload,
-        timeoutMs: trigger.retryConf.timeoutSec * 1000,
-      });
-
-      if (result.success) {
-        // Mark as delivered
-        await pool.query(
-          `UPDATE ${quoteIdent(schemaName)}.event_log SET status = 'delivered', delivered = true, delivered_at = now(),
-           response_status = $2 WHERE id = $1`,
-          [eventId, result.statusCode],
-        );
-
-        logger.info(
-          { trigger: triggerName, eventId, statusCode: result.statusCode, durationMs: result.durationMs },
-          'Event webhook delivered',
-        );
-      } else {
-        // Update error info
-        await pool.query(
-          `UPDATE ${quoteIdent(schemaName)}.event_log SET
-           retry_count = retry_count + 1,
-           last_error = $2,
-           response_status = $3,
-           status = CASE WHEN retry_count + 1 >= $4 THEN 'failed' ELSE 'pending' END,
-           next_retry = now() + interval '1 second' * $5
-           WHERE id = $1`,
-          [
-            eventId,
-            result.error ?? `HTTP ${result.statusCode}`,
-            result.statusCode,
-            trigger.retryConf.numRetries,
-            trigger.retryConf.intervalSec * Math.pow(2, 0), // backoff handled by pg-boss
-          ],
-        );
-
-        logger.warn(
-          { trigger: triggerName, eventId, statusCode: result.statusCode, error: result.error },
-          'Event webhook delivery failed',
-        );
-
-        // Throw so pg-boss knows the job failed
-        throw new Error(`Webhook delivery failed: ${result.error ?? `HTTP ${result.statusCode}`}`);
-      }
-      }
-    }, { concurrency });
+          async onFailure(job, result) {
+            const { eventId } = job.data;
+            await pool.query(
+              `UPDATE ${quoteIdent(schemaName)}.event_log SET
+               retry_count = retry_count + 1,
+               last_error = $2,
+               response_status = $3,
+               status = CASE WHEN retry_count + 1 >= $4 THEN 'failed' ELSE 'pending' END,
+               next_retry = now() + interval '1 second' * $5
+               WHERE id = $1`,
+              [
+                eventId,
+                result.error ?? `HTTP ${result.statusCode}`,
+                result.statusCode,
+                trigger.retryConf.numRetries,
+                trigger.retryConf.intervalSec * Math.pow(2, 0), // backoff handled by pg-boss
+              ],
+            );
+          },
+        },
+      },
+    );
   }
 }

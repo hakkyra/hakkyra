@@ -349,7 +349,10 @@ export async function createServer(
       configWatcher?.stop();
       await phase2.redisFanout?.stop();
       await phase2.changeListener?.stop();
+      // Stop all ServiceManager-based services uniformly
       await phase2.eventManager?.stop();
+      await phase2.cronManager?.stop();
+      await phase2.actionManager?.stop();
       await phase2.jobQueue?.stop();
       await server.close();
       await connectionManager.shutdown();
