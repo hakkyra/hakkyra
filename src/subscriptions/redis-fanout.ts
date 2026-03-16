@@ -57,8 +57,9 @@ export async function createRedisFanoutBridge(
   const callbacks: Array<(notification: ChangeNotification) => void> = [];
 
   // Build connection options
-  const connectionOpts = redisConfig.url
-    ? redisConfig.url
+  const resolvedUrl = redisConfig.url ?? (redisConfig.urlEnv ? process.env[redisConfig.urlEnv] : undefined);
+  const connectionOpts = resolvedUrl
+    ? resolvedUrl
     : {
         host: redisConfig.host ?? 'localhost',
         port: redisConfig.port ?? 6379,

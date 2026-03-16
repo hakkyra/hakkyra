@@ -32,6 +32,7 @@ type BullWorker = any;
 
 interface RedisConfig {
   url?: string;
+  urlEnv?: string;
   host?: string;
   port?: number;
   password?: string;
@@ -65,9 +66,10 @@ export class BullMQAdapter implements JobQueue {
     }
 
     // Build IORedis-compatible connection options
-    if (this.redis.url) {
+    const resolvedUrl = this.redis.url ?? (this.redis.urlEnv ? process.env[this.redis.urlEnv] : undefined);
+    if (resolvedUrl) {
       // Parse redis:// URL into host/port/password for IORedis
-      const parsed = new URL(this.redis.url);
+      const parsed = new URL(resolvedUrl);
       this.connectionOpts = {
         host: parsed.hostname || 'localhost',
         port: parseInt(parsed.port || '6379', 10),

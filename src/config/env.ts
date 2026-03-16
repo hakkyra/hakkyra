@@ -46,9 +46,19 @@ export function validateEnvironment(config: HakkyraConfig): EnvValidationResult 
     checkRequired(config.auth.jwt.keyEnv, 'auth.jwt.keyEnv', missing);
   }
 
+  // ── Auth: JWT JWK URL from env ─────────────────────────────────────────
+  if (config.auth.jwt?.jwkUrlEnv && !config.auth.jwt.jwkUrl) {
+    checkRequired(config.auth.jwt.jwkUrlEnv, 'auth.jwt.jwkUrlEnv', missing);
+  }
+
   // ── Auth: webhook URL ─────────────────────────────────────────────────
   if (config.auth.webhook?.urlFromEnv) {
     checkRequired(config.auth.webhook.urlFromEnv, 'auth.webhook.urlFromEnv', missing);
+  }
+
+  // ── Redis URL from env ──────────────────────────────────────────────
+  if (config.redis?.urlEnv && !config.redis.url) {
+    checkRequired(config.redis.urlEnv, 'redis.urlEnv', missing);
   }
 
   // ── Event triggers ────────────────────────────────────────────────────

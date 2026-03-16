@@ -412,31 +412,7 @@ export const RawRESTOverrideSchema = z
   .strict();
 
 export const RawApiConfigSchema = z
-  .object({
-    rest: z
-      .object({
-        auto_generate: z.boolean().optional(),
-        base_path: z.string().optional(),
-        pagination: z
-          .object({
-            default_limit: z.number().optional(),
-            max_limit: z.number().optional(),
-          })
-          .strict()
-          .optional(),
-        overrides: z.record(z.string(), z.array(RawRESTOverrideSchema)).optional(),
-      })
-      .strict()
-      .optional(),
-    docs: z
-      .object({
-        generate: z.boolean().optional(),
-        output: z.string().optional(),
-        llm_format: z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
-  })
+  .object({})
   .strict();
 
 // ─── Query Collections ──────────────────────────────────────────────────
@@ -577,6 +553,7 @@ export const RawServerConfigSchema = z
             key: z.string().optional(),
             key_from_env: z.string().optional(),
             jwk_url: z.string().optional(),
+            jwk_url_from_env: z.string().optional(),
             claims_namespace: z.string().optional(),
             claims_map: z
               .record(
@@ -642,6 +619,7 @@ export const RawServerConfigSchema = z
     redis: z
       .object({
         url: z.string().optional(),
+        url_from_env: z.string().optional(),
         host: z.string().optional(),
         port: z.number().optional(),
         password: z.string().optional(),

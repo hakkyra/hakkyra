@@ -90,8 +90,9 @@ export async function createJWTVerifier(
   }
 
   // ── JWKS endpoint (remote key set with auto-rotation) ──────────────────
-  if (config.jwkUrl) {
-    const jwks = createRemoteJWKSet(new URL(config.jwkUrl));
+  const jwkUrl = config.jwkUrl ?? (config.jwkUrlEnv ? process.env[config.jwkUrlEnv] : undefined);
+  if (jwkUrl) {
+    const jwks = createRemoteJWKSet(new URL(jwkUrl));
 
     return {
       async verify(token: string): Promise<JWTPayload> {

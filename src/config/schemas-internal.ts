@@ -262,6 +262,7 @@ export const AuthConfigSchema = z.object({
       key: z.string().optional(),
       keyEnv: z.string().optional(),
       jwkUrl: z.string().optional(),
+      jwkUrlEnv: z.string().optional(),
       claimsNamespace: z.string().optional(),
       claimsMap: z
         .record(
@@ -297,6 +298,7 @@ export const AuthConfigSchema = z.object({
 
 export const RedisConfigSchema = z.object({
   url: z.string().optional(),
+  urlEnv: z.string().optional(),
   host: z.string().optional(),
   port: z.number().default(6379),
   password: z.string().optional(),

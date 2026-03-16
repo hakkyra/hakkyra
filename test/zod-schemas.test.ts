@@ -786,30 +786,12 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
   // ─── RawApiConfigSchema ────────────────────────────────────────────────────
 
   describe('RawApiConfigSchema', () => {
-    it('accepts empty object (all fields optional)', () => {
+    it('accepts empty object', () => {
       expectValid(RawApiConfigSchema, {});
     });
 
-    it('accepts full api config', () => {
-      expectValid(RawApiConfigSchema, {
-        rest: {
-          auto_generate: true,
-          base_path: '/api/v1',
-          pagination: { default_limit: 20, max_limit: 100 },
-          overrides: {
-            users: [{ method: 'GET', path: '/users', operation: 'select' }],
-          },
-        },
-        docs: {
-          generate: true,
-          output: './docs',
-          llm_format: true,
-        },
-      });
-    });
-
     it('rejects unknown keys (strict mode)', () => {
-      const err = expectInvalid(RawApiConfigSchema, { table_aliases: { users: 'people' } });
+      const err = expectInvalid(RawApiConfigSchema, { rest: {} });
       expect(err.issues.length).toBeGreaterThan(0);
     });
   });
