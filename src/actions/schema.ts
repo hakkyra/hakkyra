@@ -63,6 +63,8 @@ export interface ActionSchemaOptions {
   tables?: TableInfo[];
   /** Registry of table GraphQL object types, keyed by "schema.name" */
   tableTypeRegistry?: Map<string, GraphQLObjectType>;
+  /** PG-introspected enum types, keyed by GraphQL enum name */
+  enumTypes?: Map<string, GraphQLEnumType>;
 }
 
 // ─── SDL Type Resolution ────────────────────────────────────────────────────
@@ -80,16 +82,22 @@ const SCALAR_MAP: Record<string, GraphQLOutputType & GraphQLInputType> = {
   Uuid: customScalars['Uuid']!,
   json: customScalars['json']!,
   Jsonb: customScalars['Jsonb']!,
+  jsonb: customScalars['Jsonb']!,
   Timestamptz: customScalars['Timestamptz']!,
+  timestamptz: customScalars['Timestamptz']!,
   Date: customScalars['Date']!,
   Time: customScalars['Time']!,
   Bigint: customScalars['Bigint']!,
+  bigint: customScalars['Bigint']!,
   numeric: customScalars['Numeric']!,
   Numeric: customScalars['Numeric']!,
   Bpchar: customScalars['Bpchar']!,
+  bpchar: customScalars['Bpchar']!,
   Interval: customScalars['Interval']!,
   Bytea: customScalars['Bytea']!,
   Inet: customScalars['Inet']!,
+  // PG array type scalars
+  _text: customScalars['_text']!,
   // Backwards-compat aliases for action SDL parsing
   UUID: customScalars['Uuid']!,
   JSON: customScalars['json']!,
@@ -102,12 +110,13 @@ const SCALAR_MAP: Record<string, GraphQLOutputType & GraphQLInputType> = {
 function resolveOutputType(
   typeNode: TypeNode,
   outputTypes: Map<string, GraphQLObjectType>,
+  enumTypes?: Map<string, GraphQLEnumType>,
 ): GraphQLOutputType {
   if (typeNode.kind === 'NonNullType') {
-    return new GraphQLNonNull(resolveOutputType(typeNode.type, outputTypes));
+    return new GraphQLNonNull(resolveOutputType(typeNode.type, outputTypes, enumTypes));
   }
   if (typeNode.kind === 'ListType') {
-    return new GraphQLList(resolveOutputType(typeNode.type, outputTypes));
+    return new GraphQLList(resolveOutputType(typeNode.type, outputTypes, enumTypes));
   }
   // NamedType
   const name = typeNode.name.value;
@@ -115,6 +124,9 @@ function resolveOutputType(
   if (scalar) return scalar;
   const objectType = outputTypes.get(name);
   if (objectType) return objectType;
+  // Check SDL-defined and PG-introspected enum types
+  const enumType = enumTypes?.get(name);
+  if (enumType) return enumType;
   // Fallback to String for unknown types
   return GraphQLString;
 }
@@ -122,18 +134,22 @@ function resolveOutputType(
 function resolveInputType(
   typeNode: TypeNode,
   inputTypes: Map<string, GraphQLInputObjectType>,
+  enumTypes?: Map<string, GraphQLEnumType>,
 ): GraphQLInputType {
   if (typeNode.kind === 'NonNullType') {
-    return new GraphQLNonNull(resolveInputType(typeNode.type, inputTypes));
+    return new GraphQLNonNull(resolveInputType(typeNode.type, inputTypes, enumTypes));
   }
   if (typeNode.kind === 'ListType') {
-    return new GraphQLList(resolveInputType(typeNode.type, inputTypes));
+    return new GraphQLList(resolveInputType(typeNode.type, inputTypes, enumTypes));
   }
   const name = typeNode.name.value;
   const scalar = SCALAR_MAP[name];
   if (scalar) return scalar;
   const inputType = inputTypes.get(name);
   if (inputType) return inputType;
+  // Check SDL-defined and PG-introspected enum types
+  const enumType = enumTypes?.get(name);
+  if (enumType) return enumType;
   return GraphQLString;
 }
 
@@ -167,6 +183,10 @@ function parseActionsSDL(sdl: string) {
   const actions: ParsedAction[] = [];
   const inputTypeDefs: Map<string, InputValueDefinitionNode[]> = new Map();
   const outputTypeDefs: Map<string, FieldDefinitionNode[]> = new Map();
+  /** Enum types defined in the SDL (e.g., `enum PaymentType { ... }`) */
+  const sdlEnumDefs: Map<string, string[]> = new Map();
+  /** Scalar type names declared in the SDL (e.g., `scalar _text`) */
+  const sdlScalarNames: Set<string> = new Set();
 
   for (const def of doc.definitions) {
     if (
@@ -211,9 +231,20 @@ function parseActionsSDL(sdl: string) {
     if (def.kind === 'InputObjectTypeDefinition') {
       inputTypeDefs.set(def.name.value, [...(def.fields ?? [])]);
     }
+
+    // Parse enum type definitions from SDL
+    if (def.kind === 'EnumTypeDefinition') {
+      const values = (def.values ?? []).map((v) => v.name.value);
+      sdlEnumDefs.set(def.name.value, values);
+    }
+
+    // Parse scalar type declarations from SDL
+    if (def.kind === 'ScalarTypeDefinition') {
+      sdlScalarNames.add(def.name.value);
+    }
   }
 
-  return { actions, inputTypeDefs, outputTypeDefs };
+  return { actions, inputTypeDefs, outputTypeDefs, sdlEnumDefs, sdlScalarNames };
 }
 
 // ─── Shared Async Action Types ──────────────────────────────────────────────
@@ -417,7 +448,41 @@ export function buildActionFields(
     return { queryFields: {}, mutationFields: {}, types: [] };
   }
 
-  const { actions: parsedActions, inputTypeDefs, outputTypeDefs } = parseActionsSDL(sdl);
+  const { actions: parsedActions, inputTypeDefs, outputTypeDefs, sdlEnumDefs, sdlScalarNames } = parseActionsSDL(sdl);
+
+  // Build merged enum types map: SDL-defined enums + PG-introspected enums
+  const allEnumTypes = new Map<string, GraphQLEnumType>();
+
+  // Add PG-introspected enum types from schema model
+  if (options?.enumTypes) {
+    for (const [name, enumType] of options.enumTypes) {
+      allEnumTypes.set(name, enumType);
+    }
+  }
+
+  // Build GraphQL enum types from SDL-defined enum declarations
+  for (const [name, values] of sdlEnumDefs) {
+    const enumValues: Record<string, { value: string }> = {};
+    for (const val of values) {
+      enumValues[val] = { value: val };
+    }
+    allEnumTypes.set(name, new GraphQLEnumType({
+      name,
+      values: enumValues,
+    }));
+  }
+
+  // Register SDL-declared scalars (e.g., `scalar _text`) in the SCALAR_MAP if they
+  // correspond to known scalars. This handles cases like `scalar _text` → [String].
+  // Unknown SDL scalars that aren't in SCALAR_MAP or customScalars are treated as
+  // GraphQLString (the existing fallback behavior).
+  for (const scalarName of sdlScalarNames) {
+    if (!SCALAR_MAP[scalarName] && customScalars[scalarName]) {
+      // Add to SCALAR_MAP at runtime for this build pass — the customScalars
+      // registry already has the type, just the action SCALAR_MAP alias is missing.
+      SCALAR_MAP[scalarName] = customScalars[scalarName] as GraphQLOutputType & GraphQLInputType;
+    }
+  }
 
   // Build action config lookup
   const actionConfigMap = new Map<string, ActionConfig>();
@@ -462,7 +527,7 @@ export function buildActionFields(
           const fields: Record<string, { type: GraphQLInputType }> = {};
           for (const fieldDef of fieldDefs) {
             fields[fieldDef.name.value] = {
-              type: resolveInputType(fieldDef.type, inputTypes),
+              type: resolveInputType(fieldDef.type, inputTypes, allEnumTypes),
             };
           }
           return fields;
@@ -483,7 +548,7 @@ export function buildActionFields(
           const fields: GraphQLFieldConfigMap<Record<string, unknown>, ResolverContext> = {};
           for (const fieldDef of fieldDefs) {
             fields[fieldDef.name.value] = {
-              type: resolveOutputType(fieldDef.type, outputTypes),
+              type: resolveOutputType(fieldDef.type, outputTypes, allEnumTypes),
             };
           }
 
@@ -517,7 +582,7 @@ export function buildActionFields(
     if (!actionConfig) continue;
 
     const isAsync = actionConfig.definition.kind === 'asynchronous';
-    const returnType = resolveOutputType(parsed.returnTypeNode, outputTypes);
+    const returnType = resolveOutputType(parsed.returnTypeNode, outputTypes, allEnumTypes);
     const inputType = inputTypes.get(parsed.inputTypeName);
     const hasInlineArgs = parsed.inlineArgs.length > 0;
 
@@ -528,7 +593,7 @@ export function buildActionFields(
     } else if (hasInlineArgs) {
       for (const argDef of parsed.inlineArgs) {
         argsConfig[argDef.name.value] = {
-          type: resolveInputType(argDef.type, inputTypes),
+          type: resolveInputType(argDef.type, inputTypes, allEnumTypes),
         };
       }
     }
@@ -590,9 +655,17 @@ export function buildActionFields(
   }
 
   // Collect all types to register in the schema
+  // Include SDL-defined enum types so they appear in the schema
+  const sdlEnumTypes: GraphQLEnumType[] = [];
+  for (const [name] of sdlEnumDefs) {
+    const et = allEnumTypes.get(name);
+    if (et) sdlEnumTypes.push(et);
+  }
+
   const types: GraphQLNamedType[] = [
     ...inputTypes.values(),
     ...outputTypes.values(),
+    ...sdlEnumTypes,
   ];
 
   // Add async action shared types if any async actions exist

@@ -151,6 +151,49 @@ describe('Actions', () => {
     it('registers acceptContractWithToken mutation in the schema', () => {
       expect(sdl).toContain('acceptContractWithToken(input: AcceptContractInput!): AcceptContractResult');
     });
+
+    it('uses Bigint scalar for action input args (not String)', () => {
+      expect(sdl).toMatch(/input ContentEventInput\s*\{[^}]*playerId:\s*Bigint!/);
+    });
+
+    it('uses Jsonb scalar for action input args (not String)', () => {
+      expect(sdl).toMatch(/input ContentEventInput\s*\{[^}]*parameters:\s*Jsonb[^!]/);
+    });
+
+    it('uses _text scalar for action input args (not String)', () => {
+      expect(sdl).toMatch(/input ContentEventInput\s*\{[^}]*tags:\s*_text[^!]/);
+    });
+
+    it('uses SDL-defined enum types for action input args (not String)', () => {
+      expect(sdl).toMatch(/input ContentEventInput\s*\{[^}]*category:\s*ContentCategory!/);
+    });
+
+    it('uses Timestamptz scalar for action input args (not String)', () => {
+      expect(sdl).toMatch(/input ContentEventInput\s*\{[^}]*occurredAt:\s*Timestamptz[^!]/);
+    });
+
+    it('uses Numeric scalar for action input args (not String)', () => {
+      expect(sdl).toMatch(/input ContentEventInput\s*\{[^}]*amount:\s*Numeric[^!]/);
+    });
+
+    it('uses correct scalar types in action output types', () => {
+      expect(sdl).toMatch(/type ContentEventResult\s*\{[^}]*eventId:\s*Uuid!/);
+      expect(sdl).toMatch(/type ContentEventResult\s*\{[^}]*category:\s*ContentCategory!/);
+      expect(sdl).toMatch(/type ContentEventResult\s*\{[^}]*processedTags:\s*_text[^!]/);
+      expect(sdl).toMatch(/type ContentEventResult\s*\{[^}]*metadata:\s*Jsonb[^!]/);
+    });
+
+    it('registers SDL-defined enum type in the schema', () => {
+      expect(sdl).toContain('enum ContentCategory');
+      expect(sdl).toContain('NEWS');
+      expect(sdl).toContain('BLOG');
+      expect(sdl).toContain('EVENT');
+      expect(sdl).toContain('ANNOUNCEMENT');
+    });
+
+    it('registers _text scalar type in the schema', () => {
+      expect(sdl).toMatch(/scalar _text/);
+    });
   });
 
   describe('mutation execution', () => {
@@ -551,6 +594,87 @@ describe('Actions', () => {
         walletId: 'f0000000-0000-0000-0000-000000000042',
         accepted: true,
       });
+    });
+
+    it('executes action with Bigint, Jsonb, _text, enum, Timestamptz, Numeric types', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/content-event', () => ({
+        code: 200,
+        body: {
+          eventId: 'a0000000-0000-0000-0000-000000000001',
+          category: 'NEWS',
+          processedTags: ['tech', 'science'],
+          metadata: { source: 'api' },
+          success: true,
+        },
+      }));
+
+      const { body } = await gql(
+        `mutation($input: ContentEventInput!) {
+          contentEvent(input: $input) {
+            eventId
+            category
+            processedTags
+            metadata
+            success
+          }
+        }`,
+        {
+          input: {
+            playerId: '12345678901234',
+            parameters: { key: 'value' },
+            tags: ['tech', 'science'],
+            category: 'NEWS',
+            occurredAt: '2025-01-15T10:30:00Z',
+            amount: '99.99',
+          },
+        },
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(body.errors).toBeUndefined();
+      expect((body.data as any).contentEvent).toEqual({
+        eventId: 'a0000000-0000-0000-0000-000000000001',
+        category: 'NEWS',
+        processedTags: ['tech', 'science'],
+        metadata: { source: 'api' },
+        success: true,
+      });
+    });
+
+    it('sends correct scalar-typed args in webhook payload', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/content-event', () => ({
+        code: 200,
+        body: { eventId: 'a0000000-0000-0000-0000-000000000002', category: 'BLOG', success: true },
+      }));
+
+      await gql(
+        `mutation($input: ContentEventInput!) {
+          contentEvent(input: $input) { success }
+        }`,
+        {
+          input: {
+            playerId: '99999999999',
+            parameters: { nested: { data: true } },
+            tags: ['alpha', 'beta'],
+            category: 'BLOG',
+            amount: '42.50',
+          },
+        },
+        { authorization: `Bearer ${token}` },
+      );
+
+      const [req] = webhook.requests;
+      const payload = req.body as any;
+      expect(payload.action).toEqual({ name: 'contentEvent' });
+      expect(payload.input.playerId).toBe('99999999999');
+      expect(payload.input.parameters).toEqual({ nested: { data: true } });
+      expect(payload.input.tags).toEqual(['alpha', 'beta']);
+      expect(payload.input.category).toBe('BLOG');
+      expect(payload.input.amount).toBe('42.50');
     });
   });
 

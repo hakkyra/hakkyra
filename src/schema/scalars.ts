@@ -333,6 +333,45 @@ export const GraphQLBpchar = new GraphQLScalarType({
   },
 });
 
+// ─── PG Array Scalars ─────────────────────────────────────────────────────
+
+/**
+ * PostgreSQL array type scalars. These represent PG array types (e.g., text[])
+ * that Hasura exposes as custom scalars in action SDL definitions.
+ * Values are JSON arrays (e.g., ["a", "b", "c"]).
+ */
+
+function parseArrayValue(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Not valid JSON — wrap as single-element array
+    }
+  }
+  return [value];
+}
+
+export const GraphQLTextArray = new GraphQLScalarType({
+  name: '_text',
+  description: 'PostgreSQL text[] array type, serialized as a JSON array of strings.',
+
+  serialize: ((value: unknown) => parseArrayValue(value)) as GraphQLScalarSerializer<unknown[]>,
+  parseValue: ((value: unknown) => parseArrayValue(value)) as GraphQLScalarValueParser<unknown[]>,
+  parseLiteral(ast) {
+    if (ast.kind === Kind.LIST) {
+      return (ast as unknown as { values: ReadonlyArray<{ kind: string; value?: string }> }).values
+        .map((v) => v.value ?? null);
+    }
+    if (ast.kind === Kind.STRING) {
+      return parseArrayValue(ast.value);
+    }
+    throw new TypeError(`_text must be a list or JSON string, got: ${ast.kind}`);
+  },
+});
+
 // ─── Scalar Registry ────────────────────────────────────────────────────────
 
 /**
@@ -352,4 +391,5 @@ export const customScalars: Record<string, GraphQLScalarType> = {
   Bytea: GraphQLBytea,
   Inet: GraphQLInet,
   Bpchar: GraphQLBpchar,
+  _text: GraphQLTextArray,
 };
