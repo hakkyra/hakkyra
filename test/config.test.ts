@@ -93,7 +93,7 @@ describe('Config Loading', () => {
       expect(config.databases.primary.pool?.max).toBe(5);
     });
 
-    it('should load REST config from api_config.yaml', async () => {
+    it('should load REST config from hakkyra.yaml', async () => {
       const cleanDir = await getCleanMetadataDir();
       const config = await loadConfig(cleanDir, SERVER_CONFIG_PATH);
       expect(config.rest.autoGenerate).toBe(true);
@@ -102,7 +102,7 @@ describe('Config Loading', () => {
       expect(config.rest.pagination.maxLimit).toBe(100);
     });
 
-    it('should load docs config from api_config.yaml', async () => {
+    it('should load docs config from hakkyra.yaml', async () => {
       const cleanDir = await getCleanMetadataDir();
       const config = await loadConfig(cleanDir, SERVER_CONFIG_PATH);
       expect(config.apiDocs.generate).toBe(true);

@@ -945,6 +945,68 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
       });
       expect(err.issues.length).toBeGreaterThan(0);
     });
+
+    it('accepts rest section', () => {
+      expectValid(RawServerConfigSchema, {
+        rest: {
+          auto_generate: true,
+          base_path: '/api/v1',
+          pagination: { default_limit: 20, max_limit: 100 },
+          overrides: {
+            users: [{ method: 'GET', path: '/users', operation: 'select' }],
+          },
+        },
+      });
+    });
+
+    it('accepts rest section with partial fields', () => {
+      expectValid(RawServerConfigSchema, {
+        rest: { auto_generate: false },
+      });
+    });
+
+    it('accepts docs section', () => {
+      expectValid(RawServerConfigSchema, {
+        docs: {
+          generate: true,
+          output: './docs',
+          llm_format: true,
+          include_examples: true,
+        },
+      });
+    });
+
+    it('accepts docs section with partial fields', () => {
+      expectValid(RawServerConfigSchema, {
+        docs: { generate: false },
+      });
+    });
+
+    it('accepts full config with rest and docs alongside other sections', () => {
+      expectValid(RawServerConfigSchema, {
+        server: { port: 8080 },
+        rest: {
+          auto_generate: true,
+          base_path: '/api',
+          pagination: { default_limit: 10 },
+        },
+        docs: { generate: true, llm_format: true },
+      });
+    });
+
+    it('rejects unknown fields inside rest section', () => {
+      const err = expectInvalid(RawServerConfigSchema, {
+        rest: { unknown_field: true },
+      });
+      expect(err.issues.length).toBeGreaterThan(0);
+    });
+
+    it('rejects unknown fields inside docs section', () => {
+      const err = expectInvalid(RawServerConfigSchema, {
+        docs: { unknown_field: true },
+      });
+      expect(err.issues.length).toBeGreaterThan(0);
+    });
   });
 });
 
