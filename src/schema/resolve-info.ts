@@ -24,7 +24,7 @@ import type {
   CompiledFilter,
 } from '../types.js';
 import type { RelationshipSelection, OrderByItem } from '../sql/select.js';
-import type { ResolverPermissionLookup } from './resolvers.js';
+import type { ResolverPermissionLookup } from './resolvers/index.js';
 import { toCamelCase, getColumnFieldName } from './type-builder.js';
 
 // ─── Public Interface ────────────────────────────────────────────────────────

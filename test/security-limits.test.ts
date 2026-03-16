@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { resolveLimit } from '../src/schema/resolvers.js';
+import { resolveLimit } from '../src/schema/resolvers/index.js';
 
 describe('resolveLimit', () => {
   it('returns undefined when no limits are set', () => {
