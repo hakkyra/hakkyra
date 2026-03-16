@@ -13,6 +13,55 @@ import {
 } from '../shared/webhook.js';
 import { applyRequestTransform, applyResponseTransform } from './transform.js';
 
+// ─── Error Sanitization ─────────────────────────────────────────────────────
+
+/** Max length for webhook error messages returned to clients. */
+const MAX_ERROR_LENGTH = 500;
+
+/**
+ * Patterns that indicate internal details that should not be exposed:
+ * - Stack traces (e.g., "at Module._compile (/app/src/...)")
+ * - File paths (e.g., "/home/user/app/src/handler.ts:42:10")
+ * - Connection strings (e.g., "postgres://user:pass@host/db")
+ * - URLs with embedded credentials (e.g., "https://user:secret@host")
+ */
+const SENSITIVE_PATTERNS = [
+  /\bat\s+\S+\s+\(.*:\d+:\d+\)/g,           // stack trace lines
+  /(?:\/[\w.-]+){3,}(?::\d+){0,2}/g,         // absolute file paths (3+ segments)
+  /(?:postgres|mysql|mongodb|redis|amqp|https?):\/\/[^\s]*@[^\s]*/gi,  // connection strings / URLs with credentials
+];
+
+/**
+ * Sanitize a webhook error message for safe client exposure.
+ *
+ * In dev mode (NODE_ENV !== 'production'), the original message is returned as-is
+ * for debugging convenience. In production mode:
+ * - Stack traces, file paths, and credential-bearing URLs are stripped
+ * - The message is truncated to 500 characters
+ */
+export function sanitizeWebhookError(message: string): string {
+  if (process.env['NODE_ENV'] !== 'production') {
+    return message;
+  }
+
+  let sanitized = message;
+
+  for (const pattern of SENSITIVE_PATTERNS) {
+    sanitized = sanitized.replace(pattern, '[redacted]');
+  }
+
+  // Collapse multiple consecutive [redacted] markers
+  sanitized = sanitized.replace(/(\[redacted\]\s*){2,}/g, '[redacted] ');
+
+  // Trim whitespace and truncate
+  sanitized = sanitized.trim();
+  if (sanitized.length > MAX_ERROR_LENGTH) {
+    sanitized = sanitized.slice(0, MAX_ERROR_LENGTH - 3) + '...';
+  }
+
+  return sanitized;
+}
+
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export interface ActionExecutionOptions {
@@ -135,7 +184,7 @@ export async function executeAction(options: ActionExecutionOptions): Promise<Ac
     }
     return {
       success: false,
-      error: errorMessage,
+      error: sanitizeWebhookError(errorMessage),
       extensions: result.statusCode ? { statusCode: result.statusCode } : undefined,
     };
   }
