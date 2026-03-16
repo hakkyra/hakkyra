@@ -157,6 +157,46 @@ describe('GraphQL Schema Generation', () => {
       const accountsField = clientType.getFields()['accounts'];
       expect(accountsField.type).toBeInstanceOf(GraphQLNonNull);
     });
+
+    it('should have non-null object relationships when FK column is NOT NULL (P9.7c)', () => {
+      const typeMap = schema.getTypeMap();
+      const clientType = typeMap['Client'] as GraphQLObjectType;
+      const fields = clientType.getFields();
+      // branch_id is NOT NULL → branch relationship should be non-null
+      expect(fields['branch'].type).toBeInstanceOf(GraphQLNonNull);
+      // currency_id is NOT NULL → currency relationship should be non-null
+      expect(fields['currency'].type).toBeInstanceOf(GraphQLNonNull);
+    });
+
+    it('should have nullable object relationships when FK column is nullable (P9.7c)', () => {
+      const typeMap = schema.getTypeMap();
+      const clientType = typeMap['Client'] as GraphQLObjectType;
+      const fields = clientType.getFields();
+      // country_id is nullable → country relationship should be nullable
+      expect(fields['country'].type).not.toBeInstanceOf(GraphQLNonNull);
+      // language_id is nullable → language relationship should be nullable
+      expect(fields['language'].type).not.toBeInstanceOf(GraphQLNonNull);
+    });
+
+    it('should have non-null object relationship for composite FK with all NOT NULL columns (P9.7c)', () => {
+      const typeMap = schema.getTypeMap();
+      const fiscalReportType = typeMap['FiscalReport'] as GraphQLObjectType | undefined;
+      expect(fiscalReportType).toBeDefined();
+      const fields = fiscalReportType!.getFields();
+      // fiscal_year and fiscal_quarter are both NOT NULL → fiscalPeriod should be non-null
+      expect(fields['fiscalPeriod']).toBeDefined();
+      expect(fields['fiscalPeriod'].type).toBeInstanceOf(GraphQLNonNull);
+    });
+
+    it('should have nullable object relationship for manual config without FK localColumns (P9.7c)', () => {
+      const typeMap = schema.getTypeMap();
+      const clientType = typeMap['Client'] as GraphQLObjectType;
+      const fields = clientType.getFields();
+      // primaryAccount uses manual_configuration mapping id → client_id
+      // No FK constraint from client → account, so it should remain nullable
+      expect(fields['primaryAccount']).toBeDefined();
+      expect(fields['primaryAccount'].type).not.toBeInstanceOf(GraphQLNonNull);
+    });
   });
 
   describe('Aggregate relationship fields on object types', () => {
