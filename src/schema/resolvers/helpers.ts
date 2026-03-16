@@ -522,7 +522,12 @@ export function buildAggregateRelationshipSelections(
   const result: AggregateRelationshipSelection[] = [];
 
   for (const aggRel of parsed) {
-    const aggregate: AggregateSelection = { count: {} };
+    const aggregate: AggregateSelection = {
+      count: {
+        columns: aggRel.countColumns,
+        distinct: aggRel.countDistinct,
+      },
+    };
 
     // Populate sum/avg/min/max with all numeric columns from the remote table
     // so that nested aggregate queries like { invoicesAggregate { aggregate { sum { amount } } } }

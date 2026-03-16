@@ -261,7 +261,7 @@ describe('GraphQL GROUP BY', () => {
     const token = await tokens.backoffice();
     const { status, body } = await graphqlRequest(
       `query {
-        clientsAggregate(groupBy: [status]) {
+        clientsAggregate(distinctOn: [status]) {
           groupedAggregates {
             keys { status }
             count
@@ -292,7 +292,7 @@ describe('GraphQL GROUP BY', () => {
   it('groups invoices by state with sum (admin)', async () => {
     const { status, body } = await graphqlRequest(
       `query {
-        invoiceAggregate(groupBy: [state]) {
+        invoiceAggregate(distinctOn: [state]) {
           groupedAggregates {
             keys { state }
             count
@@ -323,7 +323,7 @@ describe('GraphQL GROUP BY', () => {
       `query($branchId: Uuid!) {
         clientsAggregate(
           where: { branchId: { _eq: $branchId } }
-          groupBy: [status]
+          distinctOn: [status]
         ) {
           groupedAggregates {
             keys { status }
@@ -369,7 +369,7 @@ describe('GraphQL GROUP BY', () => {
     const token = await tokens.client(ALICE_ID);
     const { body } = await graphqlRequest(
       `query {
-        clientsAggregate(groupBy: [status]) {
+        clientsAggregate(distinctOn: [status]) {
           groupedAggregates {
             keys { status }
             count
@@ -386,7 +386,7 @@ describe('GraphQL GROUP BY', () => {
   it('groups by multiple columns', async () => {
     const { status, body } = await graphqlRequest(
       `query {
-        invoiceAggregate(groupBy: [state, type]) {
+        invoiceAggregate(distinctOn: [state, type]) {
           groupedAggregates {
             keys { state type }
             count

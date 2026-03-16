@@ -21,7 +21,7 @@ import type { GraphQLInputType } from 'graphql';
 import type { TableInfo, ColumnInfo, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
-import { getTypeName, toCamelCase, getColumnFieldName, tableKey, getRelFieldName, type TypeRegistry } from './type-builder.js';
+import { getTypeName, toCamelCase, getColumnFieldName, tableKey, getRelFieldName, getVisibleColumns, type TypeRegistry } from './type-builder.js';
 
 // ─── Scalar Comparison Input Types ──────────────────────────────────────────
 
@@ -57,16 +57,16 @@ function orderedComparisonFields(scalarType: GraphQLInputType): Record<string, {
 function stringComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
   return {
     ...orderedComparisonFields(scalarType),
-    _like: { type: GraphQLString },
-    _nlike: { type: GraphQLString },
-    _ilike: { type: GraphQLString },
-    _nilike: { type: GraphQLString },
-    _similar: { type: GraphQLString },
-    _nsimilar: { type: GraphQLString },
-    _regex: { type: GraphQLString },
-    _nregex: { type: GraphQLString },
-    _iregex: { type: GraphQLString },
-    _niregex: { type: GraphQLString },
+    _like: { type: scalarType },
+    _nlike: { type: scalarType },
+    _ilike: { type: scalarType },
+    _nilike: { type: scalarType },
+    _similar: { type: scalarType },
+    _nsimilar: { type: scalarType },
+    _regex: { type: scalarType },
+    _nregex: { type: scalarType },
+    _iregex: { type: scalarType },
+    _niregex: { type: scalarType },
   };
 }
 
@@ -357,6 +357,8 @@ export function buildFilterTypes(
     const typeName = getTypeName(table);
     const key = tableKey(table.schema, table.name);
 
+    const visibleColumns = getVisibleColumns(table);
+
     const boolExpType = new GraphQLInputObjectType({
       name: `${typeName}BoolExp`,
       description: `Boolean expression filter for ${typeName}.`,
@@ -365,6 +367,7 @@ export function buildFilterTypes(
 
         // Column comparison fields (camelCase per graphql-default naming convention)
         for (const column of table.columns) {
+          if (visibleColumns && !visibleColumns.has(column.name)) continue;
           const compType = columnComparisonType(column, enumTypes, enumNames);
           const fieldName = getColumnFieldName(table, column.name);
           fields[fieldName] = { type: compType };

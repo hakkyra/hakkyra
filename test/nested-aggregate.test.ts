@@ -255,3 +255,131 @@ describe('Nested aggregate fields on object types', () => {
     });
   });
 });
+
+// ─── Aggregate count arguments (columns + distinct) ─────────────────────────
+
+describe('Aggregate count arguments (columns, distinct)', () => {
+
+  it('count without arguments returns total row count', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientsAggregate {
+          aggregate {
+            count
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const agg = (body.data as { clientsAggregate: { aggregate: AnyRow } })
+      .clientsAggregate.aggregate;
+    expect(agg.count).toBe(4);
+  });
+
+  it('count(columns: [status]) counts non-null values in that column', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientsAggregate {
+          aggregate {
+            count(columns: [status])
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const agg = (body.data as { clientsAggregate: { aggregate: AnyRow } })
+      .clientsAggregate.aggregate;
+    // All 4 clients have a status value
+    expect(agg.count).toBe(4);
+  });
+
+  it('count(columns: [status], distinct: true) counts distinct values', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientsAggregate {
+          aggregate {
+            count(columns: [status], distinct: true)
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const agg = (body.data as { clientsAggregate: { aggregate: AnyRow } })
+      .clientsAggregate.aggregate;
+    // 3 clients active + 1 suspended = 2 distinct statuses
+    expect(agg.count).toBe(2);
+  });
+
+  it('count(distinct: true) without columns falls back to count(*)', async () => {
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientsAggregate {
+          aggregate {
+            count(distinct: true)
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const agg = (body.data as { clientsAggregate: { aggregate: AnyRow } })
+      .clientsAggregate.aggregate;
+    // Without columns, distinct is ignored and count(*) is used
+    expect(agg.count).toBe(4);
+  });
+
+  it('nested aggregate count(columns: ..., distinct: true) on object type', async () => {
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query {
+        clientByPk(id: "${ALICE_ID}") {
+          id
+          invoicesAggregate {
+            aggregate {
+              count(columns: [state], distinct: true)
+            }
+          }
+        }
+      }`,
+      undefined,
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const client = (body.data as { clientByPk: AnyRow }).clientByPk;
+    expect(client).toBeDefined();
+    const invAgg = (client.invoicesAggregate as AnyRow).aggregate as AnyRow;
+    // Alice has invoices — distinct count of state values should be >= 1
+    expect(invAgg.count).toBeGreaterThanOrEqual(1);
+  });
+
+  it('count with columns uses variables correctly', async () => {
+    const { status, body } = await graphqlRequest(
+      `query CountWithVars($cols: [ClientSelectColumn!], $distinct: Boolean) {
+        clientsAggregate {
+          aggregate {
+            count(columns: $cols, distinct: $distinct)
+          }
+        }
+      }`,
+      { cols: ['status'], distinct: true },
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const agg = (body.data as { clientsAggregate: { aggregate: AnyRow } })
+      .clientsAggregate.aggregate;
+    expect(agg.count).toBe(2);
+  });
+});

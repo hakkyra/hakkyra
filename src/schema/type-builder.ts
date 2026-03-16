@@ -27,7 +27,7 @@ import type {
   GraphQLScalarType,
   GraphQLInputType,
 } from 'graphql';
-import type { TableInfo, ColumnInfo, FunctionInfo, ComputedFieldConfig } from '../types.js';
+import type { TableInfo, ColumnInfo, FunctionInfo, ComputedFieldConfig, SelectPermission } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
 import { pgArgTypeToGraphQL } from './tracked-functions.js';
@@ -68,6 +68,38 @@ export function getTypeName(table: TableInfo): string {
  */
 export function tableKey(schema: string, name: string): string {
   return `${schema}.${name}`;
+}
+
+/**
+ * Compute the set of columns visible in the GraphQL schema for a table.
+ *
+ * A column is visible if it appears in at least one role's select permission.
+ * If any role has `columns: "*"`, all columns are visible.
+ * If a table has no select permissions at all, all columns are visible
+ * (admin-only tables still need object types for relationships).
+ */
+export function getVisibleColumns(table: TableInfo): Set<string> | null {
+  const selectPerms = Object.values(table.permissions.select) as SelectPermission[];
+  if (selectPerms.length === 0) {
+    // No select permissions — expose all columns (admin-only)
+    return null;
+  }
+
+  // If any role has wildcard columns, all columns are visible
+  if (selectPerms.some((p) => p.columns === '*')) {
+    return null;
+  }
+
+  // Union of all roles' column lists
+  const visible = new Set<string>();
+  for (const perm of selectPerms) {
+    if (Array.isArray(perm.columns)) {
+      for (const col of perm.columns) {
+        visible.add(col);
+      }
+    }
+  }
+  return visible;
 }
 
 // ─── GraphQL Type Resolution ────────────────────────────────────────────────
@@ -152,6 +184,7 @@ export function columnToGraphQLType(
  * @param orderByTypes  Map of table key → OrderBy input type (for orderBy args on array rels)
  * @param functions     List of introspected PG functions (for computed field return type resolution)
  * @param aggregateTypes Map of table key → {Table}Aggregate object type (for {rel}Aggregate fields)
+ * @param selectColumnEnums Map of table key → SelectColumn enum (for distinctOn args on array rels)
  */
 export function buildObjectType(
   table: TableInfo,
@@ -162,8 +195,11 @@ export function buildObjectType(
   orderByTypes?: Map<string, GraphQLInputObjectType>,
   functions?: FunctionInfo[],
   aggregateTypes?: Map<string, GraphQLObjectType>,
+  selectColumnEnums?: Map<string, GraphQLEnumType>,
 ): GraphQLObjectType {
   const typeName = getTypeName(table);
+
+  const visibleColumns = getVisibleColumns(table);
 
   const objectType = new GraphQLObjectType({
     name: typeName,
@@ -173,6 +209,8 @@ export function buildObjectType(
 
       // ── Column fields ────────────────────────────────────────────────
       for (const column of table.columns) {
+        // Skip columns not visible in any role's select permission
+        if (visibleColumns && !visibleColumns.has(column.name)) continue;
         const fieldName = getColumnFieldName(table, column.name);
         let fieldType = columnToGraphQLType(column, enumTypes, enumNames);
 
@@ -235,6 +273,15 @@ export function buildObjectType(
         } else {
           // Array relationship — [RelatedType!] with optional filtering/ordering
           const args: GraphQLFieldConfigArgumentMap = {};
+
+          // distinctOn argument
+          const relSelectColumnEnum = selectColumnEnums?.get(relKey);
+          if (relSelectColumnEnum) {
+            args['distinctOn'] = {
+              type: new GraphQLList(new GraphQLNonNull(relSelectColumnEnum)),
+              description: 'Distinct on columns. DISTINCT ON selects one row per unique combination of the specified columns.',
+            };
+          }
 
           // where argument
           const relFilterType = filterTypes?.get(relKey);

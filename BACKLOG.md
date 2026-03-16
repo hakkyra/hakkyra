@@ -1117,18 +1117,19 @@ Hakkyra auto-detected relationships from foreign keys and exposed them all in th
 - [x] Auto-detected FK data still used to fill in missing column mappings for configured relationships
 - [x] All existing tests pass (relationships used in tests are all explicitly configured in metadata)
 
-### P9.7b — Remaining Comparison Operator Parity (Medium)
+### P9.7b — Remaining Comparison Operator Parity (Medium) — COMPLETE
 
 Schema comparison (hakkyra vs Hasura on neofix DB) found missing comparison operators:
 
-- [ ] Add `_gt`, `_gte`, `_lt`, `_lte` to `BooleanComparisonExp` (Hasura has these, hakkyra uses `baseComparisonFields`)
-- [ ] Add `_gt`, `_gte`, `_lt`, `_lte` to `UuidComparisonExp` (same issue)
-- [ ] Add `_gt`, `_gte`, `_lt`, `_lte` to `JsonbComparisonExp` (same issue)
-- [ ] Verify `FloatComparisonExp` is generated when float columns exist
+- [x] Add `_gt`, `_gte`, `_lt`, `_lte` to `BooleanComparisonExp` (Hasura has these, hakkyra uses `baseComparisonFields`)
+- [x] Add `_gt`, `_gte`, `_lt`, `_lte` to `UuidComparisonExp` (same issue)
+- [x] Add `_gt`, `_gte`, `_lt`, `_lte` to `JsonbComparisonExp` (same issue)
+- [x] Verify `FloatComparisonExp` is generated when float columns exist
 
 ### P9.7c — Nullability Parity (Low)
 
 - [ ] Investigate nullability mismatch: `Country.currency` and `Country.language` are nullable in hakkyra but non-null in Hasura — may depend on FK constraint NOT NULL vs nullable
+- [ ] `BigWin.currency` — nullable in Hasura, non-null in Hakkyra
 
 ### P9.7 — Tracked Function Aggregate Variants for Non-SETOF Functions (Low)
 
@@ -1177,6 +1178,75 @@ configuration:
 - [x] Test: globally disabled non-PK delete hides `deleteCountry` but keeps `deleteCountryByPk`
 - [x] Test: per-table override re-enables globally disabled operations
 - [x] Test: admin role bypasses operation restrictions (configurable)
+
+### P9.9 — Action Type Parity (High)
+
+Hakkyra maps action output/input types differently than Hasura. Action types defined in `actions.graphql` should use the exact scalar types from the GraphQL definitions.
+
+- [ ] Add `ID` scalar type — Hasura uses `ID` for some action output fields (e.g., `AuthenticationInfoResponse.playerToken`); Hakkyra maps them to `String`
+- [ ] Action input args using `ID!` should remain `ID!`, not become `String!` (`cancelLimit.token`, `triggerTask.token`, `authenticationInfo.token`)
+- [ ] `AcceptContractWithTokenArgs.contractToken` — Hasura types as `Uuid`, Hakkyra as `String`
+- [ ] `authenticate.amount` — Hasura types as `numeric` (lowercase scalar), Hakkyra as `String`
+- [ ] `LatestWinsArgs.cutoff` — Hasura types as `Numeric`, Hakkyra as `String`
+- [ ] `acceptContractWithToken.args` — Hasura requires `AcceptContractWithTokenArgs!` (non-null), Hakkyra makes it nullable; Hasura also adds `distinctOn`, `limit`, `offset`, `orderBy`, `where` args
+
+### P9.10 — BpcharComparisonExp Operator Types (Medium)
+
+The 10 pattern-matching operators in `BpcharComparisonExp` accept `String` in Hakkyra but `Bpchar` in Hasura. These should use the `Bpchar` scalar for type consistency.
+
+- [x] Change `_like`, `_nlike`, `_ilike`, `_nilike`, `_similar`, `_nsimilar`, `_regex`, `_nregex`, `_iregex`, `_niregex` in `BpcharComparisonExp` to accept `Bpchar` instead of `String`
+
+### P9.11 — `distinctOn` on Subscriptions and Nested Relationship Fields (High)
+
+Hakkyra is missing `distinctOn` arguments on subscription list fields and nested array relationship fields within object types. Also, aggregate queries use `groupBy` instead of Hasura's `distinctOn`.
+
+- [x] Add `distinctOn` argument to subscription list fields (~23 fields)
+- [x] Add `distinctOn` argument to nested array relationship fields on object types (e.g., `GameIntegration.currencies`, `GamePresentation.content`, `GamePresentation.games`, `GamePresentation.thumbnails`)
+- [x] Replace `groupBy` with `distinctOn` on aggregate query root fields to match Hasura naming
+
+### P9.12 — Aggregate Count Arguments (Medium)
+
+Hasura's `*AggregateFields.count` field accepts `columns` (select column enum) and `distinct` (Boolean) arguments. Hakkyra's aggregate count has no arguments.
+
+- [x] Add `columns: [{Table}SelectColumn!]` argument to `{Table}AggregateFields.count`
+- [x] Add `distinct: Boolean` argument to `{Table}AggregateFields.count`
+- [x] Affects 7+ aggregate types (all tracked tables with aggregation permissions)
+- [x] SQL compiler: emit `COUNT(DISTINCT col1, col2)` when both args provided
+
+### P9.13 — Missing Subscription Fields (Low)
+
+- [ ] `latestWins` and `latestWinsAggregate` exist as query fields but not subscription fields — expose tracked function query fields as subscriptions
+
+### P9.14 — Missing Table Fields (Low)
+
+- [ ] `AuthenticationProvider.method` — exists in Hasura but not in Hakkyra; investigate whether this is a column visibility or introspection issue
+
+### P9.15 — Order-By Type Field Parity (Medium)
+
+Some Hasura order-by aggregate types have different field sets than Hakkyra:
+
+- [x] `GamePresentationContentMaxOrderBy`/`MinOrderBy` — Hasura has `brandId`, `content`, `createdAt`, `description`, `languageId`, `title`, `updatedAt`; Hakkyra only has `id`, `gamePresentationId`
+- [x] `GamePresentationThumbnailMaxOrderBy`/`MinOrderBy` — Hasura has `resolution`, `url`; Hakkyra has `gamePresentationId`, `id`
+- [x] Root cause: these types should include all orderable (non-array, non-json) columns from the table, not just PK/FK columns
+
+### P9.16 — Schema Column Visibility (High)
+
+Hakkyra exposes ALL database columns on object types for tracked tables. Hasura only exposes columns that appear in at least one role's select permission. This causes extra fields, extra enum values in `SelectColumn`, and extra order-by/bool-exp fields.
+
+Examples:
+- `Authentication`: +21 extra fields in Hakkyra
+- `BigWin`: +6 extra fields (`createdAtDate`, `gameId`, `gameIntegrationId`, `gameRoundId`, `playerId`, `transactionId`)
+- `Currency`: +5 extra fields
+- `Game`: +12 extra fields
+- `GameIntegration`: +9 extra fields
+- `GamePresentation`: +13 extra fields
+- `GamePresentationThumbnail`: +6 extra fields
+
+- [x] Schema generator: collect union of all columns across all roles' select permissions for each table
+- [x] Only expose columns in the union set on the GraphQL object type (admin still sees all)
+- [x] Propagate column filtering to `SelectColumn` enum, `OrderBy` input, `BoolExp` input, `MinFields`/`MaxFields`, etc.
+- [x] Tables with no select permissions: only admin can see columns (expose all for admin)
+- [x] Test: object type only has columns that appear in at least one role's select permission
 
 ---
 

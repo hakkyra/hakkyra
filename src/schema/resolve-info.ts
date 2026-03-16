@@ -55,6 +55,10 @@ export interface AggregateRelationshipParsed {
   remoteTable: TableInfo;
   /** Whether count was requested */
   hasCount: boolean;
+  /** Columns for count(columns: ...) */
+  countColumns?: string[];
+  /** Distinct flag for count(distinct: ...) */
+  countDistinct?: boolean;
   /** Aggregate functions requested with their columns */
   aggregateFunctions: string[];
   /** User-provided where filter */
@@ -602,11 +606,34 @@ function parseSelectionSet(
         const whereArg = getArgumentValue(selection, 'where', variableValues);
         const where = whereArg ? remapBoolExp(whereArg as BoolExp, remoteColMap) : undefined;
 
+        // Parse count arguments from the sub-selection: aggregate { count(columns: ..., distinct: ...) }
+        let countColumns: string[] | undefined;
+        let countDistinct: boolean | undefined;
+        if (selection.selectionSet) {
+          for (const subSel of selection.selectionSet.selections) {
+            if (subSel.kind !== 'Field' || subSel.name.value !== 'aggregate') continue;
+            if (!subSel.selectionSet) continue;
+            for (const aggSel of subSel.selectionSet.selections) {
+              if (aggSel.kind !== 'Field' || aggSel.name.value !== 'count') continue;
+              const colsArg = getArgumentValue(aggSel, 'columns', variableValues);
+              if (Array.isArray(colsArg) && colsArg.length > 0) {
+                countColumns = colsArg as string[];
+              }
+              const distArg = getArgumentValue(aggSel, 'distinct', variableValues);
+              if (typeof distArg === 'boolean') {
+                countDistinct = distArg;
+              }
+            }
+          }
+        }
+
         const aggRelParsed: AggregateRelationshipParsed = {
           fieldName,
           relationship: aggRel,
           remoteTable,
           hasCount: true, // Always include count
+          countColumns,
+          countDistinct,
           aggregateFunctions: [],
           where,
           permission: remotePerm ? {
@@ -674,9 +701,14 @@ function parseSelectionSet(
           } : undefined,
         };
 
-        // For array relationships, parse where/orderBy/limit/offset arguments
+        // For array relationships, parse distinctOn/where/orderBy/limit/offset arguments
         if (rel.type === 'array') {
           const remoteColMap = camelToColumnMap(remoteTable);
+
+          const distinctOnArg = getArgumentValue(selection, 'distinctOn', variableValues);
+          if (Array.isArray(distinctOnArg) && distinctOnArg.length > 0) {
+            relSelection.distinctOn = distinctOnArg as string[];
+          }
 
           const whereArg = getArgumentValue(selection, 'where', variableValues);
           if (whereArg) {
@@ -907,4 +939,44 @@ export function parseAggregateNodesInfo(
   }
 
   return null;
+}
+
+/**
+ * Extract `columns` and `distinct` arguments from the `count` field
+ * inside `aggregate { count(columns: ..., distinct: ...) }`.
+ */
+export function parseAggregateCountArgs(
+  info: GraphQLResolveInfo,
+): { columns?: string[]; distinct?: boolean } {
+  const fieldNode = info.fieldNodes[0];
+  if (!fieldNode.selectionSet) return {};
+
+  const variableValues = info.variableValues as Record<string, unknown>;
+
+  // Find the "aggregate" field
+  for (const sel of fieldNode.selectionSet.selections) {
+    if (sel.kind !== 'Field' || sel.name.value !== 'aggregate') continue;
+    if (!sel.selectionSet) continue;
+
+    // Find the "count" field inside aggregate
+    for (const aggSel of sel.selectionSet.selections) {
+      if (aggSel.kind !== 'Field' || aggSel.name.value !== 'count') continue;
+
+      const result: { columns?: string[]; distinct?: boolean } = {};
+
+      const columnsArg = getArgumentValue(aggSel, 'columns', variableValues);
+      if (Array.isArray(columnsArg) && columnsArg.length > 0) {
+        result.columns = columnsArg as string[];
+      }
+
+      const distinctArg = getArgumentValue(aggSel, 'distinct', variableValues);
+      if (typeof distinctArg === 'boolean') {
+        result.distinct = distinctArg;
+      }
+
+      return result;
+    }
+  }
+
+  return {};
 }

@@ -35,7 +35,7 @@ import type {
 import type { TableInfo, ColumnInfo, RelationshipConfig, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
-import { toCamelCase, getTypeName, getColumnFieldName, tableKey, getRelFieldName } from './type-builder.js';
+import { toCamelCase, getTypeName, getColumnFieldName, tableKey, getRelFieldName, getVisibleColumns } from './type-builder.js';
 
 // ─── CursorOrdering Enum ────────────────────────────────────────────────────
 
@@ -108,9 +108,10 @@ function buildUpdateColumnEnum(table: TableInfo, typeName: string): GraphQLEnumT
   });
 }
 
-function buildSelectColumnEnum(table: TableInfo, typeName: string): GraphQLEnumType {
+function buildSelectColumnEnum(table: TableInfo, typeName: string, visibleColumns: Set<string> | null): GraphQLEnumType {
   const values: Record<string, { value: string }> = {};
   for (const col of table.columns) {
+    if (visibleColumns && !visibleColumns.has(col.name)) continue;
     // Use custom column name if available — internal value is the PG column name
     const fieldName = getColumnFieldName(table, col.name);
     values[fieldName] = { value: col.name };
@@ -189,6 +190,20 @@ function isNumericColumn(column: ColumnInfo, enumNames: Set<string>): boolean {
   return NUMERIC_GRAPHQL_TYPES.has(mapping.name);
 }
 
+/** Orderable types: numeric + string-like + date/time (everything except arrays, json/jsonb, bytea, inet, interval) */
+const ORDERABLE_GRAPHQL_TYPES = new Set([
+  'Int', 'Float', 'Bigint', 'Numeric',
+  'String', 'Bpchar',
+  'Timestamptz', 'Date', 'Time',
+  'Uuid', 'Boolean',
+]);
+
+function isOrderableColumn(column: ColumnInfo, enumNames: Set<string>): boolean {
+  if (column.isArray) return false;
+  const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
+  return ORDERABLE_GRAPHQL_TYPES.has(mapping.name);
+}
+
 // ─── Mutation Input Types Container ─────────────────────────────────────────
 
 export interface MutationInputTypes {
@@ -226,14 +241,16 @@ export function buildStreamCursorTypes(
   enumNames: Set<string>,
 ): StreamCursorTypes {
   const typeName = getTypeName(table);
+  const visibleColumns = getVisibleColumns(table);
 
-  // StreamCursorValueInput — all columns as optional fields (same pattern as SetInput)
+  // StreamCursorValueInput — visible columns as optional fields (same pattern as SetInput)
   const streamCursorValueInput = new GraphQLInputObjectType({
     name: `${typeName}StreamCursorValueInput`,
     description: `Initial value of the cursor for streaming subscription on ${typeName}.`,
     fields: () => {
       const fields: GraphQLInputFieldConfigMap = {};
       for (const column of table.columns) {
+        if (visibleColumns && !visibleColumns.has(column.name)) continue;
         const fieldName = getColumnFieldName(table, column.name);
         fields[fieldName] = {
           type: columnToInputType(column, enumTypes, enumNames),
@@ -293,7 +310,13 @@ function buildAggregateOrderByTypes(
   // Don't rebuild if already exists
   if (orderByTypes.has(aggKey)) return;
 
-  const numericColumns = table.columns.filter((c) => isNumericColumn(c, enumNames));
+  const visibleColumns = getVisibleColumns(table);
+  const numericColumns = table.columns.filter((c) =>
+    isNumericColumn(c, enumNames) && (!visibleColumns || visibleColumns.has(c.name)),
+  );
+  const orderableColumns = table.columns.filter((c) =>
+    isOrderableColumn(c, enumNames) && (!visibleColumns || visibleColumns.has(c.name)),
+  );
 
   // Build per-aggregate-function order types
   const perFunctionTypes: Record<string, GraphQLInputObjectType> = {};
@@ -302,10 +325,9 @@ function buildAggregateOrderByTypes(
     // Map function name to PascalCase for GraphQL type name
     const fnPascal = fn.charAt(0).toUpperCase() + fn.slice(1);
 
+    // max, min apply to all orderable types (text, date, etc.)
     // avg, sum, stddev*, var*, variance only apply to numeric columns
-    // max, min also apply to orderable types (text, date, etc.) but for consistency
-    // and matching Hasura behavior, we'll use numeric columns for all aggregate order types
-    const applicableColumns = numericColumns;
+    const applicableColumns = (fn === 'max' || fn === 'min') ? orderableColumns : numericColumns;
 
     if (applicableColumns.length === 0) continue;
 
@@ -383,6 +405,7 @@ export function buildMutationInputTypes(
   insertInputTypes?: Map<string, GraphQLInputObjectType>,
 ): MutationInputTypes {
   const typeName = getTypeName(table);
+  const visibleColumns = getVisibleColumns(table);
   // ── InsertInput ────────────────────────────────────────────────────────
   // All fields are optional in the schema because different roles have different
   // presets and allowed columns. Strict per-role validation happens at runtime.
@@ -439,7 +462,7 @@ export function buildMutationInputTypes(
   // ── Constraint, UpdateColumn, and SelectColumn enums ─────────────────
   const constraintEnum = buildConstraintEnum(table, typeName);
   const updateColumnEnum = buildUpdateColumnEnum(table, typeName);
-  const selectColumnEnum = buildSelectColumnEnum(table, typeName);
+  const selectColumnEnum = buildSelectColumnEnum(table, typeName, visibleColumns);
 
   // ── OnConflict ────────────────────────────────────────────────────────
   let onConflict: GraphQLInputObjectType | null = null;
@@ -511,6 +534,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLInputFieldConfigMap = {};
       for (const column of table.columns) {
+        if (visibleColumns && !visibleColumns.has(column.name)) continue;
         const fieldName = getColumnFieldName(table, column.name);
         fields[fieldName] = { type: OrderByDirection };
       }
@@ -568,7 +592,9 @@ export function buildMutationInputTypes(
   });
 
   // ── Aggregate Sub-Fields (Sum, Avg, Min, Max) ─────────────────────────
-  const numericColumns = table.columns.filter((c) => isNumericColumn(c, enumNames));
+  const numericColumns = table.columns.filter((c) =>
+    isNumericColumn(c, enumNames) && (!visibleColumns || visibleColumns.has(c.name)),
+  );
 
   // Determine numeric scalar computed fields for aggregate types
   interface ScalarCFInfo { name: string; returnType: string; graphqlTypeName: string; functionName: string; schema: string }
@@ -651,6 +677,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of table.columns) {
+        if (visibleColumns && !visibleColumns.has(column.name)) continue;
         // Min/Max work on any ordered type
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
         if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
@@ -677,6 +704,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of table.columns) {
+        if (visibleColumns && !visibleColumns.has(column.name)) continue;
         const mapping = pgTypeToGraphQL(column.udtName, false, enumNames);
         if (NUMERIC_GRAPHQL_TYPES.has(mapping.name) || ['String', 'Timestamptz', 'Date', 'Time', 'Bpchar'].includes(mapping.name)) {
           const fieldName = getColumnFieldName(table, column.name);
@@ -757,7 +785,19 @@ export function buildMutationInputTypes(
     name: `${typeName}AggregateFields`,
     description: `Aggregate fields for ${typeName}.`,
     fields: {
-      count: { type: new GraphQLNonNull(GraphQLInt) },
+      count: {
+        type: new GraphQLNonNull(GraphQLInt),
+        args: {
+          columns: {
+            type: new GraphQLList(new GraphQLNonNull(selectColumnEnum)),
+            description: 'Select columns to count. If omitted, counts all rows.',
+          },
+          distinct: {
+            type: GraphQLBoolean,
+            description: 'If true, count only distinct values.',
+          },
+        },
+      },
       sum: { type: sumFields },
       avg: { type: avgFields },
       min: { type: minFields },
@@ -778,6 +818,7 @@ export function buildMutationInputTypes(
     fields: () => {
       const fields: GraphQLFieldConfigMap<unknown, unknown> = {};
       for (const column of table.columns) {
+        if (visibleColumns && !visibleColumns.has(column.name)) continue;
         const fieldName = getColumnFieldName(table, column.name);
         const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
         fields[fieldName] = { type: resolveOutputScalarType(mapping.name) };

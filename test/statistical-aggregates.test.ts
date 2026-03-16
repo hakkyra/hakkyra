@@ -323,7 +323,7 @@ describe('GraphQL Statistical Aggregates', () => {
   it('returns statistical aggregates in grouped query (admin)', async () => {
     const { status, body } = await graphqlRequest(
       `query {
-        accountAggregate(groupBy: [currencyId]) {
+        accountAggregate(distinctOn: [currencyId]) {
           groupedAggregates {
             keys { currencyId }
             count

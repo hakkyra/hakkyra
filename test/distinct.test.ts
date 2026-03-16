@@ -255,6 +255,48 @@ describe('DISTINCT ON — Schema', () => {
     expect(distinctIdx).toBeLessThan(whereIdx);
     expect(distinctIdx).toBeLessThan(orderByIdx);
   });
+
+  it('should have distinctOn argument on subscription list fields', () => {
+    const subscriptionType = schema.getSubscriptionType()!;
+    expect(subscriptionType).toBeDefined();
+    const clientsField = subscriptionType.getFields()['clients'];
+    expect(clientsField).toBeDefined();
+    const argNames = clientsField.args.map((a) => a.name);
+    expect(argNames).toContain('distinctOn');
+
+    // Should be [ClientSelectColumn!]
+    const distinctOnArg = clientsField.args.find((a) => a.name === 'distinctOn');
+    expect(distinctOnArg).toBeDefined();
+    const argType = distinctOnArg!.type;
+    expect(argType).toBeInstanceOf(GraphQLList);
+  });
+
+  it('should have distinctOn argument on nested array relationship fields', () => {
+    const typeMap = schema.getTypeMap();
+    // Client has array relationship to invoices
+    const clientType = typeMap['Client'] as import('graphql').GraphQLObjectType | undefined;
+    expect(clientType).toBeDefined();
+    const invoicesField = clientType!.getFields()['invoices'];
+    expect(invoicesField).toBeDefined();
+    const argNames = invoicesField.args.map((a) => a.name);
+    expect(argNames).toContain('distinctOn');
+
+    // Should be [InvoiceSelectColumn!]
+    const distinctOnArg = invoicesField.args.find((a) => a.name === 'distinctOn');
+    expect(distinctOnArg).toBeDefined();
+    const argType = distinctOnArg!.type;
+    expect(argType).toBeInstanceOf(GraphQLList);
+  });
+
+  it('should have distinctOn argument on aggregate query root fields (replacing groupBy)', () => {
+    const queryType = schema.getQueryType()!;
+    const clientsAggField = queryType.getFields()['clientsAggregate'];
+    expect(clientsAggField).toBeDefined();
+    const argNames = clientsAggField.args.map((a) => a.name);
+    expect(argNames).toContain('distinctOn');
+    // groupBy should no longer exist
+    expect(argNames).not.toContain('groupBy');
+  });
 });
 
 // ─── REST API Filter Tests ────────────────────────────────────────────────────
@@ -362,5 +404,39 @@ describe('DISTINCT ON — E2E via GraphQL & REST', () => {
     const statuses = rows.map((r) => r.status);
     const uniqueStatuses = [...new Set(statuses)];
     expect(statuses.length).toBe(uniqueStatuses.length);
+  });
+
+  it('should support distinctOn on nested array relationship fields', async () => {
+    const query = `
+      query {
+        clients {
+          id
+          invoices(distinctOn: [state], orderBy: [{ state: ASC }]) {
+            state
+          }
+        }
+      }
+    `;
+
+    const { status, body } = await graphqlRequest(query, undefined, {
+      'x-hasura-admin-secret': ADMIN_SECRET,
+    });
+
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as Record<string, unknown>)?.clients as Array<{
+      id: string;
+      invoices: Array<{ state: string }>;
+    }>;
+    expect(clients).toBeDefined();
+
+    // For each client with invoices, invoice states should be distinct
+    for (const client of clients) {
+      if (client.invoices.length > 0) {
+        const states = client.invoices.map((inv) => inv.state);
+        const uniqueStates = [...new Set(states)];
+        expect(states.length).toBe(uniqueStates.length);
+      }
+    }
   });
 });

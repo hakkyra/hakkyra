@@ -84,6 +84,7 @@ export interface RelationshipSelection {
   fieldName?: string;
   remoteTable: TableInfo;
   columns: string[];
+  distinctOn?: string[];
   where?: BoolExp;
   orderBy?: OrderByItem[];
   limit?: number;
@@ -676,8 +677,17 @@ function buildRelationshipSubquery(
 
   const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
 
+  // DISTINCT ON for array relationships
+  const distinctOn = relSel.distinctOn;
+  const distinctOnClause = distinctOn && distinctOn.length > 0
+    ? compileDistinctOn(distinctOn, subAlias)
+    : '';
+  const effectiveOrderBy = distinctOn && distinctOn.length > 0
+    ? ensureDistinctOnInOrderBy(distinctOn, relSel.orderBy)
+    : relSel.orderBy;
+
   // ORDER BY
-  const orderByClause = relSel.orderBy ? compileOrderBy(relSel.orderBy, subAlias) : '';
+  const orderByClause = effectiveOrderBy ? compileOrderBy(effectiveOrderBy, subAlias) : '';
 
   // LIMIT / OFFSET
   let limitClause = '';
@@ -696,17 +706,17 @@ function buildRelationshipSubquery(
   }
 
   // Array relationship: return json_agg wrapped in coalesce
-  // When LIMIT/OFFSET is used, we need a subquery to apply it before aggregation
-  const hasLimitOffset = limitClause.length > 0;
+  // When LIMIT/OFFSET/DISTINCT ON is used, we need a subquery to apply it before aggregation
+  const needsSubquery = limitClause.length > 0 || distinctOnClause.length > 0;
 
-  if (hasLimitOffset) {
-    // Wrap in a subquery: first select with WHERE + ORDER BY + LIMIT, then aggregate
+  if (needsSubquery) {
+    // Wrap in a subquery: first select with DISTINCT ON + WHERE + ORDER BY + LIMIT, then aggregate
     const innerAlias = aliasCounter.next();
-    const innerSelect = `SELECT json_build_object(${jsonFields}) AS "_row_" FROM ${tableRef} ${quoteIdentifier(subAlias)}${whereClause}${orderByClause}${limitClause}`;
+    const innerSelect = `SELECT ${distinctOnClause}json_build_object(${jsonFields}) AS "_row_" FROM ${tableRef} ${quoteIdentifier(subAlias)}${whereClause}${orderByClause}${limitClause}`;
     return `SELECT coalesce(json_agg(${quoteIdentifier(innerAlias)}."_row_"), '[]'::json) FROM (${innerSelect}) ${quoteIdentifier(innerAlias)}`;
   }
 
-  // No LIMIT — use ORDER BY inside json_agg for efficiency
+  // No LIMIT/DISTINCT ON — use ORDER BY inside json_agg for efficiency
   return `SELECT coalesce(json_agg(json_build_object(${jsonFields})${orderByClause}), '[]'::json) FROM ${tableRef} ${quoteIdentifier(subAlias)}${whereClause}`;
 }
 
