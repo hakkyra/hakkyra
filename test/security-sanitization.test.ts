@@ -428,6 +428,43 @@ describe('DNS rebinding prevention for webhook SSRF (P7.1)', () => {
       expect(result!.resolvedUrl).toContain('/api/v2/hook');
       expect(result!.resolvedUrl).toContain('token=abc');
     });
+
+    it('propagates DNS resolution errors instead of falling back to unpinned fetch (TOCTOU fix)', async () => {
+      // Previously, DNS errors caused a fallback to validateWebhookUrl() + return null,
+      // meaning deliverWebhook would call fetch() with the original hostname. An attacker
+      // could exploit this by having DNS fail during validation but succeed during fetch
+      // with a private IP. Now DNS errors propagate directly, preventing any unpinned request.
+      const failingLookup = async () => {
+        throw new Error('getaddrinfo ENOTFOUND evil.example.com');
+      };
+
+      await expect(resolveAndValidateDns('https://evil.example.com/webhook', failingLookup))
+        .rejects.toThrow('ENOTFOUND');
+    });
+
+    it('resolved IP is embedded in URL to prevent second DNS lookup', async () => {
+      // Verify the critical property: the returned URL contains the IP, not the hostname.
+      // This ensures fetch() connects to the validated IP directly, with no second DNS lookup.
+      const fakeLookup = async () => [{ address: '203.0.113.50', family: 4 }];
+
+      const result = await resolveAndValidateDns('https://webhook.example.com:443/path', fakeLookup);
+      expect(result).not.toBeNull();
+      // The resolved URL must contain the IP address, NOT the hostname
+      expect(result!.resolvedUrl).toContain('203.0.113.50');
+      expect(result!.resolvedUrl).not.toContain('webhook.example.com');
+      // The original host is preserved in the Host header value
+      expect(result!.hostHeader).toBe('webhook.example.com');
+    });
+
+    it('handles IPv6 resolved address with brackets in URL', async () => {
+      const fakeLookup = async () => [{ address: '2001:db8::1', family: 6 }];
+
+      const result = await resolveAndValidateDns('https://example.com/webhook', fakeLookup);
+      expect(result).not.toBeNull();
+      // IPv6 addresses must be wrapped in brackets in the URL
+      expect(result!.resolvedUrl).toContain('[2001:db8::1]');
+      expect(result!.hostHeader).toBe('example.com');
+    });
   });
 
   describe('isPrivateIP coverage', () => {
