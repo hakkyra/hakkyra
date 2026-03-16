@@ -4,6 +4,9 @@
  * Phase 2 features that are initialized after the Fastify + Mercurius core
  * is ready. Each sub-system is independently try/caught so one failure does
  * not block the others.
+ *
+ * All background services (events, crons, async actions) conform to the
+ * ServiceManager interface for uniform init/stop lifecycle management.
  */
 
 import type { FastifyInstance } from 'fastify';
@@ -12,9 +15,10 @@ import type { HakkyraConfig, TableInfo } from '../types.js';
 import type { ConnectionManager } from '../connections/manager.js';
 import { createJobQueue } from '../shared/job-queue/index.js';
 import type { JobQueue } from '../shared/job-queue/types.js';
-import { initCronTriggers } from '../crons/index.js';
-import { initEventTriggers } from '../events/manager.js';
-import type { EventManager } from '../events/manager.js';
+import type { ServiceManager } from '../shared/service-manager.js';
+import { createCronManager } from '../crons/manager.js';
+import { createEventManager } from '../events/manager.js';
+import { createActionManager } from '../actions/manager.js';
 import { registerEventCleanup } from '../events/cleanup.js';
 import { reconcileTriggers, buildDesiredSubscriptionTriggers } from '../shared/trigger-reconciler.js';
 import { createChangeListener } from '../subscriptions/listener.js';
@@ -23,7 +27,6 @@ import { createSubscriptionManager } from '../subscriptions/manager.js';
 import type { SubscriptionManager } from '../subscriptions/manager.js';
 import { createRedisFanoutBridge } from '../subscriptions/redis-fanout.js';
 import type { RedisFanoutBridge } from '../subscriptions/redis-fanout.js';
-import { ensureAsyncActionSchema, registerAsyncActionWorkers } from '../actions/index.js';
 import { registerInvokeRoute } from '../events/invoke.js';
 import { registerAsyncActionStatusRoute } from '../actions/rest.js';
 import type { Logger } from 'pino';
@@ -44,7 +47,9 @@ export interface Phase2Deps {
 
 export interface Phase2Result {
   jobQueue: JobQueue | undefined;
-  eventManager: EventManager | undefined;
+  eventManager: ServiceManager | undefined;
+  cronManager: ServiceManager | undefined;
+  actionManager: ServiceManager | undefined;
   changeListener: ChangeListener | undefined;
   subscriptionMgr: SubscriptionManager | undefined;
   redisFanout: RedisFanoutBridge | undefined;
@@ -71,7 +76,9 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
   const sessionConnectionString = connectionManager.getSessionConnectionString();
 
   let jobQueue: JobQueue | undefined;
-  let eventManager: EventManager | undefined;
+  let eventManager: ServiceManager | undefined;
+  let cronManager: ServiceManager | undefined;
+  let actionManager: ServiceManager | undefined;
   let changeListener: ChangeListener | undefined;
   let subscriptionMgr: SubscriptionManager | undefined;
   let redisFanout: RedisFanoutBridge | undefined;
@@ -83,7 +90,7 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
     server.log.warn(
       `Database URL env var "${primaryUrlEnv}" not set — skipping Phase 2 features (events, crons, subscriptions)`,
     );
-    return { jobQueue, eventManager, changeListener, subscriptionMgr, redisFanout };
+    return { jobQueue, eventManager, cronManager, actionManager, changeListener, subscriptionMgr, redisFanout };
   }
 
   try {
@@ -102,19 +109,25 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
     server.log.warn({ err }, 'Job queue initialization failed — continuing without Phase 2 features');
   }
 
-  // Initialize events + crons (separate try/catch so failures don't block async actions)
+  // Initialize events + crons via ServiceManager interface
   if (jobQueue) {
     try {
-      await initCronTriggers(jobQueue, config.cronTriggers, log);
+      cronManager = createCronManager({
+        jobQueue,
+        triggers: config.cronTriggers,
+        logger: log,
+      });
+      await cronManager.init();
 
-      eventManager = await initEventTriggers(
-        primaryPool,
+      eventManager = createEventManager({
+        pool: primaryPool,
         jobQueue,
         tables,
-        sessionConnectionString,
-        log,
-        { batchSize: config.eventDelivery.batchSize, schemaName, httpConcurrency: config.eventDelivery.httpConcurrency },
-      );
+        connectionString: sessionConnectionString,
+        logger: log,
+        options: { batchSize: config.eventDelivery.batchSize, schemaName, httpConcurrency: config.eventDelivery.httpConcurrency },
+      });
+      await eventManager.init();
 
       await registerEventCleanup(jobQueue, primaryPool, config.eventLogRetentionDays, log, {
         schedule: config.eventCleanup.schedule,
@@ -123,20 +136,26 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
     } catch (err) {
       server.log.warn({ err }, 'Event/cron initialization failed — continuing without');
       eventManager = undefined;
+      cronManager = undefined;
     }
 
-    // Async action initialization (independent from events/crons)
+    // Async action initialization via ServiceManager interface
     try {
       const asyncActions = config.actions.filter((a) => a.definition.kind === 'asynchronous');
       if (asyncActions.length > 0) {
-        await ensureAsyncActionSchema(primaryPool);
-        await registerAsyncActionWorkers(jobQueue, primaryPool, config.actions, log);
+        actionManager = createActionManager({
+          jobQueue,
+          pool: primaryPool,
+          actions: config.actions,
+          logger: log,
+        });
+        await actionManager.init();
         asyncActionRef.jobQueue = jobQueue;
         asyncActionRef.pool = primaryPool;
-        server.log.info({ count: asyncActions.length }, 'Async action system initialized');
       }
     } catch (err) {
       server.log.warn({ err }, 'Async action initialization failed — continuing without');
+      actionManager = undefined;
     }
   }
 
@@ -228,5 +247,5 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
     subscriptionMgr = undefined;
   }
 
-  return { jobQueue, eventManager, changeListener, subscriptionMgr, redisFanout };
+  return { jobQueue, eventManager, cronManager, actionManager, changeListener, subscriptionMgr, redisFanout };
 }
