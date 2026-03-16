@@ -23,7 +23,6 @@ import {
   ActionRelationshipSchema,
   RESTEndpointOverrideSchema,
   RESTConfigSchema,
-  CustomQueryConfigSchema,
   APIDocsConfigSchema,
   JobQueueProviderSchema,
   JobQueueConfigSchema,
@@ -73,7 +72,6 @@ export interface SchemaModel {
   tables: TableInfo[];
   enums: EnumInfo[];
   functions: FunctionInfo[];
-  customQueries: CustomQueryConfig[];
   trackedFunctions: TrackedFunctionConfig[];
   nativeQueries: NativeQuery[];
   logicalModels: LogicalModel[];
@@ -274,10 +272,6 @@ export type HasuraRestEndpoint = z.infer<typeof HasuraRestEndpointSchema>;
 export type RESTEndpointOverride = z.infer<typeof RESTEndpointOverrideSchema>;
 
 export type RESTConfig = z.infer<typeof RESTConfigSchema>;
-
-// ─── Custom Queries (Hakkyra extension) ─────────────────────────────────────
-
-export type CustomQueryConfig = z.infer<typeof CustomQueryConfigSchema>;
 
 // ─── API Docs Config (Hakkyra extension) ────────────────────────────────────
 

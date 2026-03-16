@@ -8,7 +8,6 @@ import {
 } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
 import { resetComparisonTypeCache } from '../src/schema/filters.js';
-import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
@@ -44,7 +43,7 @@ describe('Array Comparison Types — Schema', () => {
   beforeAll(async () => {
     process.env['DATABASE_URL'] = TEST_DB_URL;
     resetComparisonTypeCache();
-    resetCustomOutputTypeCache();
+
     await waitForDb();
     await ensureArrayColumns();
     const pool = getPool();
@@ -181,7 +180,7 @@ describe('Array Comparison Types — E2E', () => {
     process.env['HAKKYRA_ADMIN_SECRET'] = 'test-admin-secret-hakkyra';
     // Reset caches so startServer can generate a fresh schema
     resetComparisonTypeCache();
-    resetCustomOutputTypeCache();
+
     await waitForDb();
     await ensureArrayColumns();
     await startServer();

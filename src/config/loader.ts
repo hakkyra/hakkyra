@@ -16,7 +16,6 @@ import type {
   CronTriggerConfig,
   CustomRootFields,
   RESTConfig,
-  CustomQueryConfig,
   APIDocsConfig,
   AuthConfig,
   DatabasesConfig,
@@ -343,7 +342,6 @@ export async function loadConfig(
     actionsGraphql: actionsGraphql ?? undefined,
     cronTriggers,
     rest: transformRESTConfig(apiConfig),
-    customQueries: transformCustomQueries(apiConfig),
     queryCollections,
     hasuraRestEndpoints,
     nativeQueries,
@@ -1139,21 +1137,6 @@ function transformRESTConfig(apiConfig: RawApiConfig | null): RESTConfig {
     overrides: rest?.overrides as RESTConfig['overrides'],
   };
   return InternalRESTConfigSchema.parse(raw);
-}
-
-function transformCustomQueries(apiConfig: RawApiConfig | null): CustomQueryConfig[] {
-  if (!apiConfig?.custom_queries) return [];
-  return apiConfig.custom_queries.map((q) => ({
-    name: q.name,
-    type: q.type,
-    sql: q.sql,
-    params: q.params,
-    returns: q.returns,
-    permissions: q.permissions?.map((p) => ({
-      role: p.role,
-      filter: p.filter as BoolExp | undefined,
-    })),
-  }));
 }
 
 function transformDocsConfig(apiConfig: RawApiConfig | null): APIDocsConfig {
