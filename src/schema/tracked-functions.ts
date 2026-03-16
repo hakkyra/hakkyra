@@ -43,7 +43,7 @@ import type {
   SessionVariables,
   BoolExp,
 } from '../types.js';
-import { customScalars } from './scalars.js';
+import { customScalars, asScalar } from './scalars.js';
 import { toCamelCase, toPascalCase, getColumnFieldName, tableKey } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import type { ResolverContext, ResolverPermissionLookup } from './resolvers.js';
@@ -64,10 +64,10 @@ import { compileWhere } from '../sql/where.js';
 
 /** Built-in GraphQL scalars by name */
 const BUILTIN_SCALARS: Record<string, GraphQLScalarType> = {
-  Int: GraphQLInt as unknown as GraphQLScalarType,
-  Float: GraphQLFloat as unknown as GraphQLScalarType,
-  String: GraphQLString as unknown as GraphQLScalarType,
-  Boolean: GraphQLBoolean as unknown as GraphQLScalarType,
+  Int: asScalar(GraphQLInt),
+  Float: asScalar(GraphQLFloat),
+  String: asScalar(GraphQLString),
+  Boolean: asScalar(GraphQLBoolean),
 };
 
 /**
@@ -122,7 +122,7 @@ export function pgArgTypeToGraphQL(pgType: string): GraphQLInputType {
   const custom = customScalars[graphqlName];
   if (custom) return custom;
 
-  return GraphQLString as unknown as GraphQLScalarType;
+  return asScalar(GraphQLString);
 }
 
 // ─── Naming ──────────────────────────────────────────────────────────────

@@ -33,7 +33,7 @@ import type {
   SessionVariables,
   BoolExp,
 } from '../types.js';
-import { customScalars } from './scalars.js';
+import { customScalars, asScalar } from './scalars.js';
 import type { ResolverContext } from './resolvers.js';
 import {
   isSessionVariable,
@@ -45,10 +45,10 @@ import {
 
 /** Built-in GraphQL scalars by name */
 const BUILTIN_SCALARS: Record<string, GraphQLScalarType> = {
-  Int: GraphQLInt as unknown as GraphQLScalarType,
-  Float: GraphQLFloat as unknown as GraphQLScalarType,
-  String: GraphQLString as unknown as GraphQLScalarType,
-  Boolean: GraphQLBoolean as unknown as GraphQLScalarType,
+  Int: asScalar(GraphQLInt),
+  Float: asScalar(GraphQLFloat),
+  String: asScalar(GraphQLString),
+  Boolean: asScalar(GraphQLBoolean),
 };
 
 /** Map PG scalar type names to GraphQL scalar names */
@@ -92,7 +92,7 @@ function scalarToGraphQL(typeName: string): GraphQLScalarType {
   if (custom) return custom;
 
   // Fallback to String
-  return GraphQLString as unknown as GraphQLScalarType;
+  return asScalar(GraphQLString);
 }
 
 // ─── SQL Parameter Parsing ──────────────────────────────────────────────────

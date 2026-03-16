@@ -29,7 +29,7 @@ import type {
 } from 'graphql';
 import type { TableInfo, ColumnInfo, FunctionInfo, ComputedFieldConfig } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
-import { customScalars } from './scalars.js';
+import { customScalars, asScalar } from './scalars.js';
 import { pgArgTypeToGraphQL } from './tracked-functions.js';
 import { toCamelCase, toPascalCase } from '../shared/naming.js';
 
@@ -73,10 +73,10 @@ export function tableKey(schema: string, name: string): string {
 
 /** Built-in GraphQL scalars by name */
 const BUILTIN_SCALARS: Record<string, GraphQLScalarType> = {
-  Int: GraphQLInt as unknown as GraphQLScalarType,
-  Float: GraphQLFloat as unknown as GraphQLScalarType,
-  String: GraphQLString as unknown as GraphQLScalarType,
-  Boolean: GraphQLBoolean as unknown as GraphQLScalarType,
+  Int: asScalar(GraphQLInt),
+  Float: asScalar(GraphQLFloat),
+  String: asScalar(GraphQLString),
+  Boolean: asScalar(GraphQLBoolean),
 };
 
 /**
@@ -117,9 +117,9 @@ function resolveScalarType(
 
   // Fallback to String
   if (isList) {
-    return new GraphQLList(new GraphQLNonNull(GraphQLString as unknown as GraphQLScalarType));
+    return new GraphQLList(new GraphQLNonNull(asScalar(GraphQLString)));
   }
-  return GraphQLString as unknown as GraphQLScalarType;
+  return asScalar(GraphQLString);
 }
 
 /**
