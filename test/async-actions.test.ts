@@ -583,15 +583,113 @@ describe('Async Actions', () => {
       expect(res.status).toBe(404);
     });
 
-    it('returns 404 for unauthenticated requests (anonymous role)', async () => {
+    it('returns 404 for unauthenticated requests with non-existent action (anonymous role)', async () => {
       // The server has `unauthorized_role: anonymous` configured, so
       // unauthenticated requests get a session with role 'anonymous'.
-      // The endpoint still works but returns 404 since no action exists.
+      // The action ID doesn't exist, so 404 is returned before permission check.
       const res = await fetch(
         `${serverAddress}/v1/actions/00000000-0000-0000-0000-000000000000/status`,
       );
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('REST status endpoint authorization', () => {
+    let sharedActionId: string;
+
+    // Create a shared async action (as 'client' role) that authorization tests query against
+    beforeAll(async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/request-verification', () => ({
+        code: 200,
+        body: {
+          requestId: 'a0000000-0000-0000-0000-000000000099',
+          status: 'ok',
+          verificationUrl: null,
+        },
+      }));
+
+      const { body } = await gql(
+        `mutation($input: RequestVerificationInput!) {
+          requestVerification(input: $input) {
+            actionId
+          }
+        }`,
+        {
+          input: {
+            documentType: 'passport',
+            documentCountry: 'JP',
+          },
+        },
+        { authorization: `Bearer ${token}` },
+      );
+
+      sharedActionId = (body.data as any).requestVerification.actionId;
+      await waitForActionStatus(sharedActionId, 'completed');
+    });
+
+    it('user with permitted role can see action status', async () => {
+      // requestVerification permits 'client' and 'backoffice' roles
+      const token = await createJWT({ role: 'client', userId: BOB_ID, allowedRoles: ['client'] });
+
+      const res = await fetch(`${serverAddress}/v1/actions/${sharedActionId}/status`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(200);
+      const statusBody = await res.json() as any;
+      expect(statusBody.id).toBe(sharedActionId);
+      expect(statusBody.status).toBe('completed');
+    });
+
+    it('user with different permitted role can also see action status', async () => {
+      // 'backoffice' is also in requestVerification permissions
+      const token = await createJWT({ role: 'backoffice', allowedRoles: ['backoffice'] });
+
+      const res = await fetch(`${serverAddress}/v1/actions/${sharedActionId}/status`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(200);
+      const statusBody = await res.json() as any;
+      expect(statusBody.id).toBe(sharedActionId);
+      expect(statusBody.status).toBe('completed');
+    });
+
+    it('user without any permitted role gets 403', async () => {
+      // 'administrator' is NOT in requestVerification permissions (only 'client' and 'backoffice')
+      const token = await createJWT({ role: 'administrator', allowedRoles: ['administrator'] });
+
+      const res = await fetch(`${serverAddress}/v1/actions/${sharedActionId}/status`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(res.status).toBe(403);
+      const errorBody = await res.json() as any;
+      expect(errorBody.error).toBe('forbidden');
+    });
+
+    it('admin can see any action status', async () => {
+      const res = await fetch(`${serverAddress}/v1/actions/${sharedActionId}/status`, {
+        headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+      });
+
+      expect(res.status).toBe(200);
+      const statusBody = await res.json() as any;
+      expect(statusBody.id).toBe(sharedActionId);
+      expect(statusBody.status).toBe('completed');
+    });
+
+    it('unauthenticated request to existing action gets 403 (anonymous role)', async () => {
+      // With unauthorized_role: anonymous, the request gets a session but
+      // 'anonymous' is not in requestVerification's permissions.
+      const res = await fetch(`${serverAddress}/v1/actions/${sharedActionId}/status`);
+
+      expect(res.status).toBe(403);
+      const errorBody = await res.json() as any;
+      expect(errorBody.error).toBe('forbidden');
     });
   });
 });
