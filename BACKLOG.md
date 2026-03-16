@@ -400,10 +400,15 @@ Hasura v2 request transforms support `template_engine` (e.g. `"Kriti"`) and `ver
 
 ### Nested Insert Ordering (`insertion_order`)
 
-Hasura supports `insertion_order` in object relationship `manual_configuration` to control whether the related row is inserted before or after the parent row in nested inserts. Values: `before_parent` (default) or `after_parent`. Schema validation accepts the field (Zod schema updated); runtime implementation pending.
+Hasura supports `insertion_order` in object relationship `manual_configuration` to control whether the related row is inserted before or after the parent row in nested inserts. Values: `before_parent` (default) or `after_parent`.
 
 - [x] Accept `insertion_order` in relationship manual_configuration Zod schema (nullable, optional)
-- [ ] INSERT compiler: respect `insertion_order` when compiling nested inserts — `before_parent` inserts child first (for FK on parent), `after_parent` inserts parent first (for FK on child)
+- [x] INSERT compiler: respect `insertion_order` when compiling nested inserts — `before_parent` inserts child first (for FK on parent), `after_parent` inserts parent first (for FK on child)
+- [x] Internal RelationshipConfig schema includes `insertionOrder` field
+- [x] Config loader propagates `insertion_order` from YAML to internal config
+- [x] Insert input types include nested relationship fields (object + array)
+- [x] Resolver executes nested inserts in correct order within a single transaction
+- [x] E2E tests for before_parent, after_parent, array relationships, combined, and rollback
 
 ### Other Improvements
 - [x] Dual connection pool — dedicated session-mode pool for LISTEN/NOTIFY, separate pooled connections for queries/mutations (enables PgBouncer transaction-mode compatibility)

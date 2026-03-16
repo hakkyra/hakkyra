@@ -15,6 +15,8 @@ const BoolExpSchema: z.ZodType<BoolExp> = z.record(z.string(), z.unknown()) as z
 
 export const RelationshipTypeSchema = z.enum(['object', 'array']);
 
+export const InsertionOrderSchema = z.enum(['before_parent', 'after_parent']);
+
 export const RelationshipConfigSchema = z.object({
   name: z.string(),
   type: RelationshipTypeSchema,
@@ -25,6 +27,7 @@ export const RelationshipConfigSchema = z.object({
   localColumns: z.array(z.string()).optional(),
   remoteColumns: z.array(z.string()).optional(),
   columnMapping: z.record(z.string(), z.string()).optional(),
+  insertionOrder: InsertionOrderSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------
