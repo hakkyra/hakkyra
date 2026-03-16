@@ -228,7 +228,7 @@ function buildReturningFields(
     // relationship subqueries, computed fields, and JSONB path extraction in one pass
     const columns = filterColumns(validReturning, table);
     const aliasCounter = new AliasCounter();
-    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, computedFields, setReturningComputedFields, jsonbPaths);
+    return buildJsonFields(columns, alias, relationships, params, session, aliasCounter, computedFields, setReturningComputedFields, jsonbPaths, table.customColumnNames);
   }
 
   // No relationships or jsonb paths — simple column list

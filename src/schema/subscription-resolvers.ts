@@ -19,7 +19,7 @@ import type {
 import type { SubscriptionManager } from '../subscriptions/manager.js';
 import type { OrderByItem, RelationshipSelection } from '../sql/select.js';
 import { compileSelect, compileSelectByPk } from '../sql/select.js';
-import { toCamelCase } from './type-builder.js';
+import { toCamelCase, getColumnFieldName } from './type-builder.js';
 import type { ResolverContext } from './resolvers.js';
 import { isSubscriptionRootFieldAllowed, buildComputedFieldSelections, buildSetReturningComputedFieldSelections } from './resolvers.js';
 import { parseResolveInfo, type ParsedSelection, type SetReturningComputedFieldParsed } from './resolve-info.js';
@@ -111,7 +111,7 @@ function permissionDenied(operation: string, table: string, role: string): Error
 function camelToColumnMap(table: TableInfo): Map<string, string> {
   const map = new Map<string, string>();
   for (const col of table.columns) {
-    map.set(toCamelCase(col.name), col.name);
+    map.set(getColumnFieldName(table, col.name), col.name);
   }
   return map;
 }
@@ -211,7 +211,7 @@ function remapRowToCamel(
   const result: Record<string, unknown> = {};
   for (const col of table.columns) {
     if (col.name in row) {
-      result[toCamelCase(col.name)] = row[col.name];
+      result[table.customColumnNames?.[col.name] ?? toCamelCase(col.name)] = row[col.name];
     }
   }
   for (const [key, value] of Object.entries(row)) {

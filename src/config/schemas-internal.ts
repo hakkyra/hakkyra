@@ -495,7 +495,6 @@ export const HakkyraConfigSchema = z.object({
   nativeQueries: z.array(NativeQuerySchema).default([]),
   logicalModels: z.array(LogicalModelSchema).default([]),
   apiDocs: APIDocsConfigSchema,
-  tableAliases: z.record(z.string(), z.string()),
   inheritedRoles: z.record(z.string(), z.array(z.string())).default({}),
   jobQueue: JobQueueConfigSchema.optional(),
   redis: RedisConfigSchema.optional(),

@@ -64,6 +64,14 @@ export function toCamelCase(str: string): string {
 }
 
 /**
+ * Derive the GraphQL field name for a column.
+ * Uses customColumnNames if available, otherwise falls back to toCamelCase.
+ */
+export function getColumnFieldName(table: TableInfo, columnName: string): string {
+  return table.customColumnNames?.[columnName] ?? toCamelCase(columnName);
+}
+
+/**
  * Derive the GraphQL type name for a table.
  * Uses the alias if available, otherwise falls back to the table name.
  */
@@ -180,7 +188,7 @@ export function buildObjectType(
 
       // ── Column fields ────────────────────────────────────────────────
       for (const column of table.columns) {
-        const fieldName = toCamelCase(column.name);
+        const fieldName = getColumnFieldName(table, column.name);
         let fieldType = columnToGraphQLType(column, enumTypes, enumNames);
 
         // Non-nullable columns that aren't primary keys with defaults

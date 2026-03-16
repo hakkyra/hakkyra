@@ -44,7 +44,7 @@ import type {
   BoolExp,
 } from '../types.js';
 import { customScalars } from './scalars.js';
-import { toCamelCase, toPascalCase, tableKey } from './type-builder.js';
+import { toCamelCase, toPascalCase, getColumnFieldName, tableKey } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
 import type { ResolverContext, ResolverPermissionLookup } from './resolvers.js';
 import { remapBoolExp as remapBoolExpFull } from './resolvers.js';
@@ -438,6 +438,10 @@ function compileTrackedFunctionCall(opts: {
     params,
     opts.session,
     aliasCounter,
+    undefined,
+    undefined,
+    undefined,
+    table.customColumnNames,
   );
 
   // Build WHERE clause
@@ -553,7 +557,7 @@ function remapRowToCamel(
   const result: Record<string, unknown> = {};
   for (const col of table.columns) {
     if (col.name in row) {
-      result[toCamelCase(col.name)] = row[col.name];
+      result[table.customColumnNames?.[col.name] ?? toCamelCase(col.name)] = row[col.name];
     }
   }
   // Preserve any extra keys (e.g., relationship subquery results)
@@ -571,7 +575,7 @@ function remapRowToCamel(
 function camelToColumnMap(table: TableInfo): Map<string, string> {
   const map = new Map<string, string>();
   for (const col of table.columns) {
-    map.set(toCamelCase(col.name), col.name);
+    map.set(getColumnFieldName(table, col.name), col.name);
   }
   return map;
 }

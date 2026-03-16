@@ -94,6 +94,8 @@ export interface TableInfo {
   eventTriggers: EventTriggerConfig[];
   customRootFields?: CustomRootFields;
   computedFields?: ComputedFieldConfig[];
+  customColumnNames?: Record<string, string>;
+  columnComments?: Record<string, string>;
   isEnum?: boolean;
   isView?: boolean;
 }
