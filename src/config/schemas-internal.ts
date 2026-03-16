@@ -159,10 +159,12 @@ export const RequestTransformSchema = z.object({
   contentType: z.string().optional(),
   queryParams: z.record(z.string(), z.string()).optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  templateEngine: z.string().optional(),
 });
 
 export const ResponseTransformSchema = z.object({
   body: z.union([z.string(), z.record(z.string(), z.unknown())]).optional(),
+  templateEngine: z.string().optional(),
 });
 
 // ---------------------------------------------------------------------------

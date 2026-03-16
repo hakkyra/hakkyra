@@ -116,3 +116,23 @@ extend type Mutation {
 type UpdateLimitResult {
   ok: Boolean!
 }
+
+# ── Action: acceptContractWithToken (ID scalar + numeric types) ───────────────
+extend type Mutation {
+  acceptContractWithToken(input: AcceptContractInput!): AcceptContractResult
+}
+
+input AcceptContractInput {
+  contractId: ID!
+  token: String!
+  depositAmount: numeric
+}
+
+type AcceptContractResult {
+  id: ID!
+  contractRef: ID
+  totalAmount: numeric!
+  balanceDue: Numeric
+  walletId: Uuid!
+  accepted: Boolean!
+}

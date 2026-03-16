@@ -11,6 +11,11 @@
  */
 
 import type { RequestTransform, ResponseTransform } from '../types.js';
+import {
+  evaluateKritiString,
+  evaluateKritiTemplate,
+  evaluateKritiUrlTemplate,
+} from './kriti.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -276,6 +281,14 @@ export function applyRequestTransform(
   context: TransformContext,
 ): TransformedRequest {
   const variables = buildVariables(originalRequest.body, context);
+  const useKriti = transform.templateEngine === 'Kriti';
+
+  // Select interpolation functions based on template engine
+  const evalString = useKriti
+    ? (t: string, v: Record<string, unknown>) => evaluateKritiString(t, v)
+    : interpolateString;
+  const evalTemplate = useKriti ? evaluateKritiTemplate : interpolateTemplate;
+  const evalUrl = useKriti ? evaluateKritiUrlTemplate : interpolateUrlTemplate;
 
   let url = originalRequest.url;
   let method = originalRequest.method;
@@ -290,12 +303,12 @@ export function applyRequestTransform(
   // Override URL with template — use URL-safe interpolation to encode
   // user-controlled values and prevent path traversal attacks.
   if (transform.url) {
-    url = interpolateUrlTemplate(transform.url, variables);
+    url = evalUrl(transform.url, variables);
   }
 
   // Override body with template
   if (transform.body !== undefined) {
-    body = interpolateTemplate(transform.body, variables);
+    body = evalTemplate(transform.body, variables);
   }
 
   // Override content type
@@ -307,7 +320,7 @@ export function applyRequestTransform(
   if (transform.queryParams) {
     const urlObj = new URL(url);
     for (const [key, valueTemplate] of Object.entries(transform.queryParams)) {
-      const resolved = interpolateString(valueTemplate, variables);
+      const resolved = evalString(valueTemplate, variables);
       const stringValue = resolved === null || resolved === undefined
         ? ''
         : typeof resolved === 'object'
@@ -321,7 +334,7 @@ export function applyRequestTransform(
   // Add/override headers
   if (transform.headers) {
     for (const [key, valueTemplate] of Object.entries(transform.headers)) {
-      const resolved = interpolateString(valueTemplate, variables);
+      const resolved = evalString(valueTemplate, variables);
       headers[key] = resolved === null || resolved === undefined
         ? ''
         : typeof resolved === 'object'
@@ -357,5 +370,8 @@ export function applyResponseTransform(
     $session_variables: context.sessionVariables,
   };
 
-  return interpolateTemplate(transform.body, variables);
+  const useKriti = transform.templateEngine === 'Kriti';
+  return useKriti
+    ? evaluateKritiTemplate(transform.body, variables)
+    : interpolateTemplate(transform.body, variables);
 }

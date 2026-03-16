@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { GraphQLSchema, GraphQLObjectType, GraphQLInputObjectType, GraphQLNonNull, GraphQLList } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
-import { mergeSchemaModel } from '../src/introspection/merger.js';
+import { mergeSchemaModel, resolveTableEnums } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
 import { getTypeName } from '../src/schema/type-builder.js';
 import type { SchemaModel, TableInfo } from '../src/types.js';
@@ -19,6 +19,7 @@ beforeAll(async () => {
   const config = await loadConfig(METADATA_DIR, SERVER_CONFIG_PATH);
   const result = mergeSchemaModel(introspection, config);
   schemaModel = result.model;
+  await resolveTableEnums(schemaModel, pool);
   schema = generateSchema(schemaModel);
 });
 
@@ -265,6 +266,27 @@ describe('GraphQL Schema Generation', () => {
       expect(typeMap['ClientStatus']).toBeDefined();
       expect(typeMap['InvoiceState']).toBeDefined();
       expect(typeMap['LedgerType']).toBeDefined();
+    });
+
+    it('should expose columns with FK to is_enum tables as enum scalar fields (P9.14)', () => {
+      const typeMap = schema.getTypeMap();
+      const appointmentType = typeMap['Appointment'] as GraphQLObjectType;
+      expect(appointmentType).toBeDefined();
+      const fields = appointmentType.getFields();
+      // priority column has FK to priority_type (is_enum: true)
+      // Should be exposed as PriorityTypeEnum scalar, not filtered out
+      expect(fields['priority']).toBeDefined();
+      expect(fields['priority'].type.toString()).toBe('PriorityTypeEnum!');
+    });
+
+    it('should remove object relationships pointing to is_enum tables', () => {
+      const typeMap = schema.getTypeMap();
+      const appointmentType = typeMap['Appointment'] as GraphQLObjectType;
+      expect(appointmentType).toBeDefined();
+      const fields = appointmentType.getFields();
+      // No object relationship to priority_type should exist
+      // (the FK is handled as an enum scalar, not a relationship)
+      expect(fields['priorityType']).toBeUndefined();
     });
   });
 

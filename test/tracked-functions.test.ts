@@ -7,10 +7,13 @@ import type { SchemaModel, TableInfo, FunctionInfo, TrackedFunctionConfig } from
 import { resolveTrackedFunctions } from '../src/schema/tracked-functions.js';
 import {
   getPool, closePool, waitForDb, makeSession,
-  startServer, stopServer, graphqlRequest, tokens, createJWT,
+  startServer, stopServer, getServerAddress, graphqlRequest, tokens, createJWT,
   METADATA_DIR, SERVER_CONFIG_PATH, TEST_DB_URL,
   ALICE_ID, BOB_ID, CHARLIE_ID, DIANA_ID, ADMIN_SECRET,
 } from './setup.js';
+import { createClient } from 'graphql-ws';
+import type { Client as GqlWsClient } from 'graphql-ws';
+import WebSocket from 'ws';
 
 type AnyRow = Record<string, unknown>;
 
@@ -1248,5 +1251,271 @@ describe('Tracked Functions — Inherited Role Permissions', () => {
 
     expect(body.errors).toBeDefined();
     expect(body.errors![0].message).toContain('Permission denied');
+  });
+});
+
+// ─── Tracked Function Subscriptions (P9.13) ──────────────────────────────
+
+function createWsClient(connectionParams: Record<string, unknown>): GqlWsClient {
+  const serverAddress = getServerAddress();
+  const wsUrl = serverAddress.replace(/^http/, 'ws') + '/graphql';
+  return createClient({
+    url: wsUrl,
+    webSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket,
+    connectionParams,
+    retryAttempts: 0,
+  });
+}
+
+function firstResult<T = unknown>(
+  client: GqlWsClient,
+  query: string,
+  variables?: Record<string, unknown>,
+  timeoutMs = 15000,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timed out waiting for subscription result`));
+    }, timeoutMs);
+
+    const unsubscribe = client.subscribe(
+      { query, variables },
+      {
+        next(value) {
+          clearTimeout(timer);
+          unsubscribe();
+          resolve(value.data as T);
+        },
+        error(err) {
+          clearTimeout(timer);
+          reject(err);
+        },
+        complete() {
+          clearTimeout(timer);
+          reject(new Error('Subscription completed without a result'));
+        },
+      },
+    );
+  });
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+describe('Tracked Function Subscriptions (P9.13)', () => {
+  it('should subscribe to a SETOF tracked function (searchClients)', async () => {
+    const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+    try {
+      const data = await firstResult<{ searchClients: AnyRow[] }>(client, `
+        subscription {
+          searchClients(args: { searchTerm: "alice" }) {
+            id
+            username
+          }
+        }
+      `);
+
+      expect(data.searchClients).toBeDefined();
+      expect(Array.isArray(data.searchClients)).toBe(true);
+      expect(data.searchClients.length).toBeGreaterThan(0);
+      expect(data.searchClients[0].username).toBe('alice');
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it('should subscribe to a tracked function aggregate (searchClientsAggregate)', async () => {
+    const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+    try {
+      const data = await firstResult<{ searchClientsAggregate: { aggregate: { count: number } } }>(client, `
+        subscription {
+          searchClientsAggregate(args: { searchTerm: "" }) {
+            aggregate {
+              count
+            }
+          }
+        }
+      `);
+
+      expect(data.searchClientsAggregate).toBeDefined();
+      expect(data.searchClientsAggregate.aggregate.count).toBeGreaterThanOrEqual(4);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it('should subscribe with custom root field name (clientsByDate)', async () => {
+    const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+    try {
+      const data = await firstResult<{ clientsByDate: AnyRow[] }>(client, `
+        subscription {
+          clientsByDate(args: { since: "2000-01-01T00:00:00Z" }) {
+            id
+            username
+          }
+        }
+      `);
+
+      expect(data.clientsByDate).toBeDefined();
+      expect(Array.isArray(data.clientsByDate)).toBe(true);
+      expect(data.clientsByDate.length).toBeGreaterThanOrEqual(4);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it('should subscribe to custom aggregate root field (clientsByDateAggregate)', async () => {
+    const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+    try {
+      const data = await firstResult<{ clientsByDateAggregate: { aggregate: { count: number } } }>(client, `
+        subscription {
+          clientsByDateAggregate(args: { since: "2000-01-01T00:00:00Z" }) {
+            aggregate {
+              count
+            }
+          }
+        }
+      `);
+
+      expect(data.clientsByDateAggregate).toBeDefined();
+      expect(data.clientsByDateAggregate.aggregate.count).toBeGreaterThanOrEqual(4);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it('should respect permissions on tracked function subscriptions', async () => {
+    const token = await tokens.backoffice();
+    const client = createWsClient({ Authorization: `Bearer ${token}` });
+
+    try {
+      const data = await firstResult<{ searchClients: AnyRow[] }>(client, `
+        subscription {
+          searchClients(args: { searchTerm: "" }) {
+            id
+            username
+          }
+        }
+      `);
+
+      expect(data.searchClients).toBeDefined();
+      expect(Array.isArray(data.searchClients)).toBe(true);
+      expect(data.searchClients.length).toBeGreaterThan(0);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it('should deny subscription to function without permission', async () => {
+    const token = await tokens.client();
+    const client = createWsClient({ Authorization: `Bearer ${token}` });
+
+    try {
+      await expect(
+        firstResult(client, `
+          subscription {
+            searchClients(args: { searchTerm: "alice" }) {
+              id
+            }
+          }
+        `, undefined, 5000),
+      ).rejects.toThrow();
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it('should NOT expose mutation functions as subscriptions', async () => {
+    const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+    try {
+      await expect(
+        firstResult(client, `
+          subscription {
+            deactivateClient(args: { clientUuid: "${ALICE_ID}" }) {
+              id
+            }
+          }
+        `, undefined, 5000),
+      ).rejects.toThrow();
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it('should subscribe with where filter on tracked function', async () => {
+    const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+    try {
+      const data = await firstResult<{ searchClients: AnyRow[] }>(client, `
+        subscription {
+          searchClients(
+            args: { searchTerm: "" },
+            where: { username: { _eq: "alice" } }
+          ) {
+            id
+            username
+          }
+        }
+      `);
+
+      expect(data.searchClients).toBeDefined();
+      expect(data.searchClients.length).toBe(1);
+      expect(data.searchClients[0].username).toBe('alice');
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it('should subscribe with limit on tracked function', async () => {
+    const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+    try {
+      const data = await firstResult<{ searchClients: AnyRow[] }>(client, `
+        subscription {
+          searchClients(
+            args: { searchTerm: "" },
+            limit: 2
+          ) {
+            id
+            username
+          }
+        }
+      `);
+
+      expect(data.searchClients).toBeDefined();
+      expect(data.searchClients.length).toBe(2);
+    } finally {
+      await client.dispose();
+    }
+  });
+
+  it('should subscribe to non-public schema function (countActiveClients)', async () => {
+    const client = createWsClient({ 'x-hasura-admin-secret': ADMIN_SECRET });
+
+    try {
+      const data = await firstResult<{ countActiveClients: AnyRow[] }>(client, `
+        subscription {
+          countActiveClients {
+            id
+            username
+            status
+          }
+        }
+      `);
+
+      expect(data.countActiveClients).toBeDefined();
+      expect(Array.isArray(data.countActiveClients)).toBe(true);
+      for (const c of data.countActiveClients) {
+        expect(c.status).toBe('ACTIVE');
+      }
+    } finally {
+      await client.dispose();
+    }
   });
 });
