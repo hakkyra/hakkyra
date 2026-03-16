@@ -12,7 +12,7 @@
 
 import { timingSafeEqual as cryptoTimingSafeEqual } from 'node:crypto';
 import fp from 'fastify-plugin';
-import type { FastifyPluginCallback, FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyPluginCallback, FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { AuthConfig, SessionVariables } from '../types.js';
 import type { JWTVerifier } from './jwt.js';
 import { createJWTVerifier } from './jwt.js';
@@ -110,9 +110,8 @@ function sendUnauthorized(reply: FastifyReply, message: string): void {
  * app.register(createAuthHook(config));
  * ```
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createAuthHook(config: AuthConfig): any {
-  return fp(function authPlugin(instance: any, _opts: any, done: (err?: Error) => void) {
+export function createAuthHook(config: AuthConfig): FastifyPluginCallback {
+  return fp(function authPlugin(instance: FastifyInstance, _opts: Record<string, unknown>, done: (err?: Error) => void) {
     // Decorate request with the session property (initial value is used for type inference).
     if (!instance.hasRequestDecorator(SESSION_KEY)) {
       instance.decorateRequest(SESSION_KEY, null);

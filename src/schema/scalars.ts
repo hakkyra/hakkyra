@@ -8,6 +8,20 @@
 import { GraphQLScalarType, Kind } from 'graphql';
 import type { GraphQLScalarSerializer, GraphQLScalarValueParser, GraphQLScalarLiteralParser } from 'graphql';
 
+// ─── Type Helper ─────────────────────────────────────────────────────────────
+
+/**
+ * Safely cast a GraphQL.js built-in scalar (which has type
+ * `GraphQLScalarType<unknown, unknown>`) to the plain `GraphQLScalarType`
+ * alias used throughout our schema code.
+ *
+ * This eliminates the need for `as unknown as GraphQLScalarType` casts
+ * scattered across schema files.
+ */
+export function asScalar(scalar: GraphQLScalarType<unknown, unknown>): GraphQLScalarType {
+  return scalar as GraphQLScalarType;
+}
+
 // ─── UUID ────────────────────────────────────────────────────────────────────
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

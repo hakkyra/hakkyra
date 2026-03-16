@@ -63,10 +63,8 @@ function copyEsmToCjs(esmSchema: GraphQLSchema, cjsSchema: GraphQLSchema): void 
         if (esmField?.resolve) {
           cjsField.resolve = esmField.resolve as typeof cjsField.resolve;
         }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((esmField as any)?.subscribe) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (cjsField as any).subscribe = (esmField as any).subscribe;
+        if (esmField?.subscribe) {
+          cjsField.subscribe = esmField.subscribe as typeof cjsField.subscribe;
         }
       }
     }
@@ -137,8 +135,7 @@ export function registerIntrospectionControl(
 
   const disabledRoles = new Set(disabledForRoles);
   server.graphql.addHook('preExecution', async (_schema, document, context) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const auth = (context as any)?.auth;
+    const auth = (context as unknown as Record<string, unknown>)?.auth as { role?: string } | undefined;
     const role: string | undefined = auth?.role;
     if (role && disabledRoles.has(role)) {
       for (const definition of document.definitions) {

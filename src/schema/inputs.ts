@@ -31,11 +31,10 @@ import type {
   GraphQLInputType,
   GraphQLOutputType,
   GraphQLFieldConfigMap,
-  GraphQLScalarType,
 } from 'graphql';
 import type { TableInfo, ColumnInfo, RelationshipConfig, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
-import { customScalars } from './scalars.js';
+import { customScalars, asScalar } from './scalars.js';
 import { toCamelCase, getTypeName, getColumnFieldName, tableKey } from './type-builder.js';
 
 // ─── CursorOrdering Enum ────────────────────────────────────────────────────
@@ -153,8 +152,8 @@ function resolveInputScalarType(
   }
 
   return isList
-    ? new GraphQLList(new GraphQLNonNull(GraphQLString as unknown as GraphQLScalarType))
-    : (GraphQLString as unknown as GraphQLScalarType);
+    ? new GraphQLList(new GraphQLNonNull(asScalar(GraphQLString)))
+    : asScalar(GraphQLString);
 }
 
 function columnToInputType(
@@ -178,7 +177,7 @@ const BUILTIN_OUTPUT_SCALARS: Record<string, GraphQLOutputType> = {
 function resolveOutputScalarType(
   graphqlName: string,
 ): GraphQLOutputType {
-  return BUILTIN_OUTPUT_SCALARS[graphqlName] ?? customScalars[graphqlName] ?? (GraphQLString as unknown as GraphQLScalarType);
+  return BUILTIN_OUTPUT_SCALARS[graphqlName] ?? customScalars[graphqlName] ?? asScalar(GraphQLString);
 }
 
 // ─── Numeric Check ──────────────────────────────────────────────────────────
