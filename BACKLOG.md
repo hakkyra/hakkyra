@@ -1157,6 +1157,62 @@ configuration:
 
 ---
 
+## YAML Configuration Documentation
+
+Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.
+
+### Approach
+
+- [ ] Add `.describe()` to all Zod fields in `src/config/schemas.ts` (raw YAML schemas) and `src/config/schemas-internal.ts` (internal schemas)
+- [ ] Build doc generator that walks Zod schemas and emits structured documentation (field name, type, default, required/optional, description)
+- [ ] `hakkyra docs-config` CLI command — outputs generated config reference (Markdown or JSON)
+- [ ] Cover all config files: `hakkyra.yaml`, `databases.yaml`, table YAML, `actions.yaml`, `cron_triggers.yaml`, `functions.yaml`, `query_collections.yaml`, `rest_endpoints.yaml`, `inherited_roles.yaml`
+
+### Scope
+
+- [ ] `hakkyra.yaml` — server, auth, graphql, rest, docs, schema, webhook, redis, job_queue sections
+- [ ] `databases.yaml` — connection config, pools, replicas, session, native_queries, logical_models
+- [ ] Table YAML — table config, permissions (select/insert/update/delete), relationships, computed fields, event triggers, `is_enum`, `configuration` block
+- [ ] `actions.yaml` + `actions.graphql` — action definitions, permissions, transforms, async config
+- [ ] `cron_triggers.yaml` — schedule, webhook, retry config, headers
+- [ ] `functions.yaml` — tracked function config, exposed_as, custom_root_fields, permissions
+- [ ] `query_collections.yaml` + `rest_endpoints.yaml` — collection definitions, endpoint routing
+
+---
+
+## Admin UI
+
+Web-based admin console served by Hakkyra itself, enabled via `hakkyra.yaml`. Requires admin secret to access. Provides a unified interface for exploring, testing, and managing the API and its metadata.
+
+### Config
+
+```yaml
+admin_ui:
+  enabled: true        # default: false
+  path: /console       # default: /console
+```
+
+### Features
+
+- [ ] **Role switcher** — Switch between roles (including inherited roles) to test the API as different users; injects appropriate session variables
+- [ ] **GraphQL playground** — Embedded GraphQL IDE (GraphiQL or similar) with role-aware schema, auto-complete, query history
+- [ ] **REST playground** — REST API explorer with request builder, generated from OpenAPI spec; role-aware endpoint visibility
+- [ ] **Metadata editor** — UI for editing YAML metadata files (tables, permissions, relationships, actions, cron triggers, functions, REST endpoints); validates against Zod schemas before saving; triggers hot reload in dev mode
+- [ ] **Database browser** — List all PG schemas and tables (tracked and untracked); show table content with pagination, filtering, sorting; one-click "track table" to add untracked tables to metadata YAML; column details (type, nullable, default, constraints)
+- [ ] **Table configuration UI** — Configure tracked tables: set permissions per role (column selection, row-level filters, presets), manage relationships, computed fields, event triggers; structured form with raw YAML toggle; changes write to metadata YAML files
+- [ ] **Schema explorer** — Browse generated GraphQL types, relationships, permissions per role; visual relationship graph
+- [ ] **Event/cron monitor** — View event trigger delivery status, cron trigger history, failed deliveries, retry queue
+
+### Technical Approach
+
+- [ ] Evaluate existing tools: GraphiQL, Apollo Sandbox, Swagger UI, Monaco editor
+- [ ] Static SPA bundled into Hakkyra (served from memory, no external CDN)
+- [ ] Admin secret auth gate (same `x-hasura-admin-secret` header used by API)
+- [ ] Backend API endpoints under `/console/api/` for metadata read/write operations
+- [ ] Dev mode: file write + hot reload; production mode: read-only explorer
+
+---
+
 ## Test Summary
 
 | Suite | Tests | Status |
