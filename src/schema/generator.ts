@@ -353,7 +353,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
         tables,
         tableTypeRegistry: typeRegistry,
       })
-    : { queryFields: {}, mutationFields: {}, types: [] };
+    : { queryFields: {}, mutationFields: {}, subscriptionFields: {}, types: [] };
 
   // Add action query fields to Query
   for (const [name, fieldConfig] of Object.entries(actionFields.queryFields)) {
@@ -660,6 +660,11 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
         };
       }
     }
+  }
+
+  // Add async action result subscription fields
+  for (const [name, fieldConfig] of Object.entries(actionFields.subscriptionFields)) {
+    subscriptionFields[name] = fieldConfig;
   }
 
   // Only create subscription type if there are subscription fields

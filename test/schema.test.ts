@@ -5,11 +5,14 @@ import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel, resolveTableEnums } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
 import { getTypeName } from '../src/schema/type-builder.js';
-import type { SchemaModel, TableInfo } from '../src/types.js';
+import type { SchemaModel, TableInfo, HakkyraConfig } from '../src/types.js';
+import { resetComparisonTypeCache } from '../src/schema/filters.js';
 import { getPool, closePool, waitForDb, METADATA_DIR, SERVER_CONFIG_PATH, TEST_DB_URL } from './setup.js';
 
 let schemaModel: SchemaModel;
 let schema: GraphQLSchema;
+/** Schema generated with actions (for async action subscription tests). */
+let schemaWithActions: GraphQLSchema;
 
 beforeAll(async () => {
   process.env['DATABASE_URL'] = TEST_DB_URL;
@@ -21,6 +24,15 @@ beforeAll(async () => {
   schemaModel = result.model;
   await resolveTableEnums(schemaModel, pool);
   schema = generateSchema(schemaModel);
+
+  // Build a second schema with action fields enabled.
+  // Reset the comparison type cache to avoid type instance conflicts
+  // between the two schemas (cached types reference the first schema's enum instances).
+  resetComparisonTypeCache();
+  schemaWithActions = generateSchema(schemaModel, {
+    actions: config.actions,
+    actionsGraphql: config.actionsGraphql,
+  });
 });
 
 afterAll(async () => {
@@ -129,6 +141,45 @@ describe('GraphQL Schema Generation', () => {
       const subscriptionType = schema.getSubscriptionType()!;
       const fields = subscriptionType.getFields();
       expect(fields['clientByPk']).toBeDefined();
+    });
+
+    it('should have aggregate subscription fields', () => {
+      const subscriptionType = schema.getSubscriptionType()!;
+      const fields = subscriptionType.getFields();
+      expect(fields['clientsAggregate']).toBeDefined();
+    });
+
+    it('should have stream subscription fields', () => {
+      const subscriptionType = schema.getSubscriptionType()!;
+      const fields = subscriptionType.getFields();
+      // Stream field uses base name (toCamelCase(table.name) + "Stream"), not custom select name
+      expect(fields['clientStream']).toBeDefined();
+    });
+  });
+
+  describe('subscription_root with actions', () => {
+    it('should have async action result subscription field (P10.6)', () => {
+      const subscriptionType = schemaWithActions.getSubscriptionType()!;
+      const fields = subscriptionType.getFields();
+      // requestVerification is the async action in test fixtures
+      expect(fields['requestVerification']).toBeDefined();
+    });
+
+    it('should have id arg on async action result subscription field', () => {
+      const subscriptionType = schemaWithActions.getSubscriptionType()!;
+      const field = subscriptionType.getFields()['requestVerification'];
+      expect(field).toBeDefined();
+      const argNames = field.args.map((a) => a.name);
+      expect(argNames).toContain('id');
+    });
+
+    it('should not have sync action fields as subscription fields', () => {
+      const subscriptionType = schemaWithActions.getSubscriptionType()!;
+      const fields = subscriptionType.getFields();
+      // createPayment is a sync mutation — should NOT appear in subscriptions
+      expect(fields['createPayment']).toBeUndefined();
+      // checkDiscountEligibility is a sync query — should NOT appear in subscriptions
+      expect(fields['checkDiscountEligibility']).toBeUndefined();
     });
   });
 
