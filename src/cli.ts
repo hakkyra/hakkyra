@@ -6,6 +6,7 @@
  *   hakkyra start [options]    Start the server (production)
  *   hakkyra dev [options]      Start the server in dev mode (hot reload)
  *   hakkyra init [--force]     Scaffold a new Hakkyra project
+ *   hakkyra docs-config        Output YAML config reference
  *   hakkyra --version, -v      Show version
  *   hakkyra --help, -h         Show help
  *
@@ -17,6 +18,8 @@ import { createRequire } from 'node:module';
 import { startServer } from './commands/start.js';
 import type { StartOptions } from './commands/start.js';
 import { initProject } from './commands/init.js';
+import { docsConfig } from './commands/docs-config.js';
+import type { DocsConfigOptions } from './commands/docs-config.js';
 import { CONFIG_DEFAULTS } from './config/schemas-internal.js';
 
 // ─── Version ────────────────────────────────────────────────────────────────
@@ -36,6 +39,7 @@ Commands:
   start              Start the server (production mode)
   dev                Start the server in dev mode (hot reload)
   init               Scaffold a new Hakkyra project
+  docs-config        Output YAML configuration reference
 
 Options (start / dev):
   --port <number>    Server port (default: 3000)
@@ -46,6 +50,9 @@ Options (start / dev):
 
 Options (init):
   --force            Overwrite existing files
+
+Options (docs-config):
+  --format <fmt>     Output format: markdown or json (default: markdown)
 
 Global:
   --help, -h         Show this help message
@@ -161,6 +168,42 @@ function parseInitArgs(args: string[]): { force: boolean } {
   return { force };
 }
 
+// ─── Arg parsing for docs-config ────────────────────────────────────────────
+
+function parseDocsConfigArgs(args: string[]): DocsConfigOptions {
+  const options: DocsConfigOptions = { format: 'markdown' };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const next = args[i + 1];
+
+    switch (arg) {
+      case '--format':
+        if (next === 'markdown' || next === 'json') {
+          options.format = next;
+          i++;
+        } else {
+          console.error(`Invalid format: ${next ?? '(missing)'}. Use "markdown" or "json".`);
+          process.exit(1);
+        }
+        break;
+
+      case '--help':
+      case '-h':
+        console.log(HELP);
+        process.exit(0);
+        break;
+
+      default:
+        console.error(`Unknown option for docs-config: ${arg}`);
+        console.error(`Run 'hakkyra --help' for usage.`);
+        process.exit(1);
+    }
+  }
+
+  return options;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function isFlag(arg: string): boolean {
@@ -207,6 +250,12 @@ async function main(): Promise<void> {
   if (first === 'init') {
     const initOpts = parseInitArgs(args.slice(1));
     await initProject(initOpts);
+    return;
+  }
+
+  if (first === 'docs-config') {
+    const docsOpts = parseDocsConfigArgs(args.slice(1));
+    docsConfig(docsOpts);
     return;
   }
 
