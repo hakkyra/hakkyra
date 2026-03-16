@@ -472,6 +472,24 @@ function checkPermission(
 
 // ─── Error responses ─────────────────────────────────────────────────────────
 
+/**
+ * Determine whether the current environment is dev/debug mode.
+ * In production, SQL error details are hidden from clients.
+ */
+function isDevMode(): boolean {
+  const env = process.env['NODE_ENV'];
+  return env !== 'production';
+}
+
+/**
+ * Sanitize a SQL/DB error message for client exposure.
+ * In dev mode, the full message is returned. In production,
+ * a generic message is returned to avoid leaking PG internals.
+ */
+function sanitizeSQLError(message: string, genericMessage: string): string {
+  return isDevMode() ? message : genericMessage;
+}
+
 function sendBadRequest(reply: FastifyReply, message: string): void {
   void reply.code(400).send({ error: 'bad_request', message });
 }
@@ -615,7 +633,10 @@ function registerListRoute(
       void reply.code(200).send(result.rows);
     } catch (err) {
       request.log.error({ err, table: table.name }, 'Error in list query');
-      sendBadRequest(reply, err instanceof Error ? err.message : 'Query failed');
+      sendBadRequest(reply, sanitizeSQLError(
+        err instanceof Error ? err.message : 'Query failed',
+        'Query failed',
+      ));
     }
   });
 }
@@ -721,7 +742,10 @@ function registerAggregateRoute(
       }
     } catch (err) {
       request.log.error({ err, table: table.name }, 'Error in aggregate query');
-      sendBadRequest(reply, err instanceof Error ? err.message : 'Query failed');
+      sendBadRequest(reply, sanitizeSQLError(
+        err instanceof Error ? err.message : 'Query failed',
+        'Query failed',
+      ));
     }
   });
 }
@@ -772,7 +796,10 @@ function registerGetByPKRoute(
       void reply.code(200).send(result.rows[0]);
     } catch (err) {
       request.log.error({ err, table: table.name }, 'Error in get-by-PK query');
-      sendBadRequest(reply, err instanceof Error ? err.message : 'Query failed');
+      sendBadRequest(reply, sanitizeSQLError(
+        err instanceof Error ? err.message : 'Query failed',
+        'Query failed',
+      ));
     }
   });
 }
@@ -831,10 +858,13 @@ function registerInsertRoute(
       const message = err instanceof Error ? err.message : 'Insert failed';
       // Check for unique constraint violations
       if (err instanceof Error && 'code' in err && (err as { code: string }).code === '23505') {
-        sendBadRequest(reply, `Unique constraint violation: ${message}`);
+        sendBadRequest(reply, sanitizeSQLError(
+          `Unique constraint violation: ${message}`,
+          'Unique constraint violation',
+        ));
         return;
       }
-      sendBadRequest(reply, message);
+      sendBadRequest(reply, sanitizeSQLError(message, 'Insert failed'));
     }
   });
 }
@@ -894,7 +924,10 @@ function registerUpdateRoute(
       void reply.code(200).send(result.rows[0]);
     } catch (err) {
       request.log.error({ err, table: table.name }, 'Error in update');
-      sendBadRequest(reply, err instanceof Error ? err.message : 'Update failed');
+      sendBadRequest(reply, sanitizeSQLError(
+        err instanceof Error ? err.message : 'Update failed',
+        'Update failed',
+      ));
     }
   });
 }
@@ -939,7 +972,10 @@ function registerDeleteRoute(
       void reply.code(200).send({ affected_rows: result.rowCount });
     } catch (err) {
       request.log.error({ err, table: table.name }, 'Error in delete');
-      sendBadRequest(reply, err instanceof Error ? err.message : 'Delete failed');
+      sendBadRequest(reply, sanitizeSQLError(
+        err instanceof Error ? err.message : 'Delete failed',
+        'Delete failed',
+      ));
     }
   });
 }

@@ -152,6 +152,44 @@ export function interpolateTemplate(
   return template;
 }
 
+// ─── Path Traversal Protection ──────────────────────────────────────────────
+
+/**
+ * Validate that a URL does not contain path traversal patterns.
+ * Throws an error if `..` segments are found in the URL path.
+ *
+ * Checks both the raw URL string and the decoded form to catch
+ * encoded traversal patterns like `%2e%2e`.
+ */
+export function validateUrlSafe(url: string): void {
+  // Check the raw URL string for ".." path segments (before URL constructor
+  // normalizes them away). We extract the path portion (between scheme+authority
+  // and any query/fragment) to avoid false positives on ".." in query params.
+  try {
+    const parsed = new URL(url);
+    // Check the raw path portion from the original URL string.
+    // The URL constructor normalizes ".." away, so we need to inspect
+    // the raw string to detect traversal attempts.
+    const rawPath = url.slice(
+      url.indexOf(parsed.host) + parsed.host.length,
+      url.includes('?') ? url.indexOf('?') : url.includes('#') ? url.indexOf('#') : url.length,
+    );
+    const decodedRawPath = decodeURIComponent(rawPath);
+    const segments = decodedRawPath.split('/');
+    for (const segment of segments) {
+      if (segment === '..') {
+        throw new Error(`Path traversal detected in URL: "${url}"`);
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Path traversal')) {
+      throw err;
+    }
+    // If URL parsing fails, it's not a valid URL — let it through
+    // and let the HTTP client handle the error downstream.
+  }
+}
+
 // ─── Request Transform ──────────────────────────────────────────────────────
 
 /**
@@ -219,6 +257,9 @@ export function applyRequestTransform(
           : String(resolved);
     }
   }
+
+  // Validate the final URL for path traversal attacks
+  validateUrlSafe(url);
 
   return { url, method, body, headers };
 }
