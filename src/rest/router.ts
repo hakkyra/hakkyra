@@ -470,7 +470,7 @@ function checkPermission(
  * Determine whether the current environment is dev/debug mode.
  * In production, SQL error details are hidden from clients.
  */
-function isDevMode(): boolean {
+export function isDevMode(): boolean {
   const env = process.env['NODE_ENV'];
   return env !== 'production';
 }
@@ -480,7 +480,7 @@ function isDevMode(): boolean {
  * In dev mode, the full message is returned. In production,
  * a generic message is returned to avoid leaking PG internals.
  */
-function sanitizeSQLError(message: string, genericMessage: string): string {
+export function sanitizeSQLError(message: string, genericMessage: string): string {
   return isDevMode() ? message : genericMessage;
 }
 

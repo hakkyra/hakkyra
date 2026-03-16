@@ -116,14 +116,16 @@ describe('sanitizeWebhookError', () => {
 // ─── 2. REST SQL Error Sanitization ─────────────────────────────────────────
 
 describe('REST SQL error sanitization', () => {
-  // We test the isDevMode/sanitizeSQLError logic indirectly.
-  // The functions are module-private, so we verify behavior through the
-  // environment variable that controls them.
-
   let originalNodeEnv: string | undefined;
+  // Lazy import so NODE_ENV is read at call time, not import time
+  let sanitizeSQLError: (message: string, genericMessage: string) => string;
+  let isDevMode: () => boolean;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalNodeEnv = process.env['NODE_ENV'];
+    const mod = await import('../src/rest/router.js');
+    sanitizeSQLError = mod.sanitizeSQLError;
+    isDevMode = mod.isDevMode;
   });
 
   afterEach(() => {
@@ -134,19 +136,92 @@ describe('REST SQL error sanitization', () => {
     }
   });
 
-  it('in production mode, sanitizeSQLError returns generic message', async () => {
-    // We dynamically import to test the module's behavior
-    // The sanitizeSQLError function is not exported, but isDevMode drives the behavior.
-    // We verify the contract: in production, NODE_ENV === 'production' => isDevMode() === false.
-    process.env['NODE_ENV'] = 'production';
-    expect(process.env['NODE_ENV']).toBe('production');
-    // The actual integration test would need a running server, so here we just
-    // verify the isDevMode contract holds.
+  describe('isDevMode', () => {
+    it('returns false when NODE_ENV is production', () => {
+      process.env['NODE_ENV'] = 'production';
+      expect(isDevMode()).toBe(false);
+    });
+
+    it('returns true when NODE_ENV is development', () => {
+      process.env['NODE_ENV'] = 'development';
+      expect(isDevMode()).toBe(true);
+    });
+
+    it('returns true when NODE_ENV is test', () => {
+      process.env['NODE_ENV'] = 'test';
+      expect(isDevMode()).toBe(true);
+    });
+
+    it('returns true when NODE_ENV is undefined', () => {
+      delete process.env['NODE_ENV'];
+      expect(isDevMode()).toBe(true);
+    });
   });
 
-  it('in non-production mode, sanitizeSQLError returns full message', () => {
-    process.env['NODE_ENV'] = 'development';
-    expect(process.env['NODE_ENV']).not.toBe('production');
+  describe('in production mode', () => {
+    beforeEach(() => {
+      process.env['NODE_ENV'] = 'production';
+    });
+
+    it('returns generic message instead of PG error with column names', () => {
+      const pgError = 'column "secret_column" of relation "users" does not exist';
+      expect(sanitizeSQLError(pgError, 'Query failed')).toBe('Query failed');
+    });
+
+    it('returns generic message instead of PG type mismatch error', () => {
+      const pgError = 'invalid input syntax for type integer: "abc" at column "internal_id"';
+      expect(sanitizeSQLError(pgError, 'Query failed')).toBe('Query failed');
+    });
+
+    it('returns generic message instead of PG constraint violation', () => {
+      const pgError = 'insert or update on table "orders" violates foreign key constraint "orders_user_id_fkey"';
+      expect(sanitizeSQLError(pgError, 'Insert failed')).toBe('Insert failed');
+    });
+
+    it('returns generic message instead of PG permission error', () => {
+      const pgError = 'permission denied for relation admin_secrets';
+      expect(sanitizeSQLError(pgError, 'Query failed')).toBe('Query failed');
+    });
+
+    it('returns appropriate generic message for different operations', () => {
+      const pgError = 'some internal error';
+      expect(sanitizeSQLError(pgError, 'Query failed')).toBe('Query failed');
+      expect(sanitizeSQLError(pgError, 'Insert failed')).toBe('Insert failed');
+      expect(sanitizeSQLError(pgError, 'Update failed')).toBe('Update failed');
+      expect(sanitizeSQLError(pgError, 'Delete failed')).toBe('Delete failed');
+    });
+  });
+
+  describe('in non-production mode', () => {
+    beforeEach(() => {
+      process.env['NODE_ENV'] = 'development';
+    });
+
+    it('returns full PG error message for debugging', () => {
+      const pgError = 'column "secret_column" of relation "users" does not exist';
+      expect(sanitizeSQLError(pgError, 'Query failed')).toBe(pgError);
+    });
+
+    it('returns full constraint violation for debugging', () => {
+      const pgError = 'insert or update on table "orders" violates foreign key constraint "orders_user_id_fkey"';
+      expect(sanitizeSQLError(pgError, 'Insert failed')).toBe(pgError);
+    });
+
+    it('returns full type mismatch error for debugging', () => {
+      const pgError = 'invalid input syntax for type integer: "abc" at column "internal_id"';
+      expect(sanitizeSQLError(pgError, 'Query failed')).toBe(pgError);
+    });
+  });
+
+  describe('in test mode', () => {
+    beforeEach(() => {
+      process.env['NODE_ENV'] = 'test';
+    });
+
+    it('returns full error message (non-production behavior)', () => {
+      const pgError = 'permission denied for relation admin_secrets';
+      expect(sanitizeSQLError(pgError, 'Query failed')).toBe(pgError);
+    });
   });
 });
 
