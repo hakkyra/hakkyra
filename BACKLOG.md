@@ -992,7 +992,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 #### Medium
 
 - [x] **`as unknown as GraphQLScalarType` pervasive** — `asScalar()` helper already existed for most cases. Added `asInputType()` and `asOutputType()` helpers in `src/schema/scalars.ts` for the 3 remaining casts in `native-queries.ts`.
-- [ ] **`as any` for decorated Fastify instance** — `src/server.ts` has 12+ `as any` casts to access Mercurius's `graphql()` method and decorated properties on the Fastify instance. Fix: declare a `HakkyraFastifyInstance` interface extending `FastifyInstance` with Mercurius augmentations.
+- [x] **`as any` for decorated Fastify instance** — `src/server/types.ts` defines `MercuriusFastifyInstance`, `HookContext`, `SubscriptionConnectionContext`, `MercuriusExecutionError`, and `asPinoLogger()` helper. All `as any` casts in `src/rest/hasura-endpoints.ts` and `as unknown as Record<string, unknown>` casts in server files replaced with proper types.
 - [x] **`createAuthHook` returns `any`** — Already annotated as `FastifyPluginCallback` (line 113).
 
 #### Low
