@@ -3,14 +3,21 @@
  * 1. Action webhook error sanitization
  * 2. REST error response PG internals leak prevention
  * 3. URL template path traversal protection in action transforms
+ * 4. DNS rebinding prevention for webhook SSRF (P7.1)
+ * 5. URL-safe interpolation for path traversal prevention (P8.1 enhancement)
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { sanitizeWebhookError } from '../src/actions/proxy.js';
 import {
   applyRequestTransform,
+  interpolateUrlTemplate,
   validateUrlSafe,
 } from '../src/actions/transform.js';
+import {
+  isPrivateIP,
+  resolveAndValidateDns,
+} from '../src/shared/webhook.js';
 import type { RequestTransform } from '../src/types.js';
 
 // ─── 1. Webhook Error Sanitization ──────────────────────────────────────────
@@ -282,16 +289,19 @@ describe('URL template path traversal protection', () => {
       baseUrl: 'https://api.example.com/webhook',
     };
 
-    it('throws on path traversal in interpolated URL', () => {
+    it('encodes path traversal characters in interpolated URL values', () => {
       const transform: RequestTransform = {
         url: '{{$base_url}}/{{$body.input.path}}/endpoint',
       };
 
-      expect(() => applyRequestTransform(transform, originalRequest, context))
-        .toThrow('Path traversal detected');
+      // With URL-safe interpolation, the ".." is encoded to "%2E%2E" and "/" to "%2F",
+      // neutralizing the path traversal without throwing.
+      const result = applyRequestTransform(transform, originalRequest, context);
+      expect(result.url).not.toContain('/../');
+      expect(result.url).toContain(encodeURIComponent('../../admin'));
     });
 
-    it('allows a normal interpolated URL', () => {
+    it('encodes slashes in user-controlled path segments', () => {
       const safeRequest = {
         ...originalRequest,
         body: {
@@ -304,8 +314,243 @@ describe('URL template path traversal protection', () => {
         url: '{{$base_url}}/{{$body.input.path}}/details',
       };
 
+      // The "/" in "users/123" gets encoded to prevent path injection
       const result = applyRequestTransform(transform, safeRequest, context);
-      expect(result.url).toBe('https://api.example.com/webhook/users/123/details');
+      expect(result.url).toBe('https://api.example.com/webhook/users%2F123/details');
+    });
+
+    it('allows a plain string value without special characters', () => {
+      const safeRequest = {
+        ...originalRequest,
+        body: {
+          ...originalRequest.body,
+          input: { path: 'user-123' },
+        },
+      };
+
+      const transform: RequestTransform = {
+        url: '{{$base_url}}/{{$body.input.path}}/details',
+      };
+
+      const result = applyRequestTransform(transform, safeRequest, context);
+      expect(result.url).toBe('https://api.example.com/webhook/user-123/details');
+    });
+  });
+});
+
+// ─── 4. DNS Rebinding Prevention (P7.1) ─────────────────────────────────────
+
+describe('DNS rebinding prevention for webhook SSRF (P7.1)', () => {
+  describe('resolveAndValidateDns', () => {
+    it('returns null for raw IPv4 addresses (no DNS rebinding possible)', async () => {
+      const result = await resolveAndValidateDns('https://93.184.216.34/webhook');
+      expect(result).toBeNull();
+    });
+
+    it('rejects private IPv4 addresses', async () => {
+      await expect(resolveAndValidateDns('https://127.0.0.1/webhook'))
+        .rejects.toThrow('private/reserved');
+    });
+
+    it('rejects 10.x.x.x private range', async () => {
+      await expect(resolveAndValidateDns('https://10.0.0.1/webhook'))
+        .rejects.toThrow('private/reserved');
+    });
+
+    it('rejects 192.168.x.x private range', async () => {
+      await expect(resolveAndValidateDns('https://192.168.1.1/webhook'))
+        .rejects.toThrow('private/reserved');
+    });
+
+    it('rejects 172.16-31.x.x private range', async () => {
+      await expect(resolveAndValidateDns('https://172.16.0.1/webhook'))
+        .rejects.toThrow('private/reserved');
+    });
+
+    it('rejects link-local addresses', async () => {
+      await expect(resolveAndValidateDns('https://169.254.1.1/webhook'))
+        .rejects.toThrow('private/reserved');
+    });
+
+    it('rejects IPv6 loopback', async () => {
+      await expect(resolveAndValidateDns('https://[::1]/webhook'))
+        .rejects.toThrow('private/reserved');
+    });
+
+    it('throws on invalid URL', async () => {
+      await expect(resolveAndValidateDns('not-a-url'))
+        .rejects.toThrow('Invalid webhook URL');
+    });
+
+    it('returns resolvedUrl and hostHeader when hostname resolves to public IP', async () => {
+      const fakeLookup = async () => [{ address: '93.184.216.34', family: 4 }];
+
+      const result = await resolveAndValidateDns('https://example.com/webhook', fakeLookup);
+      expect(result).not.toBeNull();
+      expect(result!.resolvedUrl).toContain('93.184.216.34');
+      expect(result!.hostHeader).toBe('example.com');
+    });
+
+    it('rejects when hostname resolves to a private IP (DNS rebinding scenario)', async () => {
+      // Simulate a DNS rebinding attack: hostname resolves to a private IP
+      const fakeLookup = async () => [{ address: '127.0.0.1', family: 4 }];
+
+      await expect(resolveAndValidateDns('https://evil-rebind.attacker.com/webhook', fakeLookup))
+        .rejects.toThrow('private/reserved');
+    });
+
+    it('rejects when any resolved address is private (multi-address)', async () => {
+      // DNS returns multiple IPs: one public, one private
+      const fakeLookup = async () => [
+        { address: '93.184.216.34', family: 4 },
+        { address: '10.0.0.1', family: 4 },
+      ];
+
+      await expect(resolveAndValidateDns('https://dual-stack.attacker.com/webhook', fakeLookup))
+        .rejects.toThrow('private/reserved');
+    });
+
+    it('preserves port in resolved URL', async () => {
+      const fakeLookup = async () => [{ address: '93.184.216.34', family: 4 }];
+
+      const result = await resolveAndValidateDns('https://example.com:8443/webhook', fakeLookup);
+      expect(result).not.toBeNull();
+      expect(result!.resolvedUrl).toContain('93.184.216.34');
+      expect(result!.resolvedUrl).toContain('8443');
+      expect(result!.hostHeader).toBe('example.com:8443');
+    });
+
+    it('preserves path and query in resolved URL', async () => {
+      const fakeLookup = async () => [{ address: '93.184.216.34', family: 4 }];
+
+      const result = await resolveAndValidateDns('https://example.com/api/v2/hook?token=abc', fakeLookup);
+      expect(result).not.toBeNull();
+      expect(result!.resolvedUrl).toContain('/api/v2/hook');
+      expect(result!.resolvedUrl).toContain('token=abc');
+    });
+  });
+
+  describe('isPrivateIP coverage', () => {
+    it('detects IPv4-mapped IPv6 private addresses', () => {
+      expect(isPrivateIP('::ffff:127.0.0.1')).toBe(true);
+      expect(isPrivateIP('::ffff:10.0.0.1')).toBe(true);
+      expect(isPrivateIP('::ffff:192.168.1.1')).toBe(true);
+      expect(isPrivateIP('::ffff:172.16.0.1')).toBe(true);
+    });
+
+    it('allows IPv4-mapped IPv6 public addresses', () => {
+      expect(isPrivateIP('::ffff:93.184.216.34')).toBe(false);
+      expect(isPrivateIP('::ffff:8.8.8.8')).toBe(false);
+    });
+
+    it('detects IPv6 unique local addresses (fc00::/7)', () => {
+      expect(isPrivateIP('fc00::1')).toBe(true);
+      expect(isPrivateIP('fd12:3456:789a::1')).toBe(true);
+    });
+
+    it('detects IPv6 link-local addresses (fe80::/10)', () => {
+      expect(isPrivateIP('fe80::1')).toBe(true);
+    });
+
+    it('allows public IPv4 addresses', () => {
+      expect(isPrivateIP('8.8.8.8')).toBe(false);
+      expect(isPrivateIP('93.184.216.34')).toBe(false);
+      expect(isPrivateIP('1.1.1.1')).toBe(false);
+    });
+
+    it('detects 0.0.0.0 as private', () => {
+      expect(isPrivateIP('0.0.0.0')).toBe(true);
+    });
+
+    it('detects :: as private', () => {
+      expect(isPrivateIP('::')).toBe(true);
+    });
+  });
+});
+
+// ─── 5. URL-Safe Template Interpolation (P8.1 Enhancement) ──────────────────
+
+describe('URL-safe template interpolation (P8.1)', () => {
+  describe('interpolateUrlTemplate', () => {
+    const variables = {
+      $base_url: 'https://api.example.com',
+      $body: {
+        input: {
+          id: 'user-123',
+          malicious: '../../admin',
+          withSlash: 'a/b/c',
+          withSpecial: 'hello world&foo=bar',
+          numeric: 42,
+        },
+      },
+      $session_variables: {
+        'x-hasura-user-id': 'uid-456',
+      },
+    };
+
+    it('returns raw value for single-expression templates (full URL from variable)', () => {
+      const result = interpolateUrlTemplate('{{$base_url}}', variables);
+      expect(result).toBe('https://api.example.com');
+    });
+
+    it('encodes interpolated values in mixed templates', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/users/{{$body.input.malicious}}/profile',
+        variables,
+      );
+      // The ".." and "/" in the malicious value should be encoded
+      expect(result).not.toContain('/../');
+      expect(result).toContain(encodeURIComponent('../../admin'));
+      expect(result).toBe('https://api.example.com/users/..%2F..%2Fadmin/profile');
+    });
+
+    it('encodes slashes in interpolated path values', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/resource/{{$body.input.withSlash}}',
+        variables,
+      );
+      expect(result).toBe('https://api.example.com/resource/a%2Fb%2Fc');
+    });
+
+    it('encodes special URL characters in interpolated values', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/search/{{$body.input.withSpecial}}',
+        variables,
+      );
+      expect(result).toBe('https://api.example.com/search/hello%20world%26foo%3Dbar');
+    });
+
+    it('preserves safe characters in non-template parts', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/v2/users/{{$body.input.id}}',
+        variables,
+      );
+      // "user-123" has no special characters, encodeURIComponent preserves "-"
+      expect(result).toBe('https://api.example.com/v2/users/user-123');
+    });
+
+    it('handles numeric values', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/items/{{$body.input.numeric}}',
+        variables,
+      );
+      expect(result).toBe('https://api.example.com/items/42');
+    });
+
+    it('handles null/undefined values as empty string', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/items/{{$body.input.nonexistent}}/details',
+        variables,
+      );
+      expect(result).toBe('https://api.example.com/items//details');
+    });
+
+    it('encodes session variables used in URL path', () => {
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/users/{{$session_variables.x-hasura-user-id}}/data',
+        variables,
+      );
+      expect(result).toBe('https://api.example.com/users/uid-456/data');
     });
   });
 });

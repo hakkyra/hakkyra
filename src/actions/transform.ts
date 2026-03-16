@@ -152,6 +152,54 @@ export function interpolateTemplate(
   return template;
 }
 
+/**
+ * Interpolate a URL template string, encoding each interpolated value with
+ * `encodeURIComponent` to prevent path traversal attacks.
+ *
+ * Unlike `interpolateString`, this function treats the template as a URL and
+ * ensures that user-controlled values cannot inject path separators (`/`),
+ * dot-dot sequences (`..`), or other characters that could alter the URL path
+ * structure. The template's literal `/` characters are preserved; only the
+ * substituted values are encoded.
+ *
+ * If the entire template is a single expression (no literal text around it),
+ * the raw resolved value is returned as a string (not URI-encoded), since it
+ * represents the full URL and not a segment within one.
+ */
+export function interpolateUrlTemplate(
+  template: string,
+  variables: Record<string, unknown>,
+): string {
+  // If the entire string is a single template expression, resolve it directly.
+  // This handles cases like url: "{{$base_url}}" where the whole URL comes
+  // from a variable and should not be encoded.
+  const trimmed = template.trim();
+  const singleMatch = /^\{\{(\$[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_\-]+)*)\}\}$/.exec(trimmed);
+  if (singleMatch) {
+    const value = resolveVariable(singleMatch[1], variables);
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+  }
+
+  // Multiple or partial — encode user-controlled interpolated values.
+  // Trusted URL components ($base_url) are not encoded since they represent
+  // server configuration, not user input.
+  return template.replace(TEMPLATE_RE, (_match, ref: string) => {
+    const value = resolveVariable(ref, variables);
+    if (value === null || value === undefined) return '';
+    const stringValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+
+    // $base_url is a trusted server config value that may contain URL-structural
+    // characters (scheme, host, path separators). Do not encode it.
+    if (ref === '$base_url') {
+      return stringValue;
+    }
+
+    return encodeURIComponent(stringValue);
+  });
+}
+
 // ─── Path Traversal Protection ──────────────────────────────────────────────
 
 /**
@@ -174,10 +222,14 @@ export function validateUrlSafe(url: string): void {
       url.indexOf(parsed.host) + parsed.host.length,
       url.includes('?') ? url.indexOf('?') : url.includes('#') ? url.indexOf('#') : url.length,
     );
-    const decodedRawPath = decodeURIComponent(rawPath);
-    const segments = decodedRawPath.split('/');
+    // Split on actual "/" characters first (not encoded %2F), then decode each
+    // segment individually. This correctly detects `..` and `%2e%2e` traversal
+    // while allowing safely-encoded values that happen to contain dots
+    // (e.g., `..%2F..%2Fadmin` is one segment, not a traversal).
+    const segments = rawPath.split('/');
     for (const segment of segments) {
-      if (segment === '..') {
+      const decoded = decodeURIComponent(segment);
+      if (decoded === '..') {
         throw new Error(`Path traversal detected in URL: "${url}"`);
       }
     }
@@ -215,10 +267,10 @@ export function applyRequestTransform(
     method = transform.method;
   }
 
-  // Override URL with template
+  // Override URL with template — use URL-safe interpolation to encode
+  // user-controlled values and prevent path traversal attacks.
   if (transform.url) {
-    const resolved = interpolateString(transform.url, variables);
-    url = typeof resolved === 'string' ? resolved : String(resolved);
+    url = interpolateUrlTemplate(transform.url, variables);
   }
 
   // Override body with template
