@@ -911,7 +911,7 @@ Covers all recent commits (e654f3b through 1518030). All 1194 tests passing.
 
 #### Medium
 
-- [ ] **DNS rebinding for webhook SSRF** — IP validation happens before `fetch()`, but DNS rebinding can return a public IP during validation and a private IP during the actual request (TOCTOU).
+- [x] **DNS rebinding for webhook SSRF** — Removed `validateWebhookUrl()` fallback that allowed unpinned fetches after DNS resolution failure. DNS errors now propagate directly, closing the TOCTOU rebinding window. 4 new tests in `test/security-sanitization.test.ts`.
 
 ### P7.2 — Missing Test Coverage: Recent Commits
 
@@ -971,7 +971,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 #### Medium
 
-- [ ] **URL template path traversal in action transforms** — `src/actions/transform.ts` interpolates user-controlled values into the URL path (e.g., `{{$body.input.id}}`). If a webhook URL template includes path segments from input, values like `../../admin` can cause path traversal on the target server. Fix: validate the final URL is well-formed and optionally encode path segments.
+- [x] **URL template path traversal in action transforms** — `interpolateUrlTemplate` now validates path segments after `encodeURIComponent`, rejecting `..` and `.` segments. 13 new tests in `test/action-transforms.test.ts`.
 - [ ] **Webhook auth cache serves stale roles** — `src/auth/webhook.ts` caches auth results by header hash. If a user's role is revoked on the webhook provider, stale cache entries grant the old role for up to `cacheTtlMs`. This is by-design for performance, but undocumented. Fix: document the trade-off, recommend low TTL values.
 
 ### P8.2 — Code Duplication
@@ -983,7 +983,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 #### Medium
 
 - [x] **`quoteIdent()` deduplicated** — All 4 files now import `quoteIdentifier as quoteIdent` from `src/sql/utils.ts`.
-- [ ] **Worker registration pattern ~200 LOC repeated 3×** — `src/events/delivery.ts`, `src/crons/worker.ts`, `src/actions/async.ts` all follow the same loop: resolve webhook URL/headers → `deliverWebhook()` → update DB status → throw on failure. Fix: extract generic worker factory to `src/shared/`.
+- [x] **Worker registration pattern deduplicated** — All three consumers (events, crons, async actions) now use `registerWebhookWorker` from `src/shared/webhook-worker.ts`. Async actions refactored with a custom `deliver` callback for transform support.
 - [x] **Trigger lookup deduplicated** — `buildTriggerLookup()` extracted to `src/events/shared.ts`, imported by both `delivery.ts` and `invoke.ts`.
 - [x] **Preset resolution duplicated** — Both `resolvePreset()` now use shared `isSessionVariable`/`resolveSessionVar` from `src/auth/session-namespace.ts`.
 
@@ -991,9 +991,9 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 #### Medium
 
-- [ ] **`as unknown as GraphQLScalarType` pervasive** — 20+ occurrences across `src/schema/type-builder.ts`, `filters.ts`, `inputs.ts`, `tracked-functions.ts`, `native-queries.ts`, `custom-queries.ts`. GraphQL.js built-in scalars (`GraphQLInt`, `GraphQLString`, etc.) have type `GraphQLScalarType<unknown, unknown>` which doesn't match `GraphQLScalarType` directly. Fix: create a typed helper `asScalar()` in `src/schema/scalars.ts`.
+- [x] **`as unknown as GraphQLScalarType` pervasive** — `asScalar()` helper already existed for most cases. Added `asInputType()` and `asOutputType()` helpers in `src/schema/scalars.ts` for the 3 remaining casts in `native-queries.ts`.
 - [ ] **`as any` for decorated Fastify instance** — `src/server.ts` has 12+ `as any` casts to access Mercurius's `graphql()` method and decorated properties on the Fastify instance. Fix: declare a `HakkyraFastifyInstance` interface extending `FastifyInstance` with Mercurius augmentations.
-- [ ] **`createAuthHook` returns `any`** — `src/auth/middleware.ts:92` has no return type annotation. Fix: annotate as `FastifyPluginAsync`.
+- [x] **`createAuthHook` returns `any`** — Already annotated as `FastifyPluginCallback` (line 113).
 
 #### Low
 
@@ -1010,7 +1010,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 - [x] **`server.ts` decomposed** — Split from 969 lines into thin orchestrator (362 lines) + 4 modules: `server/context.ts` (buildResolverContext factory), `server/schema.ts` (CJS bridging, introspection control), `server/jobs.ts` (job queue, events, crons, subscriptions), `server/routes.ts` (REST, health, docs).
 - [x] **Context building deduplicated** — `buildResolverContext()` factory in `server/context.ts` replaces 3× duplicated inline context objects.
 - [ ] **Events/crons/actions inconsistent init patterns** — Events return a `Manager` with `stop()`, crons return nothing, actions require two separate calls (`ensureAsyncActionSchema` + `registerAsyncActionWorkers`). Fix: standardize on a `Manager` interface with `init()` and `stop()`.
-- [ ] **`resolvers.ts` too large (1749 lines)** — Contains all 10 resolver factories plus helpers. Fix: split into `resolvers/select.ts`, `resolvers/insert.ts`, `resolvers/update.ts`, `resolvers/delete.ts` with shared helpers in `resolvers/helpers.ts`.
+- [x] **`resolvers.ts` split into modules** — Already split into `resolvers/select.ts`, `resolvers/insert.ts`, `resolvers/update.ts`, `resolvers/delete.ts` with shared `resolvers/helpers.ts`.
 - [x] **Error handling inconsistency in webhook workers** — All three consumers (events, crons, async actions) now use the shared `registerWebhookWorker` factory in `src/shared/webhook-worker.ts`, which provides consistent logging (info on success, warn on failure) and throws on failure so pg-boss records error details. Async actions refactored from manual `jobQueue.work()` to the factory with a custom `deliver` callback.
 
 #### Low
@@ -1020,9 +1020,9 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 ### Bugs Discovered During Test Gap Coverage
 
-- [ ] **`makeSelectAggregateResolver` missing computed fields** — Non-groupBy path doesn't pass `aggregate.computedFields` to `compileSelectAggregate`; computed field aggregation (e.g., `sum { totalBalance }`) silently omits the field
-- [ ] **`makeUpdateManyResolver` missing returning computed fields** — Doesn't build/pass `returningComputedFields` to SQL compiler
-- [ ] **PG type map missing `"boolean"` long form** — `PG_TO_GRAPHQL` maps `"bool"` but not `"boolean"`; function return types use long form, causing boolean computed fields to fall through to String in BoolExp types
+- [x] **`makeSelectAggregateResolver` missing computed fields** — Already fixed; `aggregate.computedFields` is set before both groupBy and non-groupBy paths in `resolvers/select.ts`
+- [x] **`makeUpdateManyResolver` missing returning computed fields** — Already fixed; `returningComputedFields` built and passed in `resolvers/update.ts`
+- [x] **PG type map missing long-form type names** — Added all PostgreSQL long-form aliases (`boolean`, `integer`, `bigint`, `real`, `double precision`, `character varying`, `timestamp with/without time zone`, etc.) to `PG_TO_GRAPHQL` and `NUMERIC_PG_RETURN` sets
 - [x] **No nested aggregate fields on object types** — Array relationships don't expose `{rel}Aggregate` on object types (e.g., `clientByPk { invoicesAggregate { ... } }`)
 
 ---
