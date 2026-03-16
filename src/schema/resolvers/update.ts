@@ -210,7 +210,7 @@ export function makeUpdateManyResolver(
 
     const rawUpdates = args.updates as Array<{ where: Record<string, unknown>; _set: Record<string, unknown> }>;
     if (!rawUpdates || rawUpdates.length === 0) {
-      return { affectedRows: 0, returning: [] };
+      return [];
     }
 
     const returningColumns = getReturningColumns(table);
@@ -253,9 +253,9 @@ export function makeUpdateManyResolver(
       session: auth,
     });
 
-    // Execute each update query within the same session (transaction)
-    let totalAffected = 0;
-    const allReturning: Record<string, unknown>[] = [];
+    // Execute each update query and return one MutationResponse per entry
+    // (Hasura returns [MutationResponse] — one result per update entry)
+    const results: Array<{ affectedRows: number; returning: Record<string, unknown>[] }> = [];
 
     for (const compiled of compiledQueries) {
       const result = await queryWithSession(compiled.sql, compiled.params, auth, 'write');
@@ -269,8 +269,12 @@ export function makeUpdateManyResolver(
         const firstRow = result.rows[0] as Record<string, unknown> | undefined;
         const data = firstRow?.data;
         if (data && Array.isArray(data)) {
-          totalAffected += data.length;
-          allReturning.push(...remapRowsToCamel(data as Record<string, unknown>[], table));
+          results.push({
+            affectedRows: data.length,
+            returning: remapRowsToCamel(data as Record<string, unknown>[], table),
+          });
+        } else {
+          results.push({ affectedRows: 0, returning: [] });
         }
       } else {
         const rows = result.rows.map((row) => {
@@ -278,14 +282,13 @@ export function makeUpdateManyResolver(
           const data = r.data as Record<string, unknown> | undefined;
           return data ? remapRowToCamel(data, table) : {};
         });
-        totalAffected += rows.length;
-        allReturning.push(...rows);
+        results.push({
+          affectedRows: rows.length,
+          returning: rows,
+        });
       }
     }
 
-    return {
-      affectedRows: totalAffected,
-      returning: allReturning,
-    };
+    return results;
   };
 }
