@@ -88,7 +88,7 @@ function getJsonbCastExpType(): GraphQLInputObjectType {
 /** Operators for JSONB types */
 function jsonbComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
   return {
-    ...baseComparisonFields(scalarType),
+    ...orderedComparisonFields(scalarType),
     _cast: { type: getJsonbCastExpType() },
     _contains: { type: scalarType },
     _containedIn: { type: scalarType },
@@ -105,10 +105,10 @@ const COMPARISON_FACTORIES: Record<string, ComparisonFieldsFactory> = {
   String: stringComparisonFields,
   Int: orderedComparisonFields,
   Float: orderedComparisonFields,
-  Boolean: baseComparisonFields,
+  Boolean: orderedComparisonFields,
   Bigint: orderedComparisonFields,
   Numeric: orderedComparisonFields,
-  Uuid: baseComparisonFields,
+  Uuid: orderedComparisonFields,
   Timestamptz: orderedComparisonFields,
   Date: orderedComparisonFields,
   Time: orderedComparisonFields,
