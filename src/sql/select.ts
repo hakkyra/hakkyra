@@ -100,6 +100,21 @@ export interface RelationshipSelection {
   };
 }
 
+export interface AggregateRelationshipSelection {
+  relationship: RelationshipConfig;
+  /** camelCase field name for the JSON key */
+  fieldName: string;
+  remoteTable: TableInfo;
+  aggregate: AggregateSelection;
+  where?: BoolExp;
+  permission?: {
+    filter: CompiledFilter;
+    columns: string[] | '*';
+    limit?: number;
+  };
+  session: SessionVariables;
+}
+
 export interface AggregateComputedFieldRef {
   /** snake_case computed field name (used as JSON key in output) */
   name: string;
@@ -143,6 +158,7 @@ export interface SelectOptions {
   limit?: number;
   offset?: number;
   relationships?: RelationshipSelection[];
+  aggregateRelationships?: AggregateRelationshipSelection[];
   computedFields?: ComputedFieldSelection[];
   setReturningComputedFields?: SetReturningComputedFieldSelection[];
   /** JSONB path arguments: snake_case column name → dot-separated path string */
@@ -160,6 +176,7 @@ export interface SelectByPkOptions {
   pkValues: Record<string, unknown>;
   columns: string[];
   relationships?: RelationshipSelection[];
+  aggregateRelationships?: AggregateRelationshipSelection[];
   computedFields?: ComputedFieldSelection[];
   setReturningComputedFields?: SetReturningComputedFieldSelection[];
   /** JSONB path arguments: snake_case column name → dot-separated path string */
@@ -494,6 +511,7 @@ export function buildJsonFields(
   setReturningComputedFields?: SetReturningComputedFieldSelection[],
   jsonbPaths?: Map<string, string>,
   customColumnNames?: Record<string, string>,
+  aggregateRelationships?: AggregateRelationshipSelection[],
 ): string {
   const fields: string[] = [];
 
@@ -569,6 +587,19 @@ export function buildJsonFields(
         aliasCounter,
       );
       fields.push(`'${relSel.fieldName ?? relSel.relationship.name}', (${subquery})`);
+    }
+  }
+
+  // Aggregate relationship subqueries
+  if (aggregateRelationships) {
+    for (const aggRelSel of aggregateRelationships) {
+      const subquery = buildAggregateRelationshipSubquery(
+        aggRelSel,
+        alias,
+        params,
+        aliasCounter,
+      );
+      fields.push(`'${aggRelSel.fieldName}', (${subquery})`);
     }
   }
 
@@ -715,6 +746,121 @@ function buildJoinConditions(
   return conditions;
 }
 
+// ─── Aggregate Relationship Subquery ─────────────────────────────────────────
+
+/**
+ * Build a correlated aggregate subquery for an array relationship.
+ *
+ * Returns a json_build_object with 'aggregate' and 'nodes' keys, matching
+ * the structure of the root-level aggregate query but scoped to the parent row
+ * via the relationship's foreign key join condition.
+ *
+ * Example output shape:
+ *   SELECT json_build_object(
+ *     'aggregate', json_build_object('count', count(*)),
+ *     'nodes', coalesce(json_agg(json_build_object(...)), '[]'::json)
+ *   )
+ *   FROM "public"."invoice" "t1"
+ *   WHERE "t1"."client_id" = "t0"."id"
+ */
+function buildAggregateRelationshipSubquery(
+  aggRelSel: AggregateRelationshipSelection,
+  parentAlias: string,
+  params: ParamCollector,
+  aliasCounter: AliasCounter,
+): string {
+  const rel = aggRelSel.relationship;
+  const remoteTable = aggRelSel.remoteTable;
+  const subAlias = aliasCounter.next();
+  const tableRef = quoteTableRef(remoteTable.schema, remoteTable.name);
+
+  // Build the join condition from the relationship mapping
+  const joinConditions = buildJoinConditions(rel, parentAlias, subAlias);
+
+  // Additional WHERE clauses
+  const whereParts: string[] = [...joinConditions];
+
+  // User-provided filter
+  const aggColumnLookup = new Map(remoteTable.columns.map(c => [c.name, c]));
+  const userWhere = compileWhere(aggRelSel.where, params, subAlias, aggRelSel.session, aggColumnLookup, remoteTable.computedFields);
+  if (userWhere) whereParts.push(userWhere);
+
+  // Permission filter
+  if (aggRelSel.permission?.filter) {
+    const permResult = aggRelSel.permission.filter.toSQL(
+      aggRelSel.session,
+      params.getOffset(),
+      subAlias,
+    );
+    if (permResult.sql) {
+      for (const p of permResult.params) {
+        params.add(p);
+      }
+      whereParts.push(permResult.sql);
+    }
+  }
+
+  const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+
+  // Build aggregate expressions
+  const aggFields: string[] = [];
+  const agg = aggRelSel.aggregate;
+
+  if (agg.count !== undefined) {
+    if (agg.count.columns && agg.count.columns.length > 0) {
+      const colRefs = agg.count.columns.map(
+        (c) => `${quoteIdentifier(subAlias)}.${quoteIdentifier(c)}`,
+      ).join(', ');
+      const distinct = agg.count.distinct ? 'DISTINCT ' : '';
+      aggFields.push(`'count', count(${distinct}${colRefs})`);
+    } else {
+      aggFields.push(`'count', count(*)`);
+    }
+  }
+
+  for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
+    const fieldCols = agg[fn];
+    if (fieldCols && fieldCols.length > 0) {
+      const colParts = fieldCols.map(
+        (c) => `'${c}', ${fn}(${quoteIdentifier(subAlias)}.${quoteIdentifier(c)})`,
+      ).join(', ');
+      aggFields.push(`'${fn}', json_build_object(${colParts})`);
+    }
+  }
+
+  // Statistical aggregate functions
+  const STAT_AGG_MAP_REL: Array<{ key: keyof AggregateSelection; sqlFn: string }> = [
+    { key: 'stddev', sqlFn: 'stddev' },
+    { key: 'stddevPop', sqlFn: 'stddev_pop' },
+    { key: 'stddevSamp', sqlFn: 'stddev_samp' },
+    { key: 'variance', sqlFn: 'variance' },
+    { key: 'varPop', sqlFn: 'var_pop' },
+    { key: 'varSamp', sqlFn: 'var_samp' },
+  ];
+
+  for (const { key, sqlFn } of STAT_AGG_MAP_REL) {
+    const fieldCols = agg[key] as string[] | undefined;
+    if (fieldCols && fieldCols.length > 0) {
+      const colParts = fieldCols.map(
+        (c) => `'${c}', ${sqlFn}(${quoteIdentifier(subAlias)}.${quoteIdentifier(c)})`,
+      ).join(', ');
+      aggFields.push(`'${key}', json_build_object(${colParts})`);
+    }
+  }
+
+  // Build the SELECT: aggregate only (no nodes for nested aggregate)
+  const selectParts: string[] = [];
+  if (aggFields.length > 0) {
+    selectParts.push(`'aggregate', json_build_object(${aggFields.join(', ')})`);
+  }
+  // Always include nodes as an empty array for consistent shape
+  selectParts.push(`'nodes', coalesce(json_agg(json_build_object()), '[]'::json)`);
+
+  const sql = `SELECT json_build_object(${selectParts.join(', ')}) FROM ${tableRef} ${quoteIdentifier(subAlias)}${whereClause}`;
+
+  return sql;
+}
+
 // ─── Set-Returning Computed Field Subquery ───────────────────────────────────
 
 /**
@@ -850,6 +996,7 @@ export function compileSelect(opts: SelectOptions): CompiledQuery {
     opts.setReturningComputedFields,
     opts.jsonbPaths,
     opts.table.customColumnNames,
+    opts.aggregateRelationships,
   );
 
   // Build WHERE clause
@@ -955,6 +1102,7 @@ export function compileSelectByPk(opts: SelectByPkOptions): CompiledQuery {
     opts.setReturningComputedFields,
     opts.jsonbPaths,
     opts.table.customColumnNames,
+    opts.aggregateRelationships,
   );
 
   // Build WHERE for PK columns

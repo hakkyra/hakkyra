@@ -150,6 +150,7 @@ export function columnToGraphQLType(
  * @param filterTypes   Map of table key → BoolExp input type (for where args on array rels)
  * @param orderByTypes  Map of table key → OrderBy input type (for orderBy args on array rels)
  * @param functions     List of introspected PG functions (for computed field return type resolution)
+ * @param aggregateTypes Map of table key → {Table}Aggregate object type (for {rel}Aggregate fields)
  */
 export function buildObjectType(
   table: TableInfo,
@@ -159,6 +160,7 @@ export function buildObjectType(
   filterTypes?: Map<string, GraphQLInputObjectType>,
   orderByTypes?: Map<string, GraphQLInputObjectType>,
   functions?: FunctionInfo[],
+  aggregateTypes?: Map<string, GraphQLObjectType>,
 ): GraphQLObjectType {
   const typeName = getTypeName(table);
 
@@ -255,6 +257,32 @@ export function buildObjectType(
               columnMapping: rel.columnMapping,
             },
           };
+
+          // {rel}Aggregate field — aggregate the related table scoped to the parent row
+          const aggType = aggregateTypes?.get(relKey);
+          if (aggType) {
+            const aggArgs: GraphQLFieldConfigArgumentMap = {};
+
+            // where argument
+            if (relFilterType) {
+              aggArgs['where'] = { type: relFilterType };
+            }
+
+            fields[`${toCamelCase(rel.name)}Aggregate`] = {
+              type: new GraphQLNonNull(aggType),
+              args: aggArgs,
+              description: `Aggregated array relationship to ${rel.remoteTable.name}`,
+              extensions: {
+                isAggregateRelationship: true,
+                relationshipType: 'array',
+                remoteTable: rel.remoteTable,
+                localColumns: rel.localColumns,
+                remoteColumns: rel.remoteColumns,
+                columnMapping: rel.columnMapping,
+                relationshipName: rel.name,
+              },
+            };
+          }
         }
       }
 
