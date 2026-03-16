@@ -70,8 +70,25 @@ export async function createRedisFanoutBridge(
   const sub = new Redis(connectionOpts);
   const pub = new Redis(connectionOpts);
 
+  // Attach error handlers to prevent unhandled error events from crashing the process
+  sub.on('error', (err: Error) => {
+    logger.error({ err }, 'Redis subscriber connection error');
+  });
+  pub.on('error', (err: Error) => {
+    logger.error({ err }, 'Redis publisher connection error');
+  });
+
   return {
     async start(): Promise<void> {
+      // Verify connectivity (will surface auth errors immediately)
+      try {
+        await pub.ping();
+      } catch (err) {
+        sub.disconnect();
+        pub.disconnect();
+        throw new Error(`Redis connection failed: ${(err as Error).message}. Check your Redis password/URL configuration.`);
+      }
+
       await sub.subscribe(CHANNEL);
       sub.on('message', (_channel: string, message: string) => {
         try {
