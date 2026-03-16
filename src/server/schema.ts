@@ -11,6 +11,7 @@ import { printSchema } from 'graphql';
 import type { GraphQLSchema } from 'graphql';
 import mercurius from 'mercurius';
 import type { FastifyInstance } from 'fastify';
+import type { HookContext } from './types.js';
 
 // ─── CJS/ESM schema reconciliation ──────────────────────────────────────────
 
@@ -134,9 +135,8 @@ export function registerIntrospectionControl(
   if (disabledForRoles.length === 0) return;
 
   const disabledRoles = new Set(disabledForRoles);
-  server.graphql.addHook('preExecution', async (_schema, document, context) => {
-    const auth = (context as unknown as Record<string, unknown>)?.auth as { role?: string } | undefined;
-    const role: string | undefined = auth?.role;
+  server.graphql.addHook<HookContext>('preExecution', async (_schema, document, context) => {
+    const role = context.auth?.role;
     if (role && disabledRoles.has(role)) {
       for (const definition of document.definitions) {
         if (definition.kind === 'OperationDefinition' && definition.selectionSet) {
