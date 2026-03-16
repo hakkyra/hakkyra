@@ -129,36 +129,23 @@ describe('Async Actions', () => {
       sdl = await res.text();
     });
 
-    it('registers async action mutation with actionId return type', () => {
+    it('registers async action mutation with uuid! return type (Hasura-compatible)', () => {
       // requestVerification is configured as async in actions.yaml
-      expect(sdl).toContain('requestVerification(input: RequestVerificationInput!): AsyncActionId!');
+      // Hasura returns uuid! for async mutations, not a wrapper type
+      expect(sdl).toContain('requestVerification(input: RequestVerificationInput!): Uuid!');
     });
 
-    it('registers async action result query field', () => {
-      expect(sdl).toContain('requestVerification(id: Uuid!): RequestVerificationAsyncResult');
+    it('registers async action result query with handler return type (Hasura-compatible)', () => {
+      // Hasura uses the action's handler return type directly, not a wrapper
+      expect(sdl).toContain('requestVerification(id: Uuid!): VerificationRequestResult');
     });
 
-    it('generates AsyncActionId type', () => {
-      expect(sdl).toContain('type AsyncActionId');
-      expect(sdl).toMatch(/type AsyncActionId\s*\{[^}]*actionId:\s*Uuid!/);
+    it('does not generate AsyncActionId wrapper type', () => {
+      expect(sdl).not.toContain('type AsyncActionId');
     });
 
-    it('generates AsyncActionStatus enum', () => {
-      expect(sdl).toContain('enum AsyncActionStatus');
-      expect(sdl).toContain('created');
-      expect(sdl).toContain('processing');
-      expect(sdl).toContain('completed');
-      expect(sdl).toContain('failed');
-    });
-
-    it('generates per-action async result type with action output type', () => {
-      expect(sdl).toContain('type RequestVerificationAsyncResult');
-      expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*id:\s*Uuid!/);
-      expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*status:\s*AsyncActionStatus!/);
-      // output field should reference the action's original output type
-      expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*output:\s*VerificationRequestResult/);
-      expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*errors:\s*Jsonb/);
-      expect(sdl).toMatch(/type RequestVerificationAsyncResult\s*\{[^}]*createdAt:\s*Timestamptz!/);
+    it('does not generate per-action AsyncResult wrapper type', () => {
+      expect(sdl).not.toContain('type RequestVerificationAsyncResult');
     });
 
     it('keeps sync actions unchanged', () => {
@@ -167,18 +154,20 @@ describe('Async Actions', () => {
       // Should NOT have a result query for sync actions
       expect(sdl).not.toContain('createPayment(id: Uuid!)');
     });
+
+    it('does not generate AsyncActionStatus enum', () => {
+      expect(sdl).not.toContain('enum AsyncActionStatus');
+    });
   });
 
   describe('async mutation execution', () => {
-    it('returns actionId immediately without calling webhook', async () => {
+    it('returns action ID (uuid) immediately without calling webhook', async () => {
       const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
 
       // Do NOT register a webhook handler — the mutation should return before the webhook is called
       const { body } = await gql(
         `mutation($input: RequestVerificationInput!) {
-          requestVerification(input: $input) {
-            actionId
-          }
+          requestVerification(input: $input)
         }`,
         {
           input: {
@@ -192,9 +181,8 @@ describe('Async Actions', () => {
       expect(body.errors).toBeUndefined();
       const data = body.data as any;
       expect(data.requestVerification).toBeDefined();
-      expect(data.requestVerification.actionId).toBeDefined();
-      // UUID format check
-      expect(data.requestVerification.actionId).toMatch(
+      // Returns UUID string directly (Hasura-compatible)
+      expect(data.requestVerification).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
       );
     });
@@ -214,9 +202,7 @@ describe('Async Actions', () => {
 
       const { body } = await gql(
         `mutation($input: RequestVerificationInput!) {
-          requestVerification(input: $input) {
-            actionId
-          }
+          requestVerification(input: $input)
         }`,
         {
           input: {
@@ -227,7 +213,7 @@ describe('Async Actions', () => {
         { authorization: `Bearer ${token}` },
       );
 
-      const actionId = (body.data as any).requestVerification.actionId;
+      const actionId = (body.data as any).requestVerification;
 
       // Check the DB row
       const row = await pool.query(
@@ -266,9 +252,7 @@ describe('Async Actions', () => {
 
       const { body } = await gql(
         `mutation($input: RequestVerificationInput!) {
-          requestVerification(input: $input) {
-            actionId
-          }
+          requestVerification(input: $input)
         }`,
         {
           input: {
@@ -279,7 +263,7 @@ describe('Async Actions', () => {
         { authorization: `Bearer ${token}` },
       );
 
-      const actionId = (body.data as any).requestVerification.actionId;
+      const actionId = (body.data as any).requestVerification;
 
       // Wait for the worker to process the job
       await waitForActionStatus(actionId, 'completed');
@@ -320,9 +304,7 @@ describe('Async Actions', () => {
 
       const { body } = await gql(
         `mutation($input: RequestVerificationInput!) {
-          requestVerification(input: $input) {
-            actionId
-          }
+          requestVerification(input: $input)
         }`,
         {
           input: {
@@ -333,7 +315,7 @@ describe('Async Actions', () => {
         { authorization: `Bearer ${token}` },
       );
 
-      const actionId = (body.data as any).requestVerification.actionId;
+      const actionId = (body.data as any).requestVerification;
 
       // Wait for the worker to process (it will fail)
       await waitForActionStatus(actionId, 'failed', 20000);
@@ -365,9 +347,7 @@ describe('Async Actions', () => {
       // Enqueue the async action
       const { body: mutBody } = await gql(
         `mutation($input: RequestVerificationInput!) {
-          requestVerification(input: $input) {
-            actionId
-          }
+          requestVerification(input: $input)
         }`,
         {
           input: {
@@ -378,24 +358,18 @@ describe('Async Actions', () => {
         { authorization: `Bearer ${token}` },
       );
 
-      const actionId = (mutBody.data as any).requestVerification.actionId;
+      const actionId = (mutBody.data as any).requestVerification;
 
       // Wait for completion
       await waitForActionStatus(actionId, 'completed');
 
-      // Query the result
+      // Query the result — returns the action's output type directly (Hasura-compatible)
       const { body: queryBody } = await gql(
         `query($id: Uuid!) {
           requestVerification(id: $id) {
-            id
+            requestId
             status
-            output {
-              requestId
-              status
-              verificationUrl
-            }
-            errors
-            createdAt
+            verificationUrl
           }
         }`,
         { id: actionId },
@@ -405,14 +379,11 @@ describe('Async Actions', () => {
       expect(queryBody.errors).toBeUndefined();
       const result = (queryBody.data as any).requestVerification;
       expect(result).toBeDefined();
-      expect(result.id).toBe(actionId);
-      expect(result.status).toBe('completed');
-      expect(result.output).toEqual({
+      expect(result).toEqual({
         requestId: 'a0000000-0000-0000-0000-000000000002',
         status: 'verified',
         verificationUrl: 'https://verify.example.com/done',
       });
-      expect(result.createdAt).toBeDefined();
     });
 
     it('returns null for non-existent action ID', async () => {
@@ -421,7 +392,7 @@ describe('Async Actions', () => {
       const { body } = await gql(
         `query($id: Uuid!) {
           requestVerification(id: $id) {
-            id
+            requestId
             status
           }
         }`,
@@ -441,9 +412,7 @@ describe('Async Actions', () => {
 
       const { body } = await gql(
         `mutation($input: RequestVerificationInput!) {
-          requestVerification(input: $input) {
-            actionId
-          }
+          requestVerification(input: $input)
         }`,
         {
           input: {
@@ -465,7 +434,7 @@ describe('Async Actions', () => {
       const { body } = await gql(
         `query($id: Uuid!) {
           requestVerification(id: $id) {
-            id
+            requestId
             status
           }
         }`,
@@ -488,9 +457,7 @@ describe('Async Actions', () => {
 
       const { body } = await gql(
         `mutation($input: RequestVerificationInput!) {
-          requestVerification(input: $input) {
-            actionId
-          }
+          requestVerification(input: $input)
         }`,
         {
           input: {
@@ -502,17 +469,17 @@ describe('Async Actions', () => {
       );
 
       expect(body.errors).toBeUndefined();
-      const actionId = (body.data as any).requestVerification.actionId;
+      const actionId = (body.data as any).requestVerification;
       expect(actionId).toBeDefined();
 
       // Wait for completion
       await waitForActionStatus(actionId, 'completed');
 
-      // Query result as admin
+      // Query result as admin — returns the action's output type directly
       const { body: queryBody } = await gql(
         `query($id: Uuid!) {
           requestVerification(id: $id) {
-            id
+            requestId
             status
           }
         }`,
@@ -521,7 +488,7 @@ describe('Async Actions', () => {
       );
 
       expect(queryBody.errors).toBeUndefined();
-      expect((queryBody.data as any).requestVerification.status).toBe('completed');
+      expect((queryBody.data as any).requestVerification.status).toBe('ok');
     });
   });
 
@@ -541,9 +508,7 @@ describe('Async Actions', () => {
       // Enqueue an async action
       const { body } = await gql(
         `mutation($input: RequestVerificationInput!) {
-          requestVerification(input: $input) {
-            actionId
-          }
+          requestVerification(input: $input)
         }`,
         {
           input: {
@@ -554,7 +519,7 @@ describe('Async Actions', () => {
         { authorization: `Bearer ${token}` },
       );
 
-      const actionId = (body.data as any).requestVerification.actionId;
+      const actionId = (body.data as any).requestVerification;
 
       // Wait for completion
       await waitForActionStatus(actionId, 'completed');
@@ -613,9 +578,7 @@ describe('Async Actions', () => {
 
       const { body } = await gql(
         `mutation($input: RequestVerificationInput!) {
-          requestVerification(input: $input) {
-            actionId
-          }
+          requestVerification(input: $input)
         }`,
         {
           input: {
@@ -626,7 +589,7 @@ describe('Async Actions', () => {
         { authorization: `Bearer ${token}` },
       );
 
-      sharedActionId = (body.data as any).requestVerification.actionId;
+      sharedActionId = (body.data as any).requestVerification;
       await waitForActionStatus(sharedActionId, 'completed');
     });
 

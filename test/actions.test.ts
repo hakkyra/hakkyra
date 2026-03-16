@@ -105,7 +105,7 @@ describe('Actions', () => {
     it('registers action mutations in the schema', () => {
       expect(sdl).toContain('createPayment(input: CreatePaymentInput!): PaymentResult');
       expect(sdl).toContain('adjustAccount(input: AdjustAccountInput!): AdjustAccountResult');
-      expect(sdl).toContain('requestVerification(input: RequestVerificationInput!): AsyncActionId!');
+      expect(sdl).toContain('requestVerification(input: RequestVerificationInput!): Uuid!');
       expect(sdl).toContain('scheduleConsultation(input: ScheduleConsultationInput!): ScheduleConsultationResult');
       expect(sdl).toContain('processService(input: ProcessServiceInput!): ProcessServiceResult');
     });
