@@ -424,11 +424,72 @@ describe('Relationship data in updateMany RETURNING', () => {
     }
   });
 
-  // BUG: updateMany resolver does not pass returningComputedFields to compileUpdateMany.
-  // The resolver parses returning info for relationships but not for computed fields.
-  // This means computed fields in updateMany RETURNING return 0/null instead of the
-  // real computed value. Marking as .todo() until the resolver is fixed.
-  it.todo('updateMany with nested computed field in RETURNING (updateMany resolver does not support returningComputedFields)');
+  // BUG FIX: updateMany resolver now passes returningComputedFields to compileUpdateMany,
+  // matching the pattern used by makeUpdateResolver and makeUpdateByPkResolver.
+  it('updateMany with nested computed field in RETURNING', async () => {
+    const pool = getPool();
+    // Save original trust_levels
+    const origAlice = await pool.query('SELECT trust_level FROM client WHERE id = $1', [ALICE_ID]);
+    const origBob = await pool.query('SELECT trust_level FROM client WHERE id = $1', [BOB_ID]);
+
+    try {
+      const { status, body } = await graphqlRequest(
+        `mutation {
+          updateClientMany(updates: [
+            {
+              where: { id: { _eq: "${ALICE_ID}" } }
+              _set: { trustLevel: 5 }
+            }
+            {
+              where: { id: { _eq: "${BOB_ID}" } }
+              _set: { trustLevel: 6 }
+            }
+          ]) {
+            affectedRows
+            returning {
+              id
+              username
+              trustLevel
+              totalBalance
+            }
+          }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+      expect(status).toBe(200);
+      expect(body.errors).toBeUndefined();
+
+      const result = (body.data as { updateClientMany: AnyRow }).updateClientMany;
+      expect(result.affectedRows).toBe(2);
+      const returning = result.returning as AnyRow[];
+      expect(returning.length).toBe(2);
+
+      // Query DB for expected totalBalance values (accounts may have changed from other tests)
+      const aliceExpected = await pool.query(
+        `SELECT public.client_total_balance(c) as total FROM client c WHERE c.id = $1`,
+        [ALICE_ID],
+      );
+      const bobExpected = await pool.query(
+        `SELECT public.client_total_balance(c) as total FROM client c WHERE c.id = $1`,
+        [BOB_ID],
+      );
+
+      // Verify computed field totalBalance is present and correct
+      const aliceRow = returning.find((r) => r.id === ALICE_ID)!;
+      expect(aliceRow).toBeDefined();
+      expect(aliceRow.trustLevel).toBe(5);
+      expect(Number(aliceRow.totalBalance)).toBe(Number(aliceExpected.rows[0].total));
+
+      const bobRow = returning.find((r) => r.id === BOB_ID)!;
+      expect(bobRow).toBeDefined();
+      expect(bobRow.trustLevel).toBe(6);
+      expect(Number(bobRow.totalBalance)).toBe(Number(bobExpected.rows[0].total));
+    } finally {
+      await pool.query('UPDATE client SET trust_level = $1 WHERE id = $2', [origAlice.rows[0].trust_level, ALICE_ID]);
+      await pool.query('UPDATE client SET trust_level = $1 WHERE id = $2', [origBob.rows[0].trust_level, BOB_ID]);
+    }
+  });
 });
 
 // ─── 7. Config-defined relationship overriding auto-detected ────────────────
