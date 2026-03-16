@@ -352,6 +352,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     ? buildActionFields(options.actions, options.actionsGraphql, {
         tables,
         tableTypeRegistry: typeRegistry,
+        enumTypes,
       })
     : { queryFields: {}, mutationFields: {}, types: [] };
 

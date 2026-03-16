@@ -5,22 +5,26 @@ import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel, resolveTableEnums } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
 import { getTypeName } from '../src/schema/type-builder.js';
-import type { SchemaModel, TableInfo } from '../src/types.js';
+import type { SchemaModel, TableInfo, HakkyraConfig } from '../src/types.js';
 import { getPool, closePool, waitForDb, METADATA_DIR, SERVER_CONFIG_PATH, TEST_DB_URL } from './setup.js';
 
 let schemaModel: SchemaModel;
 let schema: GraphQLSchema;
+let config: HakkyraConfig;
 
 beforeAll(async () => {
   process.env['DATABASE_URL'] = TEST_DB_URL;
   await waitForDb();
   const pool = getPool();
   const introspection = await introspectDatabase(pool);
-  const config = await loadConfig(METADATA_DIR, SERVER_CONFIG_PATH);
+  config = await loadConfig(METADATA_DIR, SERVER_CONFIG_PATH);
   const result = mergeSchemaModel(introspection, config);
   schemaModel = result.model;
   await resolveTableEnums(schemaModel, pool);
-  schema = generateSchema(schemaModel);
+  schema = generateSchema(schemaModel, {
+    actions: config.actions,
+    actionsGraphql: config.actionsGraphql,
+  });
 });
 
 afterAll(async () => {
@@ -577,6 +581,95 @@ describe('GraphQL Schema Generation', () => {
       expect(table!.primaryKeyConstraintName).toBeDefined();
       expect(typeof table!.primaryKeyConstraintName).toBe('string');
       expect(table!.primaryKeyConstraintName!.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Action argument scalar type parity (P10.3)', () => {
+    it('should use Bigint scalar for ContentEventInput.playerId', () => {
+      const typeMap = schema.getTypeMap();
+      const inputType = typeMap['ContentEventInput'] as GraphQLInputObjectType;
+      expect(inputType).toBeDefined();
+      const fields = inputType.getFields();
+      expect(fields['playerId']).toBeDefined();
+      // Should be NonNull(Bigint), not NonNull(String)
+      expect(fields['playerId'].type.toString()).toBe('Bigint!');
+    });
+
+    it('should use Jsonb scalar for ContentEventInput.parameters', () => {
+      const typeMap = schema.getTypeMap();
+      const inputType = typeMap['ContentEventInput'] as GraphQLInputObjectType;
+      const fields = inputType.getFields();
+      expect(fields['parameters']).toBeDefined();
+      expect(fields['parameters'].type.toString()).toBe('Jsonb');
+    });
+
+    it('should use _text scalar for ContentEventInput.tags', () => {
+      const typeMap = schema.getTypeMap();
+      const inputType = typeMap['ContentEventInput'] as GraphQLInputObjectType;
+      const fields = inputType.getFields();
+      expect(fields['tags']).toBeDefined();
+      expect(fields['tags'].type.toString()).toBe('_text');
+    });
+
+    it('should use SDL-defined ContentCategory enum for ContentEventInput.category', () => {
+      const typeMap = schema.getTypeMap();
+      const inputType = typeMap['ContentEventInput'] as GraphQLInputObjectType;
+      const fields = inputType.getFields();
+      expect(fields['category']).toBeDefined();
+      expect(fields['category'].type.toString()).toBe('ContentCategory!');
+      // Verify it's actually an enum type
+      const enumType = typeMap['ContentCategory'];
+      expect(enumType).toBeDefined();
+      expect(enumType).toBeInstanceOf(GraphQLEnumType);
+    });
+
+    it('should use Timestamptz scalar for ContentEventInput.occurredAt', () => {
+      const typeMap = schema.getTypeMap();
+      const inputType = typeMap['ContentEventInput'] as GraphQLInputObjectType;
+      const fields = inputType.getFields();
+      expect(fields['occurredAt']).toBeDefined();
+      expect(fields['occurredAt'].type.toString()).toBe('Timestamptz');
+    });
+
+    it('should use Numeric scalar for ContentEventInput.amount', () => {
+      const typeMap = schema.getTypeMap();
+      const inputType = typeMap['ContentEventInput'] as GraphQLInputObjectType;
+      const fields = inputType.getFields();
+      expect(fields['amount']).toBeDefined();
+      expect(fields['amount'].type.toString()).toBe('Numeric');
+    });
+
+    it('should use Uuid scalar for ContentEventResult.eventId', () => {
+      const typeMap = schema.getTypeMap();
+      const outputType = typeMap['ContentEventResult'] as GraphQLObjectType;
+      expect(outputType).toBeDefined();
+      const fields = outputType.getFields();
+      expect(fields['eventId']).toBeDefined();
+      expect(fields['eventId'].type.toString()).toBe('Uuid!');
+    });
+
+    it('should use ContentCategory enum in output type', () => {
+      const typeMap = schema.getTypeMap();
+      const outputType = typeMap['ContentEventResult'] as GraphQLObjectType;
+      const fields = outputType.getFields();
+      expect(fields['category']).toBeDefined();
+      expect(fields['category'].type.toString()).toBe('ContentCategory!');
+    });
+
+    it('should use _text scalar in output type', () => {
+      const typeMap = schema.getTypeMap();
+      const outputType = typeMap['ContentEventResult'] as GraphQLObjectType;
+      const fields = outputType.getFields();
+      expect(fields['processedTags']).toBeDefined();
+      expect(fields['processedTags'].type.toString()).toBe('_text');
+    });
+
+    it('should use Jsonb scalar in output type', () => {
+      const typeMap = schema.getTypeMap();
+      const outputType = typeMap['ContentEventResult'] as GraphQLObjectType;
+      const fields = outputType.getFields();
+      expect(fields['metadata']).toBeDefined();
+      expect(fields['metadata'].type.toString()).toBe('Jsonb');
     });
   });
 });
