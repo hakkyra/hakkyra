@@ -17,12 +17,12 @@ import type {
   BoolExp,
 } from '../types.js';
 import type { SubscriptionManager } from '../subscriptions/manager.js';
-import type { OrderByItem, RelationshipSelection } from '../sql/select.js';
-import { compileSelect, compileSelectByPk } from '../sql/select.js';
+import type { OrderByItem, RelationshipSelection, AggregateSelection, AggregateComputedFieldRef } from '../sql/select.js';
+import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../sql/select.js';
 import { toCamelCase, getColumnFieldName } from './type-builder.js';
 import type { ResolverContext } from './resolvers/index.js';
-import { isSubscriptionRootFieldAllowed, buildComputedFieldSelections, buildSetReturningComputedFieldSelections, resolveLimit } from './resolvers/index.js';
-import { parseResolveInfo, type ParsedSelection, type SetReturningComputedFieldParsed } from './resolve-info.js';
+import { isSubscriptionRootFieldAllowed, isNumericColumn, buildComputedFieldSelections, buildSetReturningComputedFieldSelections, resolveLimit, camelToColumnAndCFMap, remapBoolExp as remapBoolExpFull, remapOrderBy as remapOrderByFull, getAllowedColumns as getAllowedColumnsFull, remapRowsToCamel as remapRowsToCamelFull } from './resolvers/index.js';
+import { parseResolveInfo, parseAggregateNodesInfo, type ParsedSelection, type SetReturningComputedFieldParsed } from './resolve-info.js';
 
 // ─── Async Queue (push-to-pull adapter) ─────────────────────────────────────
 
@@ -498,6 +498,178 @@ export function makeSubscriptionSelectByPkSubscribe(
         } else {
           yield initialData;
         }
+
+        // Yield subsequent updates from the queue
+        for await (const value of queue.iterator) {
+          yield value;
+        }
+      } finally {
+        // Cleanup: unregister when the client disconnects
+        subscriptionManager!.unregister(subscriptionId);
+        queue.done();
+      }
+    }
+
+    return generate();
+  };
+}
+
+// ─── Subscription Subscribe: Select Aggregate ────────────────────────────────
+
+/**
+ * Creates a `subscribe` function for aggregate subscription fields ({table}Aggregate).
+ *
+ * Mirrors the query aggregate resolver but as a subscription:
+ * - Subscribes to table change notifications
+ * - When a change occurs, re-executes the aggregate query
+ * - Pushes updated aggregate results to the subscriber
+ *
+ * The aggregate SQL is wrapped so that its result is placed into a "data" column,
+ * making it compatible with the subscription manager's executeQuery which extracts rows[0].data.
+ */
+export function makeSubscriptionSelectAggregateSubscribe(
+  table: TableInfo,
+): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext, info: GraphQLResolveInfo) => AsyncIterableIterator<unknown> {
+  const columnMap = camelToColumnAndCFMap(table);
+  const tableKeyStr = `${table.schema}.${table.name}`;
+
+  return (_parent, args, context, info) => {
+    const { auth, permissionLookup, subscriptionManager } = context;
+
+    if (!subscriptionManager) {
+      throw new Error('Subscription manager is not available');
+    }
+
+    const perm = permissionLookup.getSelect(table.schema, table.name, auth.role);
+
+    if (!perm && !auth.isAdmin) {
+      throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
+    }
+
+    // Check subscription root field visibility
+    if (!auth.isAdmin && !isSubscriptionRootFieldAllowed(perm, 'select_aggregate')) {
+      throw permissionDenied('select', `${table.schema}.${table.name}`, auth.role);
+    }
+
+    if (perm && !perm.allowAggregations && !auth.isAdmin) {
+      throw new Error(
+        `Aggregations not allowed for role "${auth.role}" on "${table.schema}.${table.name}"`,
+      );
+    }
+
+    // Parse resolve info for the "nodes" sub-selection to extract relationships
+    const nodesParsed = parseAggregateNodesInfo(info, table, context.tables, permissionLookup, auth, context.functions);
+    const columns = nodesParsed?.columns.length
+      ? nodesParsed.columns
+      : getAllowedColumnsFull(table, perm?.columns);
+    const nodeRelationships = nodesParsed?.relationships ?? [];
+
+    const where = remapBoolExpFull(args.where as BoolExp | undefined, columnMap, table, context.tables);
+    const orderBy = remapOrderByFull(
+      args.orderBy as Array<Record<string, unknown>> | undefined,
+      columnMap, table, context.tables,
+    );
+    const limit = resolveLimit(args.limit as number | undefined, perm?.limit, context.graphqlMaxLimit);
+
+    // Build aggregate selection — request count + sum/avg/min/max for numeric columns
+    const aggregate: AggregateSelection = { count: {} };
+
+    // Build computed field refs for aggregation
+    const numericCFRefs: AggregateComputedFieldRef[] = [];
+    if (table.computedFields) {
+      for (const cf of table.computedFields) {
+        const fnSchema = cf.function.schema ?? 'public';
+        const fn = context.functions.find(
+          (f) => f.name === cf.function.name && f.schema === fnSchema,
+        );
+        if (!fn || fn.isSetReturning) continue;
+        const NUMERIC_PG_RETURN = new Set(['int2', 'int4', 'int8', 'float4', 'float8', 'numeric', 'serial', 'serial4', 'serial8', 'bigserial', 'oid']);
+        if (NUMERIC_PG_RETURN.has(fn.returnType)) {
+          numericCFRefs.push({ name: toCamelCase(cf.name), functionName: cf.function.name, schema: fnSchema });
+        }
+      }
+    }
+
+    // Add numeric computed fields to aggregates
+    if (numericCFRefs.length > 0) {
+      aggregate.computedFields = {
+        sum: numericCFRefs,
+        avg: numericCFRefs,
+        min: numericCFRefs,
+        max: numericCFRefs,
+        stddev: numericCFRefs,
+        stddevPop: numericCFRefs,
+        stddevSamp: numericCFRefs,
+        variance: numericCFRefs,
+        varPop: numericCFRefs,
+        varSamp: numericCFRefs,
+      };
+    }
+
+    // Compile the aggregate SQL
+    const compiled = compileSelectAggregate({
+      table,
+      where,
+      aggregate,
+      nodes: {
+        columns,
+        relationships: nodeRelationships,
+        orderBy,
+        limit,
+        offset: args.offset as number | undefined,
+      },
+      permission: perm ? {
+        filter: perm.filter,
+        columns: perm.columns,
+        limit: perm.limit,
+      } : undefined,
+      session: auth,
+    });
+
+    // Wrap the aggregate SQL so the result is in a "data" column,
+    // compatible with the subscription manager's executeQuery which extracts rows[0].data
+    const wrappedSql = `SELECT row_to_json("_agg_") AS "data" FROM (${compiled.sql}) "_agg_"`;
+
+    const relatedTableKeys = nodesParsed ? collectRelatedTableKeys(nodesParsed) : [];
+    const queue = createAsyncQueue<unknown>();
+    const subscriptionId = randomUUID();
+
+    /**
+     * Process raw aggregate data from the subscription manager into the
+     * format expected by the GraphQL aggregate type: { aggregate, nodes }.
+     * Remaps node rows from snake_case to camelCase.
+     */
+    function processAggregateData(data: unknown): unknown {
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        return { aggregate: { count: 0 }, nodes: [] };
+      }
+
+      const row = data as Record<string, unknown>;
+      const aggData = row.aggregate as Record<string, unknown> | undefined;
+      const nodesData = row.nodes as Record<string, unknown>[] | undefined;
+
+      return {
+        aggregate: aggData ?? { count: 0 },
+        nodes: nodesData ? remapRowsToCamelFull(nodesData, table) : [],
+      };
+    }
+
+    async function* generate(): AsyncGenerator<unknown> {
+      try {
+        // Register with the manager — this executes the initial query
+        const initialData = await subscriptionManager!.register({
+          id: subscriptionId,
+          tableKey: tableKeyStr,
+          query: { sql: wrappedSql, params: compiled.params },
+          session: auth,
+          relatedTableKeys: relatedTableKeys.length > 0 ? relatedTableKeys : undefined,
+          push: (data: unknown) => {
+            queue.push(processAggregateData(data));
+          },
+        });
+
+        // Yield the initial result (processed)
+        yield processAggregateData(initialData);
 
         // Yield subsequent updates from the queue
         for await (const value of queue.iterator) {

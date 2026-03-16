@@ -9,7 +9,7 @@
  * 5. Build mutation input types (insert/set/pk/orderby/aggregate) for each table
  * 6. Build Query type with all select / selectByPk / aggregate fields
  * 7. Build Mutation type with all insert / update / delete fields
- * 8. Build Subscription type with select / selectByPk fields
+ * 8. Build Subscription type with select / selectByPk / selectAggregate fields
  * 9. Assemble and return a complete GraphQLSchema
  */
 
@@ -57,6 +57,7 @@ import type { ResolverContext } from './resolvers/index.js';
 import {
   makeSubscriptionSelectSubscribe,
   makeSubscriptionSelectByPkSubscribe,
+  makeSubscriptionSelectAggregateSubscribe,
   makeSubscriptionStreamSubscribe,
 } from './subscription-resolvers.js';
 import { buildNativeQueryFields } from './native-queries.js';
@@ -539,6 +540,25 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
         subscribe: makeSubscriptionSelectByPkSubscribe(table),
       };
     }
+
+    // subscribe to select_aggregate
+    const subAggArgs: GraphQLFieldConfigArgumentMap = {};
+    if (filterType) {
+      subAggArgs['where'] = { type: filterType };
+    }
+    subAggArgs['orderBy'] = {
+      type: new GraphQLList(new GraphQLNonNull(mutInputs.orderBy)),
+    };
+    subAggArgs['limit'] = { type: GraphQLInt };
+    subAggArgs['offset'] = { type: GraphQLInt };
+
+    subscriptionFields[names.selectAggregate] = {
+      type: new GraphQLNonNull(mutInputs.selectAggregateFields),
+      args: subAggArgs,
+      description: `Subscribe to aggregate values from ${table.schema}.${table.name}`,
+      resolve: (payload: unknown) => payload,
+      subscribe: makeSubscriptionSelectAggregateSubscribe(table),
+    };
 
     // subscribe to stream (cursor-based streaming)
     const streamCursorTypes = buildStreamCursorTypes(table, enumTypes, enumNames);
