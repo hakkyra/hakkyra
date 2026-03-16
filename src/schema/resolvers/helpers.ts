@@ -724,6 +724,25 @@ export function buildAggregateRelationshipSelections(
   for (const aggRel of parsed) {
     const aggregate: AggregateSelection = { count: {} };
 
+    // Populate sum/avg/min/max with all numeric columns from the remote table
+    // so that nested aggregate queries like { invoicesAggregate { aggregate { sum { amount } } } }
+    // produce the correct SQL with aggregate functions for those columns.
+    const numericCols = aggRel.remoteTable.columns
+      .filter((c) => isNumericColumn(c))
+      .map((c) => c.name);
+    if (numericCols.length > 0) {
+      aggregate.sum = numericCols;
+      aggregate.avg = numericCols;
+      aggregate.min = numericCols;
+      aggregate.max = numericCols;
+      aggregate.stddev = numericCols;
+      aggregate.stddevPop = numericCols;
+      aggregate.stddevSamp = numericCols;
+      aggregate.variance = numericCols;
+      aggregate.varPop = numericCols;
+      aggregate.varSamp = numericCols;
+    }
+
     result.push({
       relationship: aggRel.relationship,
       fieldName: aggRel.fieldName,

@@ -254,15 +254,213 @@ describe('Object relationship ordering with NULL FK', () => {
 
 describe('Relationship aggregates as nested query', () => {
   // Nested aggregate fields on array relationships (e.g., invoicesAggregate on Client)
-  // are NOT yet implemented — the object type only exposes the array field, not an
-  // aggregate subfield. These tests are marked as .todo() until the feature is added.
+  // are now implemented — the object type exposes {rel}Aggregate fields for array relationships.
 
-  it.todo('clientByPk with invoicesAggregate { aggregate { count } } (nested aggregate field not yet implemented)');
-  it.todo('clientByPk with invoicesAggregate sum and avg (nested aggregate field not yet implemented)');
-  it.todo('nested aggregate on a client with zero children returns count=0 (nested aggregate field not yet implemented)');
-  it.todo('nested accountsAggregate with where filter inside clientByPk (nested aggregate field not yet implemented)');
-  it.todo('backoffice role can use nested aggregates when allow_aggregations is true (nested aggregate field not yet implemented)');
-  it.todo('list query with nested aggregate: clients with accountsAggregate (nested aggregate field not yet implemented)');
+  it('clientByPk with invoicesAggregate { aggregate { count } }', async () => {
+    const pool = getPool();
+    const dbResult = await pool.query(
+      'SELECT count(*)::int as cnt FROM invoice WHERE client_id = $1',
+      [ALICE_ID],
+    );
+    const expectedCount = dbResult.rows[0].cnt;
+
+    const { status, body } = await graphqlRequest(
+      `query($id: Uuid!) {
+        clientByPk(id: $id) {
+          id
+          username
+          invoicesAggregate {
+            aggregate {
+              count
+            }
+          }
+        }
+      }`,
+      { id: ALICE_ID },
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const client = (body.data as { clientByPk: AnyRow }).clientByPk;
+    expect(client.username).toBe('alice');
+    const invoicesAgg = client.invoicesAggregate as { aggregate: AnyRow };
+    expect(invoicesAgg.aggregate.count).toBe(expectedCount);
+  });
+
+  it('clientByPk with invoicesAggregate sum and avg', async () => {
+    const pool = getPool();
+    const dbResult = await pool.query(
+      'SELECT count(*)::int as cnt, sum(amount) as total, avg(amount) as average FROM invoice WHERE client_id = $1',
+      [ALICE_ID],
+    );
+    const expectedCount = dbResult.rows[0].cnt;
+    const expectedSum = Number(dbResult.rows[0].total);
+    const expectedAvg = Number(dbResult.rows[0].average);
+
+    const { status, body } = await graphqlRequest(
+      `query($id: Uuid!) {
+        clientByPk(id: $id) {
+          id
+          invoicesAggregate {
+            aggregate {
+              count
+              sum { amount }
+              avg { amount }
+            }
+          }
+        }
+      }`,
+      { id: ALICE_ID },
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const client = (body.data as { clientByPk: AnyRow }).clientByPk;
+    const agg = (client.invoicesAggregate as { aggregate: AnyRow }).aggregate;
+    expect(agg.count).toBe(expectedCount);
+    expect(Number((agg.sum as AnyRow).amount)).toBe(expectedSum);
+    expect(Number((agg.avg as AnyRow).amount)).toBeCloseTo(expectedAvg, 2);
+  });
+
+  it('nested aggregate on a client with zero children returns count=0', async () => {
+    // Charlie has 0 invoices
+    const { status, body } = await graphqlRequest(
+      `query($id: Uuid!) {
+        clientByPk(id: $id) {
+          id
+          username
+          invoicesAggregate {
+            aggregate {
+              count
+            }
+          }
+        }
+      }`,
+      { id: CHARLIE_ID },
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const client = (body.data as { clientByPk: AnyRow }).clientByPk;
+    expect(client.username).toBe('charlie');
+    const invoicesAgg = client.invoicesAggregate as { aggregate: AnyRow };
+    expect(invoicesAgg.aggregate.count).toBe(0);
+  });
+
+  it('nested accountsAggregate with where filter inside clientByPk', async () => {
+    const pool = getPool();
+    const dbResult = await pool.query(
+      'SELECT count(*)::int as cnt, sum(balance) as total FROM account WHERE client_id = $1 AND balance > 1000',
+      [ALICE_ID],
+    );
+    const expectedCount = dbResult.rows[0].cnt;
+    const expectedSum = Number(dbResult.rows[0].total);
+
+    const { status, body } = await graphqlRequest(
+      `query($id: Uuid!) {
+        clientByPk(id: $id) {
+          id
+          accountsAggregate(where: { balance: { _gt: 1000 } }) {
+            aggregate {
+              count
+              sum { balance }
+            }
+          }
+        }
+      }`,
+      { id: ALICE_ID },
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const client = (body.data as { clientByPk: AnyRow }).clientByPk;
+    const accountsAgg = client.accountsAggregate as { aggregate: AnyRow };
+    expect(accountsAgg.aggregate.count).toBe(expectedCount);
+    expect(Number((accountsAgg.aggregate.sum as AnyRow).balance)).toBe(expectedSum);
+  });
+
+  it('backoffice role can use nested aggregates when allow_aggregations is true', async () => {
+    const pool = getPool();
+    const dbResult = await pool.query(
+      'SELECT count(*)::int as cnt, sum(amount) as total FROM invoice WHERE client_id = $1',
+      [ALICE_ID],
+    );
+    const expectedCount = dbResult.rows[0].cnt;
+    const expectedSum = Number(dbResult.rows[0].total);
+
+    const token = await tokens.backoffice();
+    const { status, body } = await graphqlRequest(
+      `query($id: Uuid!) {
+        clientByPk(id: $id) {
+          id
+          username
+          invoicesAggregate {
+            aggregate {
+              count
+              sum { amount }
+            }
+          }
+        }
+      }`,
+      { id: ALICE_ID },
+      { authorization: `Bearer ${token}` },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const client = (body.data as { clientByPk: AnyRow }).clientByPk;
+    expect(client.username).toBe('alice');
+    const invoicesAgg = client.invoicesAggregate as { aggregate: AnyRow };
+    expect(invoicesAgg.aggregate.count).toBe(expectedCount);
+    expect(Number((invoicesAgg.aggregate.sum as AnyRow).amount)).toBe(expectedSum);
+  });
+
+  it('list query with nested aggregate: clients with accountsAggregate', async () => {
+    const pool = getPool();
+    // Query expected values for each client
+    const aliceAccounts = await pool.query(
+      'SELECT count(*)::int as cnt, coalesce(sum(balance), 0) as total FROM account WHERE client_id = $1',
+      [ALICE_ID],
+    );
+    const charlieAccounts = await pool.query(
+      'SELECT count(*)::int as cnt, coalesce(sum(balance), 0) as total FROM account WHERE client_id = $1',
+      [CHARLIE_ID],
+    );
+
+    const { status, body } = await graphqlRequest(
+      `query {
+        clients(orderBy: [{ username: ASC }]) {
+          id
+          username
+          accountsAggregate {
+            aggregate {
+              count
+            }
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+    expect(status).toBe(200);
+    expect(body.errors).toBeUndefined();
+    const clients = (body.data as { clients: AnyRow[] }).clients;
+    expect(clients.length).toBe(4);
+
+    // Each client should have accountsAggregate with count
+    for (const client of clients) {
+      const accountsAgg = client.accountsAggregate as { aggregate: AnyRow };
+      expect(accountsAgg).toBeDefined();
+      expect(accountsAgg.aggregate.count).toBeGreaterThanOrEqual(0);
+    }
+
+    // Alice
+    const alice = clients.find((c) => c.username === 'alice')!;
+    expect((alice.accountsAggregate as { aggregate: AnyRow }).aggregate.count).toBe(aliceAccounts.rows[0].cnt);
+
+    // Charlie
+    const charlie = clients.find((c) => c.username === 'charlie')!;
+    expect((charlie.accountsAggregate as { aggregate: AnyRow }).aggregate.count).toBe(charlieAccounts.rows[0].cnt);
+  });
 
   // Top-level aggregate queries DO work — verify clientsAggregate as a regression guard
   it('top-level clientsAggregate count works (regression guard)', async () => {
