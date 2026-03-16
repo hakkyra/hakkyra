@@ -87,10 +87,13 @@ function extractNestedInserts(
 
       if (rel.type === 'object') {
         const insertionOrder = rel.insertionOrder ?? 'before_parent';
+        // Unwrap ObjRelInsertInput wrapper: { data: {...}, onConflict?: {...} }
+        const wrapper = value as Record<string, unknown>;
+        const nestedValue = wrapper.data != null ? wrapper.data as Record<string, unknown> : wrapper;
         const nestedData: NestedInsertData = {
           rel,
           remoteTable,
-          data: value as Record<string, unknown>,
+          data: nestedValue,
         };
         if (insertionOrder === 'after_parent') {
           afterParentObj.push(nestedData);
@@ -98,8 +101,9 @@ function extractNestedInserts(
           beforeParent.push(nestedData);
         }
       } else {
-        // Array relationship: always after_parent
-        const arr = value as Record<string, unknown>[];
+        // Unwrap ArrRelInsertInput wrapper: { data: [...], onConflict?: {...} }
+        const wrapper = value as Record<string, unknown>;
+        const arr = (wrapper.data != null ? wrapper.data : wrapper) as Record<string, unknown>[];
         if (arr.length > 0) {
           afterParentArr.push({
             rel,

@@ -83,6 +83,18 @@ function buildConstraintEnum(table: TableInfo, typeName: string): GraphQLEnumTyp
     values[enumKey] = { value: uc.constraintName };
   }
 
+  // Unique indexes that are NOT already covered by unique constraints or PK.
+  // PostgreSQL has both unique constraints (pg_constraint) and unique indexes
+  // (pg_index) — they are different catalog objects. Hasura includes both in
+  // its Constraint enums.
+  const coveredNames = new Set(Object.values(values).map((v) => v.value));
+  for (const idx of table.indexes) {
+    if (idx.isUnique && !coveredNames.has(idx.name)) {
+      const enumKey = toCamelCase(idx.name);
+      values[enumKey] = { value: idx.name };
+    }
+  }
+
   if (Object.keys(values).length === 0) {
     return null;
   }
@@ -225,6 +237,14 @@ function resolveSumReturnType(graphqlName: string): GraphQLOutputType {
 
 const NUMERIC_GRAPHQL_TYPES = new Set(['Int', 'Smallint', 'Float', 'Bigint', 'Numeric']);
 
+// ─── JSONB Check ─────────────────────────────────────────────────────────────
+
+const JSONB_UDT_NAMES = new Set(['jsonb']);
+
+function isJsonbColumn(column: ColumnInfo): boolean {
+  return JSONB_UDT_NAMES.has(column.udtName) && !column.isArray;
+}
+
 /** Types eligible for min/max aggregate fields — numeric + string-like + date/time + UUID (Hasura includes all orderable non-boolean scalars). */
 const MIN_MAX_FIELD_GRAPHQL_TYPES = new Set([
   'Int', 'Smallint', 'Float', 'Bigint', 'Numeric',
@@ -281,6 +301,8 @@ function isMinMaxFieldColumn(column: ColumnInfo, enumNames: Set<string>): boolea
 export interface MutationInputTypes {
   insertInput: GraphQLInputObjectType;
   onConflict: GraphQLInputObjectType | null;
+  objRelInsertInput: GraphQLInputObjectType;
+  arrRelInsertInput: GraphQLInputObjectType;
   setInput: GraphQLInputObjectType;
   incInput: GraphQLInputObjectType | null;
   pkColumnsInput: GraphQLInputObjectType | null;
@@ -292,6 +314,12 @@ export interface MutationInputTypes {
   updateColumnEnum: GraphQLEnumType;
   selectColumnEnum: GraphQLEnumType;
   updateManyInput: GraphQLInputObjectType | null;
+  /** JSONB mutation operator input types (only present when table has jsonb columns) */
+  appendInput: GraphQLInputObjectType | null;
+  prependInput: GraphQLInputObjectType | null;
+  deleteAtPathInput: GraphQLInputObjectType | null;
+  deleteElemInput: GraphQLInputObjectType | null;
+  deleteKeyInput: GraphQLInputObjectType | null;
 }
 
 // ─── Stream Cursor Types ────────────────────────────────────────────────────
@@ -466,6 +494,9 @@ export function buildAllAggregateOrderByTypes(
  *                      table's AggregateOrderBy types for use by parent tables.
  * @param allTables     All tracked tables, needed to find remote tables for relationships.
  */
+/** Wrapper types map used for cross-table relationship references in InsertInput. */
+export type RelInsertInputTypes = Map<string, { objRelInsertInput: GraphQLInputObjectType; arrRelInsertInput: GraphQLInputObjectType }>;
+
 export function buildMutationInputTypes(
   table: TableInfo,
   objectType: GraphQLObjectType,
@@ -476,6 +507,7 @@ export function buildMutationInputTypes(
   allTables?: TableInfo[],
   functions?: FunctionInfo[],
   insertInputTypes?: Map<string, GraphQLInputObjectType>,
+  relInsertInputTypes?: RelInsertInputTypes,
 ): MutationInputTypes {
   const typeName = getTypeName(table);
   const visibleColumns = getVisibleColumns(table);
@@ -498,23 +530,23 @@ export function buildMutationInputTypes(
         };
       }
 
-      // Add nested insert fields for relationships
-      if (insertInputTypes) {
+      // Add nested insert fields for relationships using wrapper types
+      if (relInsertInputTypes) {
         for (const rel of table.relationships) {
           const relKey = tableKey(rel.remoteTable.schema, rel.remoteTable.name);
-          const relInsertInput = insertInputTypes.get(relKey);
-          if (relInsertInput) {
+          const wrapperTypes = relInsertInputTypes.get(relKey);
+          if (wrapperTypes) {
             const relFieldName = getRelFieldName(rel);
             if (rel.type === 'object') {
-              // Object relationship: single nested object
+              // Object relationship: use ObjRelInsertInput wrapper
               fields[relFieldName] = {
-                type: relInsertInput,
+                type: wrapperTypes.objRelInsertInput,
                 description: `Nested insert for ${rel.name} object relationship.`,
               };
             } else {
-              // Array relationship: array of nested objects
+              // Array relationship: use ArrRelInsertInput wrapper
               fields[relFieldName] = {
-                type: new GraphQLList(new GraphQLNonNull(relInsertInput)),
+                type: wrapperTypes.arrRelInsertInput,
                 description: `Nested insert for ${rel.name} array relationship.`,
               };
             }
@@ -561,6 +593,52 @@ export function buildMutationInputTypes(
     });
   }
 
+  // ── ObjRelInsertInput wrapper ────────────────────────────────────────
+  const objRelInsertInputFields: GraphQLInputFieldConfigMap = {
+    data: {
+      type: new GraphQLNonNull(insertInput),
+      description: `Row data for a nested object relationship insert into ${typeName}.`,
+    },
+  };
+  if (onConflict) {
+    objRelInsertInputFields['onConflict'] = {
+      type: onConflict,
+      description: `On conflict condition for ${typeName} upsert.`,
+    };
+  }
+  const objRelInsertInput = new GraphQLInputObjectType({
+    name: `${typeName}ObjRelInsertInput`,
+    description: `Object relationship insert input for ${typeName}. Wraps data + optional onConflict.`,
+    fields: objRelInsertInputFields,
+  });
+
+  // ── ArrRelInsertInput wrapper ────────────────────────────────────────
+  const arrRelInsertInputFields: GraphQLInputFieldConfigMap = {
+    data: {
+      type: new GraphQLNonNull(
+        new GraphQLList(new GraphQLNonNull(insertInput)),
+      ),
+      description: `Row data for a nested array relationship insert into ${typeName}.`,
+    },
+  };
+  if (onConflict) {
+    arrRelInsertInputFields['onConflict'] = {
+      type: onConflict,
+      description: `On conflict condition for ${typeName} upsert.`,
+    };
+  }
+  const arrRelInsertInput = new GraphQLInputObjectType({
+    name: `${typeName}ArrRelInsertInput`,
+    description: `Array relationship insert input for ${typeName}. Wraps data[] + optional onConflict.`,
+    fields: arrRelInsertInputFields,
+  });
+
+  // Register wrapper types so other tables' InsertInput thunks can reference them
+  if (relInsertInputTypes) {
+    const thisKey = tableKey(table.schema, table.name);
+    relInsertInputTypes.set(thisKey, { objRelInsertInput, arrRelInsertInput });
+  }
+
   // ── SetInput ──────────────────────────────────────────────────────────
   const setInput = new GraphQLInputObjectType({
     name: `${typeName}SetInput`,
@@ -595,6 +673,110 @@ export function buildMutationInputTypes(
           const fieldName = getColumnFieldName(table, column.name);
           fields[fieldName] = {
             type: columnToInputType(column, enumTypes, enumNames),
+            description: column.comment,
+          };
+        }
+        return fields;
+      },
+    });
+  }
+
+  // ── JSONB Mutation Operator Input Types ──────────────────────────────
+  const jsonbColumns = table.columns.filter((c) => isJsonbColumn(c));
+  const hasJsonbColumns = jsonbColumns.length > 0;
+
+  // AppendInput — each jsonb column → Jsonb scalar
+  let appendInput: GraphQLInputObjectType | null = null;
+  if (hasJsonbColumns) {
+    appendInput = new GraphQLInputObjectType({
+      name: `${typeName}AppendInput`,
+      description: `Append JSON value to jsonb columns of ${typeName}. Appends to the end of an array or merges objects.`,
+      fields: () => {
+        const fields: GraphQLInputFieldConfigMap = {};
+        for (const column of jsonbColumns) {
+          const fieldName = getColumnFieldName(table, column.name);
+          fields[fieldName] = {
+            type: customScalars['Jsonb'] as GraphQLInputType,
+            description: column.comment,
+          };
+        }
+        return fields;
+      },
+    });
+  }
+
+  // PrependInput — each jsonb column → Jsonb scalar
+  let prependInput: GraphQLInputObjectType | null = null;
+  if (hasJsonbColumns) {
+    prependInput = new GraphQLInputObjectType({
+      name: `${typeName}PrependInput`,
+      description: `Prepend JSON value to jsonb columns of ${typeName}. Prepends to the beginning of an array or merges objects.`,
+      fields: () => {
+        const fields: GraphQLInputFieldConfigMap = {};
+        for (const column of jsonbColumns) {
+          const fieldName = getColumnFieldName(table, column.name);
+          fields[fieldName] = {
+            type: customScalars['Jsonb'] as GraphQLInputType,
+            description: column.comment,
+          };
+        }
+        return fields;
+      },
+    });
+  }
+
+  // DeleteAtPathInput — each jsonb column → [String!] (path to delete)
+  let deleteAtPathInput: GraphQLInputObjectType | null = null;
+  if (hasJsonbColumns) {
+    deleteAtPathInput = new GraphQLInputObjectType({
+      name: `${typeName}DeleteAtPathInput`,
+      description: `Delete value at a nested path in jsonb columns of ${typeName}.`,
+      fields: () => {
+        const fields: GraphQLInputFieldConfigMap = {};
+        for (const column of jsonbColumns) {
+          const fieldName = getColumnFieldName(table, column.name);
+          fields[fieldName] = {
+            type: new GraphQLList(new GraphQLNonNull(GraphQLString)),
+            description: column.comment,
+          };
+        }
+        return fields;
+      },
+    });
+  }
+
+  // DeleteElemInput — each jsonb column → Int (array index to delete)
+  let deleteElemInput: GraphQLInputObjectType | null = null;
+  if (hasJsonbColumns) {
+    deleteElemInput = new GraphQLInputObjectType({
+      name: `${typeName}DeleteElemInput`,
+      description: `Delete array element by index in jsonb columns of ${typeName}.`,
+      fields: () => {
+        const fields: GraphQLInputFieldConfigMap = {};
+        for (const column of jsonbColumns) {
+          const fieldName = getColumnFieldName(table, column.name);
+          fields[fieldName] = {
+            type: GraphQLInt,
+            description: column.comment,
+          };
+        }
+        return fields;
+      },
+    });
+  }
+
+  // DeleteKeyInput — each jsonb column → String (object key to delete)
+  let deleteKeyInput: GraphQLInputObjectType | null = null;
+  if (hasJsonbColumns) {
+    deleteKeyInput = new GraphQLInputObjectType({
+      name: `${typeName}DeleteKeyInput`,
+      description: `Delete top-level key from jsonb columns of ${typeName}.`,
+      fields: () => {
+        const fields: GraphQLInputFieldConfigMap = {};
+        for (const column of jsonbColumns) {
+          const fieldName = getColumnFieldName(table, column.name);
+          fields[fieldName] = {
+            type: GraphQLString,
             description: column.comment,
           };
         }
@@ -1024,6 +1206,8 @@ export function buildMutationInputTypes(
   return {
     insertInput,
     onConflict,
+    objRelInsertInput,
+    arrRelInsertInput,
     setInput,
     incInput,
     pkColumnsInput,
@@ -1035,5 +1219,10 @@ export function buildMutationInputTypes(
     updateColumnEnum,
     selectColumnEnum,
     updateManyInput,
+    appendInput,
+    prependInput,
+    deleteAtPathInput,
+    deleteElemInput,
+    deleteKeyInput,
   };
 }

@@ -59,8 +59,10 @@ describe('Nested Insert Ordering (insertion_order)', () => {
             email: 'nested_before@test.com',
             currencyId: 'EUR',
             branch: {
-              name: 'NestedTest_BeforeParent',
-              code: 'NESTED_BP',
+              data: {
+                name: 'NestedTest_BeforeParent',
+                code: 'NESTED_BP',
+              },
             },
           },
         },
@@ -112,8 +114,10 @@ describe('Nested Insert Ordering (insertion_order)', () => {
             branchId: BRANCH_TEST_ID,
             currencyId: 'EUR',
             primaryAccount: {
-              currencyId: 'EUR',
-              balance: 1000,
+              data: {
+                currencyId: 'EUR',
+                balance: 1000,
+              },
             },
           },
         },
@@ -161,10 +165,12 @@ describe('Nested Insert Ordering (insertion_order)', () => {
             email: 'nested_array@test.com',
             branchId: BRANCH_TEST_ID,
             currencyId: 'EUR',
-            clientData: [
-              { key: 'pref1', value: '{"theme": "light"}' },
-              { key: 'pref2', value: '{"lang": "fi"}' },
-            ],
+            clientData: {
+              data: [
+                { key: 'pref1', value: '{"theme": "light"}' },
+                { key: 'pref2', value: '{"lang": "fi"}' },
+              ],
+            },
           },
         },
         { 'x-hasura-admin-secret': ADMIN_SECRET },
@@ -212,13 +218,17 @@ describe('Nested Insert Ordering (insertion_order)', () => {
             currencyId: 'EUR',
             // before_parent: create branch first
             branch: {
-              name: 'NestedTest_Combined',
-              code: 'NESTED_COMB',
+              data: {
+                name: 'NestedTest_Combined',
+                code: 'NESTED_COMB',
+              },
             },
             // after_parent: create account after client
             primaryAccount: {
-              currencyId: 'USD',
-              balance: 500,
+              data: {
+                currencyId: 'USD',
+                balance: 500,
+              },
             },
           },
         },
@@ -272,7 +282,9 @@ describe('Nested Insert Ordering (insertion_order)', () => {
             currencyId: 'EUR',
             // This account insert will fail because currency_id is required but not provided
             primaryAccount: {
-              balance: 1000,
+              data: {
+                balance: 1000,
+              },
             },
           },
         },
