@@ -447,6 +447,23 @@ export const IntrospectionConfigSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// OperationsConfig — controls which CRUD root fields are exposed
+// ---------------------------------------------------------------------------
+
+export const OperationsConfigSchema = z.object({
+  select: z.boolean().default(true),
+  selectByPk: z.boolean().default(true),
+  selectAggregate: z.boolean().default(true),
+  insert: z.boolean().default(true),
+  insertOne: z.boolean().default(true),
+  update: z.boolean().default(true),
+  updateByPk: z.boolean().default(true),
+  updateMany: z.boolean().default(true),
+  delete: z.boolean().default(true),
+  deleteByPk: z.boolean().default(true),
+});
+
+// ---------------------------------------------------------------------------
 // HakkyraConfig (top-level)
 // ---------------------------------------------------------------------------
 
@@ -515,6 +532,33 @@ export const HakkyraConfigSchema = z.object({
     batchChunkSize: z.number().default(100),
   }).default({ arrayAnyThreshold: 20, unnestThreshold: 500, batchChunkSize: 100 }),
   introspection: IntrospectionConfigSchema.default({ disabledForRoles: [] }),
+  schema: z.object({
+    defaultOperations: OperationsConfigSchema.default({
+      select: true,
+      selectByPk: true,
+      selectAggregate: true,
+      insert: true,
+      insertOne: true,
+      update: true,
+      updateByPk: true,
+      updateMany: true,
+      delete: true,
+      deleteByPk: true,
+    }),
+  }).default({
+    defaultOperations: {
+      select: true,
+      selectByPk: true,
+      selectAggregate: true,
+      insert: true,
+      insertOne: true,
+      update: true,
+      updateByPk: true,
+      updateMany: true,
+      delete: true,
+      deleteByPk: true,
+    },
+  }),
 });
 
 // ---------------------------------------------------------------------------
