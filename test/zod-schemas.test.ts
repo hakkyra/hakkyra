@@ -804,7 +804,6 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
           generate: true,
           output: './docs',
           llm_format: true,
-          include_examples: true,
         },
       });
     });
@@ -1438,7 +1437,6 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
         generate: false,
         output: './docs',
         llmFormat: true,
-        includeExamples: true,
       });
     });
 

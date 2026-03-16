@@ -433,7 +433,6 @@ export const RawApiConfigSchema = z
         generate: z.boolean().optional(),
         output: z.string().optional(),
         llm_format: z.boolean().optional(),
-        include_examples: z.boolean().optional(),
       })
       .strict()
       .optional(),

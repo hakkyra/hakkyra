@@ -14,7 +14,7 @@
 - [x] Define TypeScript types for all config structures (Hasura-compatible metadata format + extensions)
 - [x] YAML parser with `!include` tag support
 - [x] Load `version.yaml`, `databases.yaml`, per-table YAML files
-- [x] Load `api_config.yaml` (table aliases, REST overrides, doc config)
+- [x] Load `api_config.yaml` (REST overrides, doc config) — REST/docs config moving to `hakkyra.yaml`
 - [x] Load `actions.yaml` + `actions.graphql`
 - [x] Load `cron_triggers.yaml`
 - [x] Config validation (version, port, permissions, cron expressions, operators)
@@ -100,7 +100,6 @@
 ### P1.7 — GraphQL Schema Generator (`src/schema/`)
 - [x] Generate GraphQLObjectType per tracked table
   - [x] Map PG columns → GraphQL fields with correct scalar types
-  - [x] Apply table aliases for type naming
   - [x] Apply custom_root_fields from config
   - [x] Add relationship fields (object + array)
 - [x] Generate filter input types (BoolExp per table, camelCase field names)
@@ -132,11 +131,10 @@
 - [x] Route registration for each tracked table (CRUD)
 - [x] Query parameter parser (PostgREST-style filters)
 - [x] Same permission/auth enforcement as GraphQL (shared SQL compiler)
-- [x] Apply table aliases for URL paths
 - [x] Proper HTTP status codes (200, 201, 204, 400, 401, 403, 404)
 - [x] REST filter parsing tests (30 tests)
 - [x] E2E REST tests (list, get, insert, update, delete, permission enforcement)
-- [x] REST endpoint overrides from config (custom paths, default_order per operation)
+- [x] REST endpoint overrides from config (custom paths, default_order per operation) — config moving to `hakkyra.yaml`
 
 ### P1.9 — Connection Manager (`src/connections/`)
 - [x] Primary pool creation from config
@@ -370,7 +368,7 @@ Move all hardcoded default values to Zod `.default()` in `src/config/schemas-int
 - [x] `sql.unnestThreshold` → `500`
 - [x] `sql.batchChunkSize` → `100`
 
-**REST** (`src/config/loader.ts`)
+**REST** (`hakkyra.yaml`)
 - [x] `rest.defaultLimit` → `20`
 - [x] `rest.maxLimit` → `100`
 - [x] `rest.autoGenerate` → `true`
@@ -399,6 +397,51 @@ Hasura supports `insertion_order` in object relationship `manual_configuration` 
 
 - [x] Accept `insertion_order` in relationship manual_configuration Zod schema (nullable, optional)
 - [ ] INSERT compiler: respect `insertion_order` when compiling nested inserts — `before_parent` inserts child first (for FK on parent), `after_parent` inserts parent first (for FK on child)
+
+### Remove `table_aliases` from `api_config.yaml`
+
+Default naming already applies `toPascalCase()` / `toCamelCase()` to table names automatically. `table_aliases` is redundant — Hasura metadata's `custom_name` on tables serves the same purpose.
+
+- [ ] Remove `table_aliases` from raw YAML schema, internal schema, loader, and type definitions
+- [ ] Remove `table_aliases` from test fixture `api_config.yaml`
+- [ ] Implement `custom_name` from Hasura table configuration as the table alias (already parsed, not yet applied)
+- [ ] Remove alias application in `loader.ts` (lines 318-326)
+
+### Remove `custom_queries` mechanism
+
+Raw SQL endpoints don't customize existing metadata-defined APIs. Will be replaced with a better mechanism for overriding/extending existing table operations.
+
+- [ ] Remove `custom_queries` from raw YAML schema, internal schema, loader
+- [ ] Remove `src/schema/custom-queries.ts`
+- [ ] Remove custom query E2E tests
+- [ ] Remove `custom_queries` from test fixture `api_config.yaml`
+- [ ] Remove custom query REST endpoint if any
+
+### Move REST and docs config from `api_config.yaml` to `hakkyra.yaml`
+
+REST pagination, base path, auto-generation, and doc generation are server runtime config, not metadata. They belong alongside `server`, `graphql`, and other deployment-level settings in `hakkyra.yaml`.
+
+- [ ] Add `rest` section to `hakkyra.yaml` raw schema (auto_generate, base_path, pagination, overrides)
+- [ ] Add `docs` section to `hakkyra.yaml` raw schema (generate, llm_format, output)
+- [ ] Update loader to read rest/docs from server config instead of api_config
+- [ ] Update test fixtures (`hakkyra.yaml` and `api_config.yaml`)
+- [ ] If `api_config.yaml` becomes empty after these removals, consider removing the file entirely
+
+### Configurable Session Variable Namespace
+
+Hakkyra currently uses the `x-hasura-*` prefix for session variables (`x-hasura-role`, `x-hasura-user-id`, `x-hasura-allowed-roles`, etc.) inherited from Hasura compatibility. Allow overriding this namespace via `hakkyra.yaml` so deployments not migrating from Hasura can use a shorter, product-neutral prefix.
+
+**Config**: `auth.session_namespace` in `hakkyra.yaml` (default: `x-hk`). Set to `x-hasura` for full Hasura backwards compatibility.
+
+- [ ] Add `session_namespace` field to `auth` section in raw YAML schema + internal schema (default: `x-hk`)
+- [ ] Auth middleware: use configured namespace when extracting/building session variables from JWT claims and webhook responses
+- [ ] Well-known variables use namespace prefix: `{ns}-role`, `{ns}-user-id`, `{ns}-allowed-roles`, `{ns}-default-role`
+- [ ] Permission compiler: resolve `x-hasura-*` references in YAML permission filters using the configured namespace (YAML always uses `x-hasura-*` for Hasura metadata compat; at runtime map to configured namespace)
+- [ ] `set_config()` session injection: use namespace for PG session variables (`{ns}.user`, `{ns}.role`, etc.)
+- [ ] Headers: accept both `x-hasura-role` and `{ns}-role` for role override header (prefer configured namespace)
+- [ ] JWT claims: support both `https://hasura.io/jwt/claims` and a configurable claims namespace key
+- [ ] Update tests to verify default `x-hk` namespace and `x-hasura` backwards-compat mode
+- [ ] Document migration path: set `auth.session_namespace: x-hasura` for drop-in Hasura replacement
 
 ### Other Improvements
 - [x] Dual connection pool — dedicated session-mode pool for LISTEN/NOTIFY, separate pooled connections for queries/mutations (enables PgBouncer transaction-mode compatibility)
@@ -859,7 +902,6 @@ Covers all recent commits (e654f3b through 1518030). All 1194 tests passing.
 
 #### High
 
-- [ ] **No query complexity/cost analysis** — Only depth limiting exists. A query within the depth limit can request many aliases, wide relationships at each level, combine aggregates. A single request could generate dozens of heavy SQL queries.
 - [ ] **No GraphQL batching limit** — Mercurius doesn't limit batched operations. An attacker can send hundreds of queries in one request.
 - [ ] **`resolveLimit` bypass in subscriptions and tracked functions** — `resolveLimit` in `subscription-resolvers.ts` and `tracked-functions.ts` doesn't accept the global `graphql.maxLimit` cap. Only `schema/resolvers.ts` properly enforces it.
 
@@ -909,6 +951,68 @@ These recent commits have no regression tests for the specific fix:
 - [ ] **Computed field WHERE with arguments** — `compileWhere` emits function call without passing user args or session args; filtering by argument-bearing computed fields may use wrong defaults
 - [ ] **Tracked function aggregate with where filter** — No test for `searchClientsAggregate(args: ..., where: { status: { _eq: ACTIVE } })`
 - [ ] **Tracked function return-table row-level filter** — Code applies `perm.filter` but no E2E test confirms row-level filtering on function results
+
+---
+
+## Phase 8: Code Quality Review (2026-03-16)
+
+Automated review of duplication, typing, security, and architectural coherence across `src/`.
+
+### P8.1 — Security Issues (NEW — not in P7)
+
+#### High
+
+- [ ] **Action webhook error reflection** — `src/actions/proxy.ts:126-135` passes raw webhook error messages (`parsed.message` / `parsed.error`) to GraphQL clients without size limit or sanitization. A compromised or misconfigured webhook can leak internal details (stack traces, credentials, internal URLs) to API consumers. Fix: truncate to 500 chars, strip sensitive patterns.
+- [ ] **REST error response leaks PG internals** — `src/rest/router.ts:618` sends `err.message` from failed SQL queries to clients (`sendBadRequest(reply, err instanceof Error ? err.message : 'Query failed')`). PostgreSQL errors reveal column names, table structure, type mismatches. Fix: log full error, return generic message in non-dev mode.
+
+#### Medium
+
+- [ ] **URL template path traversal in action transforms** — `src/actions/transform.ts` interpolates user-controlled values into the URL path (e.g., `{{$body.input.id}}`). If a webhook URL template includes path segments from input, values like `../../admin` can cause path traversal on the target server. Fix: validate the final URL is well-formed and optionally encode path segments.
+- [ ] **Webhook auth cache serves stale roles** — `src/auth/webhook.ts` caches auth results by header hash. If a user's role is revoked on the webhook provider, stale cache entries grant the old role for up to `cacheTtlMs`. This is by-design for performance, but undocumented. Fix: document the trade-off, recommend low TTL values.
+
+### P8.2 — Code Duplication
+
+#### High
+
+- [ ] **Session variable resolution duplicated 4×** — `resolveValue()` in `src/sql/where.ts:23-45`, `resolvePreset()` in `src/sql/insert.ts:103-119` and `src/sql/update.ts:78-94`, and `resolveValue()` in `src/permissions/compiler.ts:94-108` all implement the same x-hasura-* claim lookup with array handling. Fix: extract to `src/shared/session-resolution.ts`.
+
+#### Medium
+
+- [ ] **`quoteIdent()` copied instead of imported** — `src/events/delivery.ts:77`, `src/events/schema.ts:56`, `src/events/cleanup.ts:22`, and `src/permissions/compiler.ts:114` each define a local `quoteIdent()` identical to `quoteIdentifier()` in `src/sql/utils.ts`. Fix: import from `sql/utils.ts`.
+- [ ] **Worker registration pattern ~200 LOC repeated 3×** — `src/events/delivery.ts`, `src/crons/worker.ts`, `src/actions/async.ts` all follow the same loop: resolve webhook URL/headers → `deliverWebhook()` → update DB status → throw on failure. Fix: extract generic worker factory to `src/shared/`.
+- [ ] **Trigger lookup building duplicated** — `buildTriggerLookup()` in `src/events/delivery.ts:64-72` and `src/events/invoke.ts:35-43` are identical. Fix: move to shared events helper.
+- [ ] **Preset resolution duplicated** — `resolvePreset()` in `src/sql/insert.ts:103-119` and `src/sql/update.ts:78-94` are identical. Part of the session resolution consolidation above.
+
+### P8.3 — TypeScript Typing
+
+#### Medium
+
+- [ ] **`as unknown as GraphQLScalarType` pervasive** — 20+ occurrences across `src/schema/type-builder.ts`, `filters.ts`, `inputs.ts`, `tracked-functions.ts`, `native-queries.ts`, `custom-queries.ts`. GraphQL.js built-in scalars (`GraphQLInt`, `GraphQLString`, etc.) have type `GraphQLScalarType<unknown, unknown>` which doesn't match `GraphQLScalarType` directly. Fix: create a typed helper `asScalar()` in `src/schema/scalars.ts`.
+- [ ] **`as any` for decorated Fastify instance** — `src/server.ts` has 12+ `as any` casts to access Mercurius's `graphql()` method and decorated properties on the Fastify instance. Fix: declare a `HakkyraFastifyInstance` interface extending `FastifyInstance` with Mercurius augmentations.
+- [ ] **`createAuthHook` returns `any`** — `src/auth/middleware.ts:92` has no return type annotation. Fix: annotate as `FastifyPluginAsync`.
+
+#### Low
+
+- [ ] **`Record<string, any>` in BullMQ adapter** — `src/shared/job-queue/bullmq-adapter.ts:105,163` uses `Record<string, any>` for job options. Justified for optional dependency, but a `BullMQJobOptions` interface would be safer.
+
+### P8.4 — Architecture
+
+#### High
+
+- [ ] **SQL layer imports from schema layer** — `src/sql/select.ts`, `insert.ts`, `update.ts` import `toCamelCase` from `src/schema/type-builder.ts`. This creates an upward dependency from the lower SQL layer to the upper GraphQL schema layer. Fix: extract `toCamelCase`/`toSnakeCase`/`toPascalCase` into `src/shared/naming.ts`.
+
+#### Medium
+
+- [ ] **`server.ts` is monolithic (958 lines)** — Handles connection pools, introspection, schema generation, permission compilation, route registration, job queue setup, event/cron/subscription wiring, config watching, and graceful shutdown. Fix: extract into phase modules (`server/schema.ts`, `server/jobs.ts`, `server/routes.ts`), keep `server.ts` as thin orchestrator.
+- [ ] **Context building duplicated 3× in `server.ts`** — Lines 359-398 (GraphQL), 416-457 (subscriptions), 502-539 (Hasura REST) build nearly identical `ResolverContext` objects. Fix: extract `buildResolverContext()` factory.
+- [ ] **Events/crons/actions inconsistent init patterns** — Events return a `Manager` with `stop()`, crons return nothing, actions require two separate calls (`ensureAsyncActionSchema` + `registerAsyncActionWorkers`). Fix: standardize on a `Manager` interface with `init()` and `stop()`.
+- [ ] **`resolvers.ts` too large (1749 lines)** — Contains all 10 resolver factories plus helpers. Fix: split into `resolvers/select.ts`, `resolvers/insert.ts`, `resolvers/update.ts`, `resolvers/delete.ts` with shared helpers in `resolvers/helpers.ts`.
+- [ ] **Error handling inconsistency in webhook workers** — Events and async actions store error details in DB on failure; crons only log a warning. Fix: standardize error recording across all webhook workers.
+
+#### Low
+
+- [ ] **Tracked functions coupled to resolvers** — `src/schema/tracked-functions.ts:50` imports `remapBoolExp` from `resolvers.ts`. Fix: extract `remapBoolExp` to `src/schema/mapping.ts`.
+- [ ] **Unused `compileFilter` export** — `src/permissions/index.ts` exports `compileFilter` from `compiler.ts` but it appears unused in the codebase. Verify and remove if dead code.
 
 ---
 

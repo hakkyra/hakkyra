@@ -226,7 +226,6 @@ export const APIDocsConfigSchema = z.object({
   generate: z.boolean(),
   output: z.string().optional(),
   llmFormat: z.boolean().optional(),
-  includeExamples: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------

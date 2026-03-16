@@ -1171,7 +1171,6 @@ function transformDocsConfig(apiConfig: RawApiConfig | null): APIDocsConfig {
     generate: docs?.generate ?? true,
     output: docs?.output,
     llmFormat: docs?.llm_format,
-    includeExamples: docs?.include_examples,
   };
 }
 

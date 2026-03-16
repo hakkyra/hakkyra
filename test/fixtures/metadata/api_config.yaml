@@ -39,4 +39,3 @@ rest:
 docs:
   generate: true
   llm_format: true
-  include_examples: true
