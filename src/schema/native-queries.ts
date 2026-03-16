@@ -17,7 +17,6 @@ import {
 import type {
   GraphQLFieldConfig,
   GraphQLFieldConfigArgumentMap,
-  GraphQLInputType,
   GraphQLOutputType,
   GraphQLScalarType,
 } from 'graphql';
@@ -33,7 +32,7 @@ import type {
   SessionVariables,
   BoolExp,
 } from '../types.js';
-import { customScalars, asScalar } from './scalars.js';
+import { customScalars, asScalar, asInputType, asOutputType } from './scalars.js';
 import type { ResolverContext } from './resolvers/index.js';
 import {
   isSessionVariable,
@@ -280,7 +279,7 @@ export function buildNativeQueryFields(
     for (const arg of nq.arguments) {
       const gqlType = scalarToGraphQL(arg.type);
       args[arg.name] = {
-        type: arg.nullable ? (gqlType as unknown as GraphQLInputType) : new GraphQLNonNull(gqlType as unknown as GraphQLInputType),
+        type: arg.nullable ? asInputType(gqlType) : new GraphQLNonNull(asInputType(gqlType)),
         description: `Argument: ${arg.name} (${arg.type})`,
       };
     }
@@ -308,8 +307,8 @@ function getOrCreateLogicalModelType(model: LogicalModel): GraphQLObjectType {
     const scalarType = scalarToGraphQL(field.type);
     fields[field.name] = {
       type: field.nullable
-        ? (scalarType as unknown as GraphQLOutputType)
-        : new GraphQLNonNull(scalarType as unknown as GraphQLOutputType),
+        ? asOutputType(scalarType)
+        : new GraphQLNonNull(asOutputType(scalarType)),
     };
   }
 

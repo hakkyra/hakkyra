@@ -22,6 +22,26 @@ export function asScalar(scalar: GraphQLScalarType<unknown, unknown>): GraphQLSc
   return scalar as GraphQLScalarType;
 }
 
+/**
+ * Safely widen a `GraphQLScalarType` to `GraphQLInputType`.
+ *
+ * GraphQLScalarType satisfies GraphQLInputType at runtime, but TypeScript's
+ * structural check sometimes fails for the generic parameterised variant.
+ */
+export function asInputType(scalar: GraphQLScalarType<unknown, unknown>): import('graphql').GraphQLInputType {
+  return scalar as import('graphql').GraphQLInputType;
+}
+
+/**
+ * Safely widen a `GraphQLScalarType` to `GraphQLOutputType`.
+ *
+ * GraphQLScalarType satisfies GraphQLOutputType at runtime, but TypeScript's
+ * structural check sometimes fails for the generic parameterised variant.
+ */
+export function asOutputType(scalar: GraphQLScalarType<unknown, unknown>): import('graphql').GraphQLOutputType {
+  return scalar as import('graphql').GraphQLOutputType;
+}
+
 // ─── UUID ────────────────────────────────────────────────────────────────────
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
