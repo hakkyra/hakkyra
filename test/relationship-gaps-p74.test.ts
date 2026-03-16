@@ -593,15 +593,17 @@ describe('Relationship data in updateMany RETURNING', () => {
       expect(status).toBe(200);
       expect(body.errors).toBeUndefined();
 
-      // updateMany returns a single { affectedRows, returning } combining all batches
-      const result = (body.data as { updateClientMany: AnyRow }).updateClientMany;
-      expect(result.affectedRows).toBe(2);
-      const returning = result.returning as AnyRow[];
-      expect(returning.length).toBe(2);
+      // updateMany returns [MutationResponse] — one result per update entry
+      const results = (body.data as { updateClientMany: AnyRow[] }).updateClientMany;
+      expect(Array.isArray(results)).toBe(true);
+      expect(results.length).toBe(2);
 
-      // Find Alice and Bob in the returning array
-      const aliceRow = returning.find((r) => r.id === ALICE_ID)!;
-      expect(aliceRow).toBeDefined();
+      // First entry: Alice
+      const aliceResult = results[0] as AnyRow;
+      expect(aliceResult.affectedRows).toBe(1);
+      const aliceReturning = aliceResult.returning as AnyRow[];
+      expect(aliceReturning.length).toBe(1);
+      const aliceRow = aliceReturning[0];
       expect(aliceRow.trustLevel).toBe(7);
       // Object relationship
       const aliceBranch = aliceRow.branch as AnyRow;
@@ -612,8 +614,12 @@ describe('Relationship data in updateMany RETURNING', () => {
       expect(Array.isArray(aliceAccounts)).toBe(true);
       expect(aliceAccounts.length).toBeGreaterThanOrEqual(1);
 
-      const bobRow = returning.find((r) => r.id === BOB_ID)!;
-      expect(bobRow).toBeDefined();
+      // Second entry: Bob
+      const bobResult = results[1] as AnyRow;
+      expect(bobResult.affectedRows).toBe(1);
+      const bobReturning = bobResult.returning as AnyRow[];
+      expect(bobReturning.length).toBe(1);
+      const bobRow = bobReturning[0];
       expect(bobRow.trustLevel).toBe(8);
       expect((bobRow.branch as AnyRow).name).toBe('TestBranch');
     } finally {
@@ -658,10 +664,10 @@ describe('Relationship data in updateMany RETURNING', () => {
       expect(status).toBe(200);
       expect(body.errors).toBeUndefined();
 
-      const result = (body.data as { updateClientMany: AnyRow }).updateClientMany;
-      expect(result.affectedRows).toBe(2);
-      const returning = result.returning as AnyRow[];
-      expect(returning.length).toBe(2);
+      // updateMany returns [MutationResponse] — one result per update entry
+      const results = (body.data as { updateClientMany: AnyRow[] }).updateClientMany;
+      expect(Array.isArray(results)).toBe(true);
+      expect(results.length).toBe(2);
 
       // Query DB for expected totalBalance values (accounts may have changed from other tests)
       const aliceExpected = await pool.query(
@@ -673,14 +679,21 @@ describe('Relationship data in updateMany RETURNING', () => {
         [BOB_ID],
       );
 
-      // Verify computed field totalBalance is present and correct
-      const aliceRow = returning.find((r) => r.id === ALICE_ID)!;
-      expect(aliceRow).toBeDefined();
+      // First entry: Alice — verify computed field totalBalance is present and correct
+      const aliceResult = results[0] as AnyRow;
+      expect(aliceResult.affectedRows).toBe(1);
+      const aliceReturning = aliceResult.returning as AnyRow[];
+      expect(aliceReturning.length).toBe(1);
+      const aliceRow = aliceReturning[0];
       expect(aliceRow.trustLevel).toBe(5);
       expect(Number(aliceRow.totalBalance)).toBe(Number(aliceExpected.rows[0].total));
 
-      const bobRow = returning.find((r) => r.id === BOB_ID)!;
-      expect(bobRow).toBeDefined();
+      // Second entry: Bob
+      const bobResult = results[1] as AnyRow;
+      expect(bobResult.affectedRows).toBe(1);
+      const bobReturning = bobResult.returning as AnyRow[];
+      expect(bobReturning.length).toBe(1);
+      const bobRow = bobReturning[0];
       expect(bobRow.trustLevel).toBe(6);
       expect(Number(bobRow.totalBalance)).toBe(Number(bobExpected.rows[0].total));
     } finally {
