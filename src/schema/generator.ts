@@ -89,6 +89,9 @@ function getRootFieldNames(table: TableInfo): RootFieldNames {
   // When custom_name (alias) is set, use it verbatim — Hasura does NOT camelCase it.
   const base = table.alias ?? toCamelCase(table.name);
   const typeName = getTypeName(table);
+  // For prefixed root fields (insert/update/delete), capitalize the first letter
+  // so that e.g. custom_name "gameSession" becomes "insertGameSession", not "insertgameSession".
+  const prefixedName = typeName.charAt(0).toUpperCase() + typeName.slice(1);
   const custom = table.customRootFields;
 
   return {
@@ -96,13 +99,13 @@ function getRootFieldNames(table: TableInfo): RootFieldNames {
     selectByPk: custom?.select_by_pk ?? `${base}ByPk`,
     selectAggregate: custom?.select_aggregate ?? `${base}Aggregate`,
     selectStream: custom?.select_stream ?? `${base}Stream`,
-    insert: custom?.insert ?? `insert${typeName}`,
-    insertOne: custom?.insert_one ?? `insert${typeName}One`,
-    update: custom?.update ?? `update${typeName}`,
-    updateByPk: custom?.update_by_pk ?? `update${typeName}ByPk`,
-    updateMany: `update${typeName}Many`,
-    delete: custom?.delete ?? `delete${typeName}`,
-    deleteByPk: custom?.delete_by_pk ?? `delete${typeName}ByPk`,
+    insert: custom?.insert ?? `insert${prefixedName}`,
+    insertOne: custom?.insert_one ?? `insert${prefixedName}One`,
+    update: custom?.update ?? `update${prefixedName}`,
+    updateByPk: custom?.update_by_pk ?? `update${prefixedName}ByPk`,
+    updateMany: custom?.update_many ?? `update${prefixedName}Many`,
+    delete: custom?.delete ?? `delete${prefixedName}`,
+    deleteByPk: custom?.delete_by_pk ?? `delete${prefixedName}ByPk`,
   };
 }
 
