@@ -385,6 +385,12 @@ export async function createServer(
           }
           return result;
         },
+        transactionalQueryWithSession: async (
+          queries: Array<{ sql: string; params: unknown[] }>,
+          session: typeof auth,
+        ) => {
+          return connectionManager.transactionalQueryWithSession(queries, session);
+        },
         permissionLookup: resolverPermissionLookup,
         inheritedRoles: inheritedRolesRef.current,
         tables: schemaModel.tables,
@@ -444,6 +450,12 @@ export async function createServer(
               );
             }
             return result;
+          },
+          transactionalQueryWithSession: async (
+            queries: Array<{ sql: string; params: unknown[] }>,
+            sess: typeof auth,
+          ) => {
+            return connectionManager.transactionalQueryWithSession(queries, sess);
           },
           permissionLookup: resolverPermissionLookup,
           inheritedRoles: inheritedRolesRef.current,

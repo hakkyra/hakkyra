@@ -44,6 +44,15 @@ object_relationships:
   - name: language
     using:
       foreign_key_constraint_on: language_id
+  - name: primaryAccount
+    using:
+      manual_configuration:
+        remote_table:
+          schema: public
+          name: account
+        column_mapping:
+          id: client_id
+        insertion_order: after_parent
 
 computed_fields:
   - name: total_balance
