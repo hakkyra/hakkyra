@@ -942,17 +942,17 @@ These recent commits have no regression tests for the specific fix:
 - [ ] **Cross-schema relationships** — No cross-schema table fixtures available; `.todo()` in `test/relationship-gaps-p74.test.ts`
 - [x] **Nested relationship traversal in where filters** — 4 tests: object-to-object, object-to-array, array-to-nested-object, combined filters (`test/relationship-gaps-p74.test.ts`)
 - [x] **Object relationship ordering with NULL FK** — 2 tests for `ASC_NULLS_FIRST` and `ASC_NULLS_LAST` (`test/relationship-gaps-p74.test.ts`)
-- [ ] **Relationship aggregates as nested query** — Not yet implemented in schema builder; `.todo()` in `test/relationship-gaps-p74.test.ts`
+- [x] **Relationship aggregates as nested query** — Implemented in P8 (see P8 bugs section); `{rel}Aggregate` fields now exposed on object types for array relationships
 - [x] **Permissions blocking nested relationship entirely** — 3 tests verifying anonymous role cannot traverse relationships (`test/relationship-gaps-p74.test.ts`)
 - [x] **Relationship data in updateMany RETURNING** — 1 test passing; computed fields in updateMany RETURNING not supported (resolver bug, `.todo()`)
 - [x] **Config-defined relationship overriding auto-detected** — 2 tests for `primaryAccount` manual relationship coexisting with auto-detected (`test/relationship-gaps-p74.test.ts`)
 
 ### P7.5 — Computed Field & Function Test Gaps
 
-- [ ] **Aggregate E2E execution of computed fields** — Bug found: `makeSelectAggregateResolver` doesn't pass `computedFields` in non-groupBy path; `.todo()` in `test/computed-function-gaps-p75.test.ts`
+- [x] **Aggregate E2E execution of computed fields** — Fixed in P8; `makeSelectAggregateResolver` now passes `computedFields` in both groupBy and non-groupBy paths
 - [x] **INSERT RETURNING with computed fields** — 4 tests: single insert, batch insert, backoffice role (`test/computed-function-gaps-p75.test.ts`)
 - [x] **SETOF computed field with where/orderBy/limit** — 5 tests exercising all argument combinations on `activeAccounts` (`test/computed-function-gaps-p75.test.ts`)
-- [ ] **Computed field WHERE with arguments** — `balanceInCurrency` filter works; `isOwn` boolean filter fails due to `pgTypeToGraphQL` mapping bug (`"boolean"` not in map, only `"bool"`); `.todo()` in `test/computed-function-gaps-p75.test.ts`
+- [x] **Computed field WHERE with arguments** — Fixed in P8; added all PostgreSQL long-form type aliases (`boolean`, `integer`, etc.) to `PG_TO_GRAPHQL` map
 - [x] **Tracked function aggregate with where filter** — 4 tests for `searchClientsAggregate` and `clientsByDateAggregate` with where filters (`test/computed-function-gaps-p75.test.ts`)
 - [x] **Tracked function return-table row-level filter** — 6 tests for session-based filtering, column permissions, permission denial (`test/computed-function-gaps-p75.test.ts`)
 
