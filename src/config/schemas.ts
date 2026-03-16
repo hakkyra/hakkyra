@@ -411,37 +411,9 @@ export const RawRESTOverrideSchema = z
   })
   .strict();
 
-export const RawCustomQuerySchema = z
-  .object({
-    name: z.string(),
-    type: z.enum(['query', 'mutation']),
-    sql: z.string(),
-    params: z
-      .array(
-        z.object({
-          name: z.string(),
-          type: z.string(),
-        }),
-      )
-      .optional(),
-    returns: z.string(),
-    permissions: z
-      .array(
-        z
-          .object({
-            role: z.string(),
-            filter: BoolExpSchema.optional(),
-          })
-          .strict(),
-      )
-      .optional(),
-  })
-  .strict();
-
 export const RawApiConfigSchema = z
   .object({
     table_aliases: z.record(z.string(), z.string()).optional(),
-    custom_queries: z.array(RawCustomQuerySchema).optional(),
     rest: z
       .object({
         auto_generate: z.boolean().optional(),

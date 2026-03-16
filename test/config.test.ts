@@ -109,41 +109,6 @@ describe('Config Loading', () => {
       expect(config.apiDocs.llmFormat).toBe(true);
     });
 
-    it('should load custom queries from api_config.yaml', async () => {
-      const cleanDir = await getCleanMetadataDir();
-      const config = await loadConfig(cleanDir, SERVER_CONFIG_PATH);
-      expect(config.customQueries).toBeDefined();
-      expect(config.customQueries.length).toBe(3);
-
-      const cwb = config.customQueries.find((q) => q.name === 'getClientWithBalance');
-      expect(cwb).toBeDefined();
-      expect(cwb!.type).toBe('query');
-      expect(cwb!.params).toHaveLength(1);
-      expect(cwb!.params![0].name).toBe('clientId');
-      expect(cwb!.params![0].type).toBe('uuid');
-      expect(cwb!.returns).toBe('ClientWithBalance');
-      expect(cwb!.permissions).toHaveLength(3);
-    });
-
-    it('should load custom mutation from api_config.yaml', async () => {
-      const cleanDir = await getCleanMetadataDir();
-      const config = await loadConfig(cleanDir, SERVER_CONFIG_PATH);
-      const ca = config.customQueries.find((q) => q.name === 'creditAccount');
-      expect(ca).toBeDefined();
-      expect(ca!.type).toBe('mutation');
-      expect(ca!.params).toHaveLength(2);
-      expect(ca!.returns).toBe('AccountBalance');
-    });
-
-    it('should load custom query permissions with filters', async () => {
-      const cleanDir = await getCleanMetadataDir();
-      const config = await loadConfig(cleanDir, SERVER_CONFIG_PATH);
-      const cwb = config.customQueries.find((q) => q.name === 'getClientWithBalance');
-      const functionPerm = cwb!.permissions!.find((p) => p.role === 'function');
-      expect(functionPerm).toBeDefined();
-      expect(functionPerm!.filter).toBeDefined();
-    });
-
     it('should handle event triggers on invoice table', async () => {
       const cleanDir = await getCleanMetadataDir();
       const config = await loadConfig(cleanDir, SERVER_CONFIG_PATH);

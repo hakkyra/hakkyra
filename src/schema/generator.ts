@@ -58,7 +58,6 @@ import {
   makeSubscriptionSelectByPkSubscribe,
   makeSubscriptionStreamSubscribe,
 } from './subscription-resolvers.js';
-import { buildCustomQueryFields } from './custom-queries.js';
 import { buildNativeQueryFields } from './native-queries.js';
 import { resolveTrackedFunctions, buildTrackedFunctionFields } from './tracked-functions.js';
 import type { TrackedFunctionConfig } from '../types.js';
@@ -147,7 +146,7 @@ export interface GenerateSchemaOptions {
 }
 
 export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptions): GraphQLSchema {
-  const { tables, enums, functions, customQueries } = model;
+  const { tables, enums, functions } = model;
 
   // ── Step 1: Initialize registries ──────────────────────────────────────
   const typeRegistry: TypeRegistry = new Map();
@@ -211,14 +210,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     aggregateTypesByTable.set(key, mutInputs.selectAggregateFields);
   }
 
-  // ── Step 5b: Build custom query fields ──────────────────────────────────
-  const customFields = buildCustomQueryFields(
-    customQueries ?? [],
-    typeRegistry,
-    tables,
-  );
-
-  // ── Step 5b2: Build native query fields ─────────────────────────────────
+  // ── Step 5b: Build native query fields ───────────────────────────────────
   const nativeQueryFieldResult = buildNativeQueryFields(
     model.nativeQueries ?? [],
     model.logicalModels ?? [],
@@ -317,11 +309,6 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
       resolve: makeSelectAggregateResolver(table),
       description: `Aggregate rows from ${table.schema}.${table.name}`,
     };
-  }
-
-  // Add custom query fields to Query
-  for (const [name, fieldConfig] of Object.entries(customFields.queryFields)) {
-    queryFields[name] = fieldConfig;
   }
 
   // Add native query fields to Query
@@ -477,11 +464,6 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     }
   }
 
-  // Add custom mutation fields to Mutation
-  for (const [name, fieldConfig] of Object.entries(customFields.mutationFields)) {
-    mutationFields[name] = fieldConfig;
-  }
-
   // Add tracked function mutation fields to Mutation
   for (const [name, fieldConfig] of Object.entries(trackedFunctionFields.mutationFields)) {
     mutationFields[name] = fieldConfig;
@@ -587,13 +569,12 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     query: queryType,
     mutation: Object.keys(mutationFields).length > 0 ? mutationType : undefined,
     subscription: subscriptionType,
-    // Register custom scalars + custom query output types so they appear in the schema
+    // Register custom scalars so they appear in the schema
     types: [
       ...Object.values(customScalars),
       ...enumTypes.values(),
       OrderByDirection,
       CursorOrdering,
-      ...customFields.outputTypes,
       ...nativeQueryFieldResult.outputTypes,
       // Note: action types are NOT included here because they are reachable
       // through the query/mutation field graph. Including them would cause

@@ -15,7 +15,6 @@ import { GraphQLSchema, GraphQLInputObjectType, GraphQLEnumType } from 'graphql'
 import { compileInsertOne, compileInsert } from '../src/sql/insert.js';
 import { compileFilter } from '../src/permissions/compiler.js';
 import { generateSchema } from '../src/schema/generator.js';
-import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
@@ -37,7 +36,6 @@ function findTable(name: string): TableInfo {
 
 beforeAll(async () => {
   process.env['DATABASE_URL'] = TEST_DB_URL;
-  resetCustomOutputTypeCache();
   await waitForDb();
   const pool = getPool();
   const introspection = await introspectDatabase(pool);

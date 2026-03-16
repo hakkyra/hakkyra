@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { GraphQLSchema, GraphQLObjectType, GraphQLInputObjectType, GraphQLNonNull, GraphQLList } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
-import { resetCustomOutputTypeCache } from '../src/schema/custom-queries.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel } from '../src/introspection/merger.js';
 import { loadConfig } from '../src/config/loader.js';
@@ -13,7 +12,6 @@ let schema: GraphQLSchema;
 
 beforeAll(async () => {
   process.env['DATABASE_URL'] = TEST_DB_URL;
-  resetCustomOutputTypeCache();
   await waitForDb();
   const pool = getPool();
   const introspection = await introspectDatabase(pool);
@@ -317,101 +315,6 @@ describe('GraphQL Schema Generation', () => {
       const fields = clientBoolExp!.getFields();
       // Client has array relationship 'accounts' -> should have 'accountsAggregate'
       expect(fields['accountsAggregate']).toBeDefined();
-    });
-  });
-
-  describe('Custom queries', () => {
-    it('should register custom query fields in the Query type', () => {
-      const queryType = schema.getQueryType()!;
-      const fields = queryType.getFields();
-      expect(fields['getClientWithBalance']).toBeDefined();
-      expect(fields['getTopClients']).toBeDefined();
-    });
-
-    it('should register custom mutation fields in the Mutation type', () => {
-      const mutationType = schema.getMutationType()!;
-      const fields = mutationType.getFields();
-      expect(fields['creditAccount']).toBeDefined();
-    });
-
-    it('should generate ClientWithBalance output type with correct fields', () => {
-      const typeMap = schema.getTypeMap();
-      const cwbType = typeMap['ClientWithBalance'] as GraphQLObjectType | undefined;
-      expect(cwbType).toBeDefined();
-      const fields = cwbType!.getFields();
-      expect(fields['id']).toBeDefined();
-      expect(fields['username']).toBeDefined();
-      expect(fields['email']).toBeDefined();
-      expect(fields['status']).toBeDefined();
-      expect(fields['totalBalance']).toBeDefined();
-      expect(fields['totalCredit']).toBeDefined();
-    });
-
-    it('should generate TopClient output type with correct fields', () => {
-      const typeMap = schema.getTypeMap();
-      const tcType = typeMap['TopClient'] as GraphQLObjectType | undefined;
-      expect(tcType).toBeDefined();
-      const fields = tcType!.getFields();
-      expect(fields['id']).toBeDefined();
-      expect(fields['username']).toBeDefined();
-      expect(fields['totalBalance']).toBeDefined();
-      expect(fields['totalPayments']).toBeDefined();
-      expect(fields['paymentCount']).toBeDefined();
-      expect(fields['totalAppointments']).toBeDefined();
-    });
-
-    it('should generate AccountBalance output type with correct fields', () => {
-      const typeMap = schema.getTypeMap();
-      const abType = typeMap['AccountBalance'] as GraphQLObjectType | undefined;
-      expect(abType).toBeDefined();
-      const fields = abType!.getFields();
-      expect(fields['id']).toBeDefined();
-      expect(fields['clientId']).toBeDefined();
-      expect(fields['balance']).toBeDefined();
-      expect(fields['creditBalance']).toBeDefined();
-    });
-
-    it('should have correct args on getClientWithBalance query', () => {
-      const queryType = schema.getQueryType()!;
-      const field = queryType.getFields()['getClientWithBalance'];
-      expect(field).toBeDefined();
-      const argNames = field.args.map((a) => a.name);
-      expect(argNames).toContain('clientId');
-      expect(argNames).toHaveLength(1);
-      const clientIdArg = field.args.find((a) => a.name === 'clientId')!;
-      expect(clientIdArg.type).toBeInstanceOf(GraphQLNonNull);
-    });
-
-    it('should have correct args on getTopClients query', () => {
-      const queryType = schema.getQueryType()!;
-      const field = queryType.getFields()['getTopClients'];
-      expect(field).toBeDefined();
-      const argNames = field.args.map((a) => a.name);
-      expect(argNames).toContain('branchId');
-      expect(argNames).toContain('limit');
-      expect(argNames).toHaveLength(2);
-    });
-
-    it('should have correct args on creditAccount mutation', () => {
-      const mutationType = schema.getMutationType()!;
-      const field = mutationType.getFields()['creditAccount'];
-      expect(field).toBeDefined();
-      const argNames = field.args.map((a) => a.name);
-      expect(argNames).toContain('accountId');
-      expect(argNames).toContain('amount');
-      expect(argNames).toHaveLength(2);
-    });
-
-    it('should return list type for custom queries', () => {
-      const queryType = schema.getQueryType()!;
-      const field = queryType.getFields()['getClientWithBalance'];
-      expect(field.type).toBeInstanceOf(GraphQLNonNull);
-    });
-
-    it('should return nullable type for custom mutations', () => {
-      const mutationType = schema.getMutationType()!;
-      const field = mutationType.getFields()['creditAccount'];
-      expect(field.type).not.toBeInstanceOf(GraphQLNonNull);
     });
   });
 

@@ -56,7 +56,6 @@ export function validateConfig(config: HakkyraConfig): ValidationResult {
   validateActions(config, errors, warnings);
   validateCronTriggers(config, errors, warnings);
   validateREST(config, errors);
-  validateCustomQueries(config, errors);
   validateEventLogRetention(config, errors);
 
   return {
@@ -400,35 +399,6 @@ function validateREST(config: HakkyraConfig, errors: ValidationError[]): void {
       path: 'rest.pagination.maxLimit',
       message: 'Max pagination limit must be >= default limit.',
     });
-  }
-}
-
-function validateCustomQueries(config: HakkyraConfig, errors: ValidationError[]): void {
-  for (let i = 0; i < config.customQueries.length; i++) {
-    const query = config.customQueries[i];
-    const qPath = `customQueries[${i}]`;
-
-    if (!query.name) {
-      errors.push({ path: `${qPath}.name`, message: 'Custom query name is required.' });
-    }
-    if (!query.sql) {
-      errors.push({
-        path: `${qPath}.sql`,
-        message: `Custom query "${query.name}" requires SQL.`,
-      });
-    }
-    if (!query.returns) {
-      errors.push({
-        path: `${qPath}.returns`,
-        message: `Custom query "${query.name}" requires a return type.`,
-      });
-    }
-    if (query.type !== 'query' && query.type !== 'mutation') {
-      errors.push({
-        path: `${qPath}.type`,
-        message: `Custom query "${query.name}" has invalid type: "${query.type}". Must be "query" or "mutation".`,
-      });
-    }
   }
 }
 

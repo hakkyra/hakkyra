@@ -219,33 +219,6 @@ export const RESTConfigSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// CustomQueryConfig
-// ---------------------------------------------------------------------------
-
-export const CustomQueryConfigSchema = z.object({
-  name: z.string(),
-  type: z.enum(['query', 'mutation']),
-  sql: z.string(),
-  params: z
-    .array(
-      z.object({
-        name: z.string(),
-        type: z.string(),
-      }),
-    )
-    .optional(),
-  returns: z.string(),
-  permissions: z
-    .array(
-      z.object({
-        role: z.string(),
-        filter: BoolExpSchema.optional(),
-      }),
-    )
-    .optional(),
-});
-
-// ---------------------------------------------------------------------------
 // APIDocsConfig
 // ---------------------------------------------------------------------------
 
@@ -489,7 +462,6 @@ export const HakkyraConfigSchema = z.object({
   actionsGraphql: z.string().optional(),
   cronTriggers: z.array(CronTriggerConfigSchema),
   rest: RESTConfigSchema,
-  customQueries: z.array(CustomQueryConfigSchema),
   queryCollections: z.array(QueryCollectionSchema).default([]),
   hasuraRestEndpoints: z.array(HasuraRestEndpointSchema).default([]),
   nativeQueries: z.array(NativeQuerySchema).default([]),

@@ -5,7 +5,6 @@
 
 import type { Pool } from 'pg';
 import type {
-  CustomQueryConfig,
   EnumInfo,
   ForeignKeyInfo,
   HakkyraConfig,
@@ -330,7 +329,6 @@ export function mergeSchemaModel(
     tables: mergedTables,
     enums: introspection.enums,
     functions: introspection.functions,
-    customQueries: config.customQueries ?? [],
     trackedFunctions: config.trackedFunctions ?? [],
     nativeQueries: config.nativeQueries ?? [],
     logicalModels: config.logicalModels ?? [],
