@@ -38,6 +38,18 @@ interface CacheEntry {
 
 /**
  * Simple in-memory TTL cache keyed by a hash of the forwarded headers.
+ *
+ * **Stale-role trade-off:** When caching is enabled, auth results (including
+ * the user's role and allowed roles) are served from cache until the TTL
+ * expires. If a user's role is revoked on the webhook provider side, stale
+ * cache entries will continue to grant the old role for up to `ttlMs`
+ * milliseconds. This is a deliberate performance trade-off to avoid
+ * hitting the webhook on every single request.
+ *
+ * **Recommendation:** Keep `cacheTtlMs` low (e.g., 5000-30000ms) to limit
+ * the window during which revoked roles remain active. Set `cacheTtlMs`
+ * to 0 to disable caching entirely if immediate revocation is required,
+ * at the cost of a webhook round-trip on every request.
  */
 class SessionCache {
   private readonly store = new Map<string, CacheEntry>();
@@ -154,7 +166,18 @@ function parseWebhookResponse(body: Record<string, unknown>, sessionNs: string):
 // ─── Authenticator factory ──────────────────────────────────────────────────
 
 export interface WebhookAuthOptions {
-  /** Cache TTL in milliseconds (default 0 = no cache). */
+  /**
+   * Cache TTL in milliseconds (default 0 = no cache).
+   *
+   * When set to a value greater than 0, webhook auth results are cached
+   * in memory for this duration. This reduces latency and load on the
+   * webhook provider, but means that role revocations on the provider
+   * side will not take effect until cached entries expire.
+   *
+   * Recommended: 5000-30000ms for a reasonable balance between
+   * performance and revocation responsiveness. Use 0 for environments
+   * where immediate role revocation is critical.
+   */
   cacheTtlMs?: number;
   /** Request timeout in milliseconds (default 5000). */
   timeoutMs?: number;

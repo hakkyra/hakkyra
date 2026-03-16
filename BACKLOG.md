@@ -972,7 +972,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 #### Medium
 
 - [x] **URL template path traversal in action transforms** — `interpolateUrlTemplate` now validates path segments after `encodeURIComponent`, rejecting `..` and `.` segments. 13 new tests in `test/action-transforms.test.ts`.
-- [ ] **Webhook auth cache serves stale roles** — `src/auth/webhook.ts` caches auth results by header hash. If a user's role is revoked on the webhook provider, stale cache entries grant the old role for up to `cacheTtlMs`. This is by-design for performance, but undocumented. Fix: document the trade-off, recommend low TTL values.
+- [x] **Webhook auth cache serves stale roles** — `src/auth/webhook.ts` caches auth results by header hash. If a user's role is revoked on the webhook provider, stale cache entries grant the old role for up to `cacheTtlMs`. This is by-design for performance, but undocumented. Fix: document the trade-off, recommend low TTL values.
 
 ### P8.2 — Code Duplication
 
@@ -997,7 +997,7 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 #### Low
 
-- [ ] **`Record<string, any>` in BullMQ adapter** — `src/shared/job-queue/bullmq-adapter.ts:105,163` uses `Record<string, any>` for job options. Justified for optional dependency, but a `BullMQJobOptions` interface would be safer.
+- [x] **`Record<string, any>` in BullMQ adapter** — `src/shared/job-queue/bullmq-adapter.ts:105,163` uses `Record<string, any>` for job options. Justified for optional dependency, but a `BullMQJobOptions` interface would be safer.
 
 ### P8.4 — Architecture
 
@@ -1009,14 +1009,14 @@ Automated review of duplication, typing, security, and architectural coherence a
 
 - [x] **`server.ts` decomposed** — Split from 969 lines into thin orchestrator (362 lines) + 4 modules: `server/context.ts` (buildResolverContext factory), `server/schema.ts` (CJS bridging, introspection control), `server/jobs.ts` (job queue, events, crons, subscriptions), `server/routes.ts` (REST, health, docs).
 - [x] **Context building deduplicated** — `buildResolverContext()` factory in `server/context.ts` replaces 3× duplicated inline context objects.
-- [ ] **Events/crons/actions inconsistent init patterns** — Events return a `Manager` with `stop()`, crons return nothing, actions require two separate calls (`ensureAsyncActionSchema` + `registerAsyncActionWorkers`). Fix: standardize on a `Manager` interface with `init()` and `stop()`.
+- [x] **Events/crons/actions inconsistent init patterns** — Events return a `Manager` with `stop()`, crons return nothing, actions require two separate calls (`ensureAsyncActionSchema` + `registerAsyncActionWorkers`). Fix: standardize on a `Manager` interface with `init()` and `stop()`.
 - [x] **`resolvers.ts` split into modules** — Already split into `resolvers/select.ts`, `resolvers/insert.ts`, `resolvers/update.ts`, `resolvers/delete.ts` with shared `resolvers/helpers.ts`.
 - [x] **Error handling inconsistency in webhook workers** — All three consumers (events, crons, async actions) now use the shared `registerWebhookWorker` factory in `src/shared/webhook-worker.ts`, which provides consistent logging (info on success, warn on failure) and throws on failure so pg-boss records error details. Async actions refactored from manual `jobQueue.work()` to the factory with a custom `deliver` callback.
 
 #### Low
 
-- [ ] **Tracked functions coupled to resolvers** — `src/schema/tracked-functions.ts:50` imports `remapBoolExp` from `resolvers.ts`. Fix: extract `remapBoolExp` to `src/schema/mapping.ts`.
-- [ ] **Unused `compileFilter` export** — `src/permissions/index.ts` exports `compileFilter` from `compiler.ts` but it appears unused in the codebase. Verify and remove if dead code.
+- [x] **Tracked functions coupled to resolvers** — `src/schema/tracked-functions.ts:50` imports `remapBoolExp` from `resolvers.ts`. Fix: extract `remapBoolExp` to `src/schema/mapping.ts`.
+- [x] **Unused `compileFilter` export** — `src/permissions/index.ts` exports `compileFilter` from `compiler.ts` but it appears unused in the codebase. Verify and remove if dead code.
 
 ### Bugs Discovered During Test Gap Coverage
 
