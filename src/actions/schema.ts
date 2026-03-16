@@ -6,7 +6,7 @@
  *
  * Supports both synchronous and asynchronous actions:
  * - Sync: mutation calls webhook inline, returns result directly
- * - Async: mutation enqueues job, returns { actionId }, result queried separately
+ * - Async: mutation enqueues job, returns uuid! (action ID), result queried via action's output type
  *
  * Action output types can include relationship fields that resolve nested
  * database records via the action's configured field_mapping.
@@ -24,7 +24,6 @@ import {
   GraphQLInt,
   GraphQLID,
   GraphQLError,
-  GraphQLEnumType,
 } from 'graphql';
 import type {
   DocumentNode,
@@ -216,28 +215,8 @@ function parseActionsSDL(sdl: string) {
   return { actions, inputTypeDefs, outputTypeDefs };
 }
 
-// ─── Shared Async Action Types ──────────────────────────────────────────────
-
-/** AsyncActionStatus enum type — shared across all async actions */
-const AsyncActionStatusEnum = new GraphQLEnumType({
-  name: 'AsyncActionStatus',
-  description: 'Status of an asynchronous action',
-  values: {
-    created: { value: 'created' },
-    processing: { value: 'processing' },
-    completed: { value: 'completed' },
-    failed: { value: 'failed' },
-  },
-});
-
-/** The return type for async action mutations: { actionId: Uuid! } */
-const AsyncActionIdType = new GraphQLObjectType({
-  name: 'AsyncActionId',
-  description: 'Return type for async action mutations',
-  fields: {
-    actionId: { type: new GraphQLNonNull(customScalars['Uuid']!) },
-  },
-});
+// (Async action types removed — mutations now return uuid! directly,
+//  and result queries use the action's handler return type)
 
 // ─── Relationship Helpers ────────────────────────────────────────────────────
 
@@ -509,9 +488,6 @@ export function buildActionFields(
   const queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
   const mutationFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
 
-  // Track whether we need async types in the schema
-  let hasAsyncActions = false;
-
   for (const parsed of parsedActions) {
     const actionConfig = actionConfigMap.get(parsed.name);
     if (!actionConfig) continue;
@@ -534,11 +510,9 @@ export function buildActionFields(
     }
 
     if (isAsync) {
-      hasAsyncActions = true;
-
-      // ── Async action: mutation returns { actionId: Uuid! } ────────────
+      // ── Async action: mutation returns uuid! (Hasura-compatible) ───────
       const mutationFieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
-        type: new GraphQLNonNull(AsyncActionIdType),
+        type: new GraphQLNonNull(customScalars['Uuid']!),
         args: argsConfig,
         description: actionConfig.comment
           ? `${actionConfig.comment} (async — returns action ID)`
@@ -548,23 +522,9 @@ export function buildActionFields(
       mutationFields[parsed.name] = mutationFieldConfig;
 
       // ── Async action: result query field ──────────────────────────────
-      // Build a per-action result type that includes the action's output type
-      const resultTypeName = `${parsed.name.charAt(0).toUpperCase()}${parsed.name.slice(1)}AsyncResult`;
-      const asyncResultType = new GraphQLObjectType({
-        name: resultTypeName,
-        description: `Async action result for ${actionConfig.name}`,
-        fields: {
-          id: { type: new GraphQLNonNull(customScalars['Uuid']!) },
-          status: { type: new GraphQLNonNull(AsyncActionStatusEnum) },
-          output: { type: returnType },
-          errors: { type: customScalars['Jsonb']! },
-          createdAt: { type: new GraphQLNonNull(customScalars['Timestamptz']!) },
-        },
-      });
-      outputTypes.set(resultTypeName, asyncResultType);
-
+      // Uses the action's handler return type directly (Hasura-compatible)
       const resultQueryFieldConfig: GraphQLFieldConfig<unknown, ResolverContext> = {
-        type: asyncResultType,
+        type: returnType,
         args: {
           id: { type: new GraphQLNonNull(customScalars['Uuid']!) },
         },
@@ -594,11 +554,6 @@ export function buildActionFields(
     ...inputTypes.values(),
     ...outputTypes.values(),
   ];
-
-  // Add async action shared types if any async actions exist
-  if (hasAsyncActions) {
-    types.push(AsyncActionStatusEnum, AsyncActionIdType);
-  }
 
   return { queryFields, mutationFields, types };
 }
@@ -646,7 +601,7 @@ function makeActionResolver(
 
 /**
  * Creates a resolver for the async action mutation.
- * Returns { actionId } immediately after enqueuing the action.
+ * Returns the action ID (UUID) immediately after enqueuing the action.
  */
 function makeAsyncActionResolver(
   action: ActionConfig,
@@ -683,13 +638,18 @@ function makeAsyncActionResolver(
       context.auth,
     );
 
-    return { actionId };
+    return actionId;
   };
 }
 
 /**
  * Creates a resolver for the async action result query.
- * Returns the current status and output of the action.
+ * Returns the action's output directly (Hasura-compatible).
+ *
+ * - If the action is not found or belongs to a different action, returns null.
+ * - If the action is still processing, returns null.
+ * - If the action failed, throws a GraphQLError with the stored error.
+ * - If the action completed, returns the output data.
  */
 function makeAsyncActionResultResolver(
   action: ActionConfig,
@@ -726,12 +686,20 @@ function makeAsyncActionResultResolver(
       return null;
     }
 
-    return {
-      id: result.id,
-      status: result.status,
-      output: result.output,
-      errors: result.errors,
-      createdAt: result.createdAt,
-    };
+    // Return the output directly (Hasura-compatible)
+    if (result.status === 'completed') {
+      return result.output ?? null;
+    }
+
+    if (result.status === 'failed') {
+      const errorMsg = (result.errors as Record<string, unknown>)?.message ?? 'Action failed';
+      throw new GraphQLError(
+        String(errorMsg),
+        { extensions: { code: 'ACTION_HANDLER_ERROR' } },
+      );
+    }
+
+    // Still processing — return null
+    return null;
   };
 }
