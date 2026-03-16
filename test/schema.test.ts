@@ -249,6 +249,16 @@ describe('GraphQL Schema Generation', () => {
       expect(typeMap['Timestamptz']).toBeDefined();
     });
 
+    it('should register Timestamp scalar type (P10.12)', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['Timestamp']).toBeDefined();
+    });
+
+    it('should register Smallint scalar type (P10.13)', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['Smallint']).toBeDefined();
+    });
+
     it('should register json scalar type', () => {
       const typeMap = schema.getTypeMap();
       expect(typeMap['json']).toBeDefined();
@@ -257,6 +267,56 @@ describe('GraphQL Schema Generation', () => {
     it('should register Numeric scalar type', () => {
       const typeMap = schema.getTypeMap();
       expect(typeMap['Numeric']).toBeDefined();
+    });
+
+    it('should generate TimestampComparisonExp for Timestamp scalar (P10.12)', () => {
+      const typeMap = schema.getTypeMap();
+      const compType = typeMap['TimestampComparisonExp'] as GraphQLInputObjectType | undefined;
+      expect(compType).toBeDefined();
+      const fields = compType!.getFields();
+      expect(fields['_eq']).toBeDefined();
+      expect(fields['_gt']).toBeDefined();
+      expect(fields['_lt']).toBeDefined();
+      expect(fields['_gte']).toBeDefined();
+      expect(fields['_lte']).toBeDefined();
+    });
+
+    it('should generate SmallintComparisonExp for Smallint scalar (P10.13)', () => {
+      const typeMap = schema.getTypeMap();
+      const compType = typeMap['SmallintComparisonExp'] as GraphQLInputObjectType | undefined;
+      expect(compType).toBeDefined();
+      const fields = compType!.getFields();
+      expect(fields['_eq']).toBeDefined();
+      expect(fields['_gt']).toBeDefined();
+      expect(fields['_lt']).toBeDefined();
+      expect(fields['_gte']).toBeDefined();
+      expect(fields['_lte']).toBeDefined();
+    });
+
+    it('should use Timestamp scalar for timestamp-without-tz columns (P10.12)', () => {
+      const typeMap = schema.getTypeMap();
+      const transactionType = typeMap['Transaction'] as GraphQLObjectType | undefined;
+      expect(transactionType).toBeDefined();
+      const fields = transactionType!.getFields();
+      // local_time is TIMESTAMP WITHOUT TIME ZONE -> Timestamp scalar
+      expect(fields['localTime']).toBeDefined();
+      const localTimeType = fields['localTime'].type.toString();
+      expect(localTimeType).toBe('Timestamp');
+      // created_at is TIMESTAMPTZ -> Timestamptz scalar (should remain unchanged)
+      expect(fields['createdAt']).toBeDefined();
+      const createdAtType = fields['createdAt'].type.toString();
+      expect(createdAtType).toBe('Timestamptz');
+    });
+
+    it('should use Smallint scalar for smallint columns (P10.13)', () => {
+      const typeMap = schema.getTypeMap();
+      const transactionType = typeMap['Transaction'] as GraphQLObjectType | undefined;
+      expect(transactionType).toBeDefined();
+      const fields = transactionType!.getFields();
+      // sequence is SMALLINT -> Smallint scalar
+      expect(fields['sequence']).toBeDefined();
+      const sequenceType = fields['sequence'].type.toString();
+      expect(sequenceType).toBe('Smallint!');
     });
   });
 

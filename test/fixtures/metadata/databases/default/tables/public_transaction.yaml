@@ -1,0 +1,40 @@
+table:
+  schema: public
+  name: transaction
+
+configuration:
+  custom_root_fields:
+    select: transactions
+    select_by_pk: transactionByPk
+    insert: insertTransactions
+    insert_one: insertTransaction
+  custom_column_names:
+    id: id
+    account_id: accountId
+    sequence: sequence
+    amount: amount
+    description: description
+    local_time: localTime
+    created_at: createdAt
+
+object_relationships:
+  - name: account
+    using:
+      foreign_key_constraint_on: account_id
+
+select_permissions:
+  - role: backoffice
+    permission:
+      columns: "*"
+      filter: {}
+
+  - role: administrator
+    permission:
+      columns: "*"
+      filter: {}
+
+insert_permissions:
+  - role: administrator
+    permission:
+      columns: "*"
+      check: {}
