@@ -583,7 +583,7 @@ export function makeSubscriptionSelectAggregateSubscribe(
           (f) => f.name === cf.function.name && f.schema === fnSchema,
         );
         if (!fn || fn.isSetReturning) continue;
-        const NUMERIC_PG_RETURN = new Set(['int2', 'int4', 'int8', 'float4', 'float8', 'numeric', 'serial', 'serial4', 'serial8', 'bigserial', 'oid']);
+        const NUMERIC_PG_RETURN = new Set(['int2', 'smallint', 'int4', 'integer', 'int8', 'bigint', 'float4', 'real', 'float8', 'double precision', 'numeric', 'serial', 'serial4', 'serial8', 'bigserial', 'oid']);
         if (NUMERIC_PG_RETURN.has(fn.returnType)) {
           numericCFRefs.push({ name: toCamelCase(cf.name), functionName: cf.function.name, schema: fnSchema });
         }

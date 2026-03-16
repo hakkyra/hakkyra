@@ -36,9 +36,11 @@ export interface GraphQLTypeName {
  */
 const STRINGIFY_NUMERIC_OVERRIDES: Record<string, { name: string; isCustomScalar: boolean }> = {
   int8: { name: 'String', isCustomScalar: false },
+  bigint: { name: 'String', isCustomScalar: false },
   bigserial: { name: 'String', isCustomScalar: false },
   serial8: { name: 'String', isCustomScalar: false },
   float8: { name: 'String', isCustomScalar: false },
+  'double precision': { name: 'String', isCustomScalar: false },
   numeric: { name: 'String', isCustomScalar: false },
   money: { name: 'String', isCustomScalar: false },
 };
@@ -73,18 +75,23 @@ export function shouldCastToText(udtName: string): boolean {
 const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> = {
   // Integer types
   int2: { name: 'Int', isCustomScalar: false },
+  smallint: { name: 'Int', isCustomScalar: false },
   int4: { name: 'Int', isCustomScalar: false },
+  integer: { name: 'Int', isCustomScalar: false },
   serial: { name: 'Int', isCustomScalar: false },
   serial4: { name: 'Int', isCustomScalar: false },
 
   // Big integer
   int8: { name: 'Bigint', isCustomScalar: true },
+  bigint: { name: 'Bigint', isCustomScalar: true },
   bigserial: { name: 'Bigint', isCustomScalar: true },
   serial8: { name: 'Bigint', isCustomScalar: true },
 
   // Floating point
   float4: { name: 'Float', isCustomScalar: false },
+  real: { name: 'Float', isCustomScalar: false },
   float8: { name: 'Float', isCustomScalar: false },
+  'double precision': { name: 'Float', isCustomScalar: false },
   numeric: { name: 'Numeric', isCustomScalar: true },
   money: { name: 'Numeric', isCustomScalar: true },
 
@@ -95,7 +102,9 @@ const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> =
   // String types
   text: { name: 'String', isCustomScalar: false },
   varchar: { name: 'String', isCustomScalar: false },
+  'character varying': { name: 'String', isCustomScalar: false },
   char: { name: 'String', isCustomScalar: false },
+  character: { name: 'String', isCustomScalar: false },
   bpchar: { name: 'Bpchar', isCustomScalar: true },
   name: { name: 'String', isCustomScalar: false },
   citext: { name: 'String', isCustomScalar: false },
@@ -110,10 +119,14 @@ const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> =
 
   // Timestamps & dates
   timestamp: { name: 'Timestamptz', isCustomScalar: true },
+  'timestamp without time zone': { name: 'Timestamptz', isCustomScalar: true },
   timestamptz: { name: 'Timestamptz', isCustomScalar: true },
+  'timestamp with time zone': { name: 'Timestamptz', isCustomScalar: true },
   date: { name: 'Date', isCustomScalar: true },
   time: { name: 'Time', isCustomScalar: true },
+  'time without time zone': { name: 'Time', isCustomScalar: true },
   timetz: { name: 'Time', isCustomScalar: true },
+  'time with time zone': { name: 'Time', isCustomScalar: true },
   interval: { name: 'Interval', isCustomScalar: true },
 
   // Binary
