@@ -25,7 +25,7 @@ import type {
 } from '../types.js';
 import type { RelationshipSelection, OrderByItem } from '../sql/select.js';
 import type { ResolverPermissionLookup } from './resolvers.js';
-import { toCamelCase } from './type-builder.js';
+import { toCamelCase, getColumnFieldName } from './type-builder.js';
 
 // ─── Public Interface ────────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ export interface SetReturningComputedFieldParsed {
 function camelToColumnMap(table: TableInfo): Map<string, string> {
   const map = new Map<string, string>();
   for (const col of table.columns) {
-    map.set(toCamelCase(col.name), col.name);
+    map.set(getColumnFieldName(table, col.name), col.name);
   }
   return map;
 }
@@ -435,7 +435,7 @@ function parseSelectionSet(
   const jsonbColumnCamelNames = new Set<string>();
   for (const col of table.columns) {
     if (!col.isArray && (col.udtName === 'jsonb' || col.udtName === 'json')) {
-      jsonbColumnCamelNames.add(toCamelCase(col.name));
+      jsonbColumnCamelNames.add(getColumnFieldName(table, col.name));
     }
   }
 

@@ -21,7 +21,7 @@ import type { GraphQLInputType, GraphQLScalarType } from 'graphql';
 import type { TableInfo, ColumnInfo, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars } from './scalars.js';
-import { getTypeName, toCamelCase, tableKey, type TypeRegistry } from './type-builder.js';
+import { getTypeName, toCamelCase, getColumnFieldName, tableKey, type TypeRegistry } from './type-builder.js';
 
 // ─── Scalar Comparison Input Types ──────────────────────────────────────────
 
@@ -366,7 +366,7 @@ export function buildFilterTypes(
         // Column comparison fields (camelCase per graphql-default naming convention)
         for (const column of table.columns) {
           const compType = columnComparisonType(column, enumTypes, enumNames);
-          const fieldName = toCamelCase(column.name);
+          const fieldName = getColumnFieldName(table, column.name);
           fields[fieldName] = { type: compType };
         }
 

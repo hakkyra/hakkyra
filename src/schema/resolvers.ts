@@ -28,7 +28,7 @@ import type { OrderByItem, AggregateSelection, AggregateComputedFieldRef, Comput
 import { compileInsertOne, compileInsert } from '../sql/insert.js';
 import { compileUpdateByPk, compileUpdate, compileUpdateMany } from '../sql/update.js';
 import { compileDeleteByPk, compileDelete } from '../sql/delete.js';
-import { toCamelCase } from './type-builder.js';
+import { toCamelCase, getColumnFieldName } from './type-builder.js';
 import { parseResolveInfo, parseReturningInfo, parseAggregateNodesInfo, type SetReturningComputedFieldParsed } from './resolve-info.js';
 
 // ─── Resolver Context ───────────────────────────────────────────────────────
@@ -137,7 +137,7 @@ export function isSubscriptionRootFieldAllowed(
 function camelToColumnMap(table: TableInfo): Map<string, string> {
   const map = new Map<string, string>();
   for (const col of table.columns) {
-    map.set(toCamelCase(col.name), col.name);
+    map.set(getColumnFieldName(table, col.name), col.name);
   }
   return map;
 }
@@ -719,7 +719,7 @@ function remapRowToCamel(
   const result: Record<string, unknown> = {};
   for (const col of table.columns) {
     if (col.name in row) {
-      result[toCamelCase(col.name)] = row[col.name];
+      result[table.customColumnNames?.[col.name] ?? toCamelCase(col.name)] = row[col.name];
     }
   }
   // Preserve any extra keys (e.g., relationship subquery results and computed fields

@@ -244,7 +244,7 @@ function remapRowToCamel(
   const result: Record<string, unknown> = {};
   for (const col of table.columns) {
     if (col.name in row) {
-      result[toCamelCase(col.name)] = row[col.name];
+      result[table.customColumnNames?.[col.name] ?? toCamelCase(col.name)] = row[col.name];
     }
   }
   // Preserve any extra keys (e.g., nested relationship data)

@@ -440,7 +440,6 @@ export const RawCustomQuerySchema = z
 
 export const RawApiConfigSchema = z
   .object({
-    table_aliases: z.record(z.string(), z.string()).optional(),
     custom_queries: z.array(RawCustomQuerySchema).optional(),
     rest: z
       .object({

@@ -839,7 +839,6 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
 
     it('accepts full api config', () => {
       expectValid(RawApiConfigSchema, {
-        table_aliases: { users: 'people' },
         custom_queries: [
           { name: 'q', type: 'query', sql: 'SELECT 1', returns: 'Result' },
         ],
@@ -860,8 +859,8 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
       });
     });
 
-    it('rejects non-object table_aliases', () => {
-      const err = expectInvalid(RawApiConfigSchema, { table_aliases: 'nope' });
+    it('rejects unknown keys (strict mode)', () => {
+      const err = expectInvalid(RawApiConfigSchema, { table_aliases: { users: 'people' } });
       expect(err.issues.length).toBeGreaterThan(0);
     });
   });
@@ -1812,7 +1811,6 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
       },
       customQueries: [],
       apiDocs: { generate: false },
-      tableAliases: {},
       eventLogRetentionDays: 30,
       slowQueryThresholdMs: 500,
     };
@@ -2148,7 +2146,6 @@ describe('Edge cases', () => {
       rest: { autoGenerate: true, basePath: '/', pagination: { defaultLimit: 20, maxLimit: 100 } },
       customQueries: [],
       apiDocs: { generate: false },
-      tableAliases: {},
       eventLogRetentionDays: 30,
       slowQueryThresholdMs: 500,
     });
