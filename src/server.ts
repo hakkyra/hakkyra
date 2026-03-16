@@ -240,10 +240,10 @@ export async function createServer(
         return { session, auth: session };
       },
       context(_connection, context) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const connectResult = (context as any)?._connectionInit ?? (context as any);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const session = connectResult?.session ?? (context as any)?.session;
+        // Mercurius stores onConnect results on _connectionInit or directly on context
+        const ctx = context as unknown as Record<string, unknown>;
+        const connectResult = (ctx._connectionInit ?? ctx) as Record<string, unknown>;
+        const session = (connectResult.session ?? ctx.session) as import('./types.js').SessionVariables | undefined;
         const auth = session ?? ANONYMOUS_SESSION;
         return buildResolverContext(contextDeps, auth);
       },
@@ -369,8 +369,7 @@ export async function createServer(
   server.decorate('permissionLookup', permissionLookup);
   server.decorate('trackedTables', schemaModel.tables);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return server as any;
+  return server;
 }
 
 // ─── Fastify augmentation ────────────────────────────────────────────────────

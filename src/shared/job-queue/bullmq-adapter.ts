@@ -30,6 +30,13 @@ type BullQueue = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BullWorker = any;
 
+/** Options passed to BullMQ Queue.add() and upsertJobScheduler(). */
+interface BullMQJobOptions {
+  attempts?: number;
+  backoff?: { type: 'exponential' | 'fixed'; delay: number };
+  timeout?: number;
+}
+
 interface RedisConfig {
   url?: string;
   urlEnv?: string;
@@ -122,8 +129,7 @@ export class BullMQAdapter implements JobQueue {
     const opts = this.queueOptions.get(queue);
 
     // Map our abstract options to BullMQ job options
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const jobOpts: Record<string, any> = {};
+    const jobOpts: BullMQJobOptions = {};
     if (opts?.retryLimit) {
       jobOpts.attempts = opts.retryLimit + 1; // BullMQ: attempts includes the initial try
       jobOpts.backoff = opts.retryBackoff
@@ -180,8 +186,7 @@ export class BullMQAdapter implements JobQueue {
     const q = this.getOrCreateQueue(name);
 
     // Build job options from schedule options
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const jobOpts: Record<string, any> = {};
+    const jobOpts: BullMQJobOptions = {};
     if (options?.retryLimit) {
       jobOpts.attempts = options.retryLimit + 1;
       jobOpts.backoff = options.retryBackoff

@@ -17,10 +17,10 @@ import {
   GraphQLBoolean,
   GraphQLEnumType,
 } from 'graphql';
-import type { GraphQLInputType, GraphQLScalarType } from 'graphql';
+import type { GraphQLInputType } from 'graphql';
 import type { TableInfo, ColumnInfo, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
-import { customScalars } from './scalars.js';
+import { customScalars, asScalar } from './scalars.js';
 import { getTypeName, toCamelCase, getColumnFieldName, tableKey, type TypeRegistry } from './type-builder.js';
 
 // ─── Scalar Comparison Input Types ──────────────────────────────────────────
@@ -93,8 +93,8 @@ function jsonbComparisonFields(scalarType: GraphQLInputType): Record<string, { t
     _contains: { type: scalarType },
     _containedIn: { type: scalarType },
     _hasKey: { type: GraphQLString },
-    _hasKeysAny: { type: new GraphQLList(new GraphQLNonNull(GraphQLString as unknown as GraphQLScalarType)) },
-    _hasKeysAll: { type: new GraphQLList(new GraphQLNonNull(GraphQLString as unknown as GraphQLScalarType)) },
+    _hasKeysAny: { type: new GraphQLList(new GraphQLNonNull(asScalar(GraphQLString))) },
+    _hasKeysAll: { type: new GraphQLList(new GraphQLNonNull(asScalar(GraphQLString))) },
   };
 }
 
@@ -137,7 +137,7 @@ function getComparisonType(scalarName: string): GraphQLInputObjectType {
     Boolean: GraphQLBoolean,
   };
   const scalarType: GraphQLInputType =
-    builtinScalars[scalarName] ?? customScalars[scalarName] ?? (GraphQLString as unknown as GraphQLScalarType);
+    builtinScalars[scalarName] ?? customScalars[scalarName] ?? asScalar(GraphQLString);
 
   const compType = new GraphQLInputObjectType({
     name: `${scalarName}ComparisonExp`,
@@ -211,7 +211,7 @@ function getArrayComparisonType(scalarName: string): GraphQLInputObjectType {
     Boolean: GraphQLBoolean,
   };
   const scalarType: GraphQLInputType =
-    builtinScalars[scalarName] ?? customScalars[scalarName] ?? (GraphQLString as unknown as GraphQLScalarType);
+    builtinScalars[scalarName] ?? customScalars[scalarName] ?? asScalar(GraphQLString);
 
   const compType = new GraphQLInputObjectType({
     name: typeName,
