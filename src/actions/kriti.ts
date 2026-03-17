@@ -11,6 +11,7 @@
 
 import { evaluate } from 'kriti-lang';
 
+type KritiVars = NonNullable<Parameters<typeof evaluate>[1]>;
 type KritiContext = Record<string, unknown>;
 
 // ─── String Evaluation ──────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ export function evaluateKritiString(
   // Single expression → evaluate directly (preserves typed value)
   if (isSingleExpression(trimmed)) {
     try {
-      return evaluate(trimmed, context);
+      return evaluate(trimmed, context as KritiVars);
     } catch {
       return null;
     }
@@ -60,7 +61,7 @@ export function evaluateKritiString(
   // Multi-expression or mixed template. First try evaluating directly — this
   // handles conditionals, range loops, and other complex Kriti structures.
   try {
-    return evaluate(trimmed, context);
+    return evaluate(trimmed, context as KritiVars);
   } catch {
     // Direct evaluation failed (likely because there's literal text outside
     // {{ }} blocks). Wrap in quotes for kriti-lang string interpolation.
@@ -75,7 +76,7 @@ export function evaluateKritiString(
   });
 
   try {
-    return evaluate(`"${escaped}"`, context);
+    return evaluate(`"${escaped}"`, context as KritiVars);
   } catch {
     return null;
   }
@@ -137,7 +138,7 @@ export function evaluateKritiUrlTemplate(
   // If the entire string is a single expression, resolve directly
   if (isSingleExpression(trimmed)) {
     try {
-      const value = evaluate(trimmed, context);
+      const value = evaluate(trimmed, context as KritiVars);
       if (value === null || value === undefined) return '';
       if (typeof value === 'object') return JSON.stringify(value);
       return String(value);
@@ -153,7 +154,7 @@ export function evaluateKritiUrlTemplate(
 
     let value: unknown;
     try {
-      value = evaluate(`{{${expr}}}`, context);
+      value = evaluate(`{{${expr}}}`, context as KritiVars);
     } catch {
       return '';
     }
