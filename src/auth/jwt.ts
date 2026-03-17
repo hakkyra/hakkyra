@@ -94,9 +94,14 @@ export async function createJWTVerifier(
   if (jwkUrl) {
     const jwks = createRemoteJWKSet(new URL(jwkUrl));
 
+    // When using JWKS, the key's `alg` field is authoritative — don't
+    // restrict to the configured type (which defaults to HS256).
+    const { algorithms: _drop, ...jwksBaseOptions } = verifyOptions;
+    const jwksOptions = jwksBaseOptions;
+
     return {
       async verify(token: string): Promise<JWTPayload> {
-        const { payload } = await jwtVerify(token, jwks, verifyOptions);
+        const { payload } = await jwtVerify(token, jwks, jwksOptions);
         return payload;
       },
     };
