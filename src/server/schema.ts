@@ -3,15 +3,20 @@
  *
  * Handles the schema bridge between ESM-imported graphql and the CJS
  * graphql instance that Mercurius uses internally, plus introspection
- * blocking for disabled roles.
+ * blocking for disabled roles and role-scoped introspection filtering.
  */
 
 import { createRequire } from 'node:module';
-import { printSchema } from 'graphql';
-import type { GraphQLSchema } from 'graphql';
+import { printSchema, execute } from 'graphql';
+import type { GraphQLSchema, DocumentNode } from 'graphql';
 import mercurius from 'mercurius';
 import type { FastifyInstance } from 'fastify';
 import type { HookContext } from './types.js';
+import type { TableInfo, SchemaModel, HakkyraConfig } from '../types.js';
+import type { PermissionLookup } from '../permissions/lookup.js';
+import { filterTablesForRole } from '../docs/role-filter.js';
+import { generateSchema } from '../schema/generator.js';
+import { resetComparisonTypeCache } from '../schema/filters.js';
 
 // ─── CJS/ESM schema reconciliation ──────────────────────────────────────────
 
@@ -156,4 +161,165 @@ export function registerIntrospectionControl(
       }
     }
   });
+}
+
+// ─── Role-scoped introspection (P12.22) ──────────────────────────────────────
+
+/**
+ * Check if a GraphQL document is an introspection query
+ * (contains __schema or __type root fields).
+ */
+function isIntrospectionQuery(document: DocumentNode): boolean {
+  for (const definition of document.definitions) {
+    if (definition.kind === 'OperationDefinition' && definition.selectionSet) {
+      for (const selection of definition.selectionSet.selections) {
+        if (
+          selection.kind === 'Field' &&
+          (selection.name.value === '__schema' || selection.name.value === '__type')
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Expand tables to include all transitively referenced relationship targets.
+ * This ensures the role schema can resolve relationship types even for
+ * tables the role doesn't have direct root-field access to.
+ */
+function expandTablesWithRelationships(
+  filteredTables: TableInfo[],
+  allTables: TableInfo[],
+): TableInfo[] {
+  const includedNames = new Set(filteredTables.map(t => t.name));
+  const expandedTables = [...filteredTables];
+  const queue = [...filteredTables];
+  while (queue.length > 0) {
+    const t = queue.pop()!;
+    for (const rel of t.relationships) {
+      if (!includedNames.has(rel.remoteTable.name)) {
+        const remoteTable = allTables.find(
+          at => at.name === rel.remoteTable.name && at.schema === rel.remoteTable.schema,
+        );
+        if (remoteTable) {
+          expandedTables.push(remoteTable);
+          includedNames.add(remoteTable.name);
+          queue.push(remoteTable);
+        }
+      }
+    }
+  }
+  return expandedTables;
+}
+
+export interface RoleScopedIntrospectionDeps {
+  server: FastifyInstance;
+  schemaModel: SchemaModel;
+  config: HakkyraConfig;
+  permissionLookup: PermissionLookup;
+}
+
+/**
+ * Register Mercurius hooks that scope GraphQL introspection results by role.
+ *
+ * For admin requests, the full schema is returned. For non-admin roles,
+ * introspection queries are re-executed against a cached per-role schema
+ * that only contains types/fields accessible to that role.
+ *
+ * Returns the role schema cache (for invalidation on hot reload).
+ */
+export function registerRoleScopedIntrospection(
+  deps: RoleScopedIntrospectionDeps,
+): Map<string, GraphQLSchema> {
+  const { server, schemaModel, config, permissionLookup } = deps;
+  const allTables = schemaModel.tables;
+  const roleSchemaCache = new Map<string, GraphQLSchema>();
+
+  function getOrBuildRoleSchema(role: string): GraphQLSchema | null {
+    const cached = roleSchemaCache.get(role);
+    if (cached) return cached;
+
+    const { tables } = filterTablesForRole(allTables, role, permissionLookup, false);
+    if (tables.length === 0) return null;
+
+    const expandedTables = expandTablesWithRelationships(tables, allTables);
+    const filteredModel: SchemaModel = { ...schemaModel, tables: expandedTables };
+    const rootFieldTables = new Set(tables.map(t => t.name));
+
+    try {
+      resetComparisonTypeCache();
+      const esmSchema = generateSchema(filteredModel, {
+        actions: config.actions,
+        actionsGraphql: config.actionsGraphql,
+        trackedFunctions: config.trackedFunctions,
+        rootFieldTables,
+      });
+      // Keep the ESM schema — we execute introspection using the ESM graphql
+      // `execute()` function, which avoids the CJS/ESM instanceof mismatch
+      // that Mercurius triggers with its CJS graphql instance.
+      roleSchemaCache.set(role, esmSchema);
+      return esmSchema;
+    } catch (err) {
+      server.log.warn({ err, role }, 'Failed to build role-scoped schema for introspection');
+      return null;
+    }
+  }
+
+  // preExecution: detect introspection queries from non-admin roles and
+  // store the document on the context for the onResolution hook.
+  // Also handles admin + x-hasura-role override (treat as the overridden role).
+  server.graphql.addHook<HookContext>('preExecution', async (_schema, document, context) => {
+    if (!isIntrospectionQuery(document)) return;
+
+    const isAdmin = context.auth?.isAdmin;
+    // Check for admin + role override: admin key with x-hasura-role header
+    const roleHeader = context.clientHeaders?.['x-hasura-role'];
+    const hasRoleOverride = isAdmin && roleHeader && roleHeader.toLowerCase() !== 'admin';
+
+    // Pure admin (no role override) gets the full schema
+    if (isAdmin && !hasRoleOverride) return;
+
+    // Store document for re-execution in onResolution
+    context._introspectionDocument = document;
+  });
+
+  // onResolution: re-execute introspection against the role-scoped schema.
+  server.graphql.addHook<Record<string, unknown>, HookContext>(
+    'onResolution',
+    async (execution, context) => {
+      const document = context._introspectionDocument;
+      if (!document) return;
+
+      // Resolve the effective role (handles admin + x-hasura-role override)
+      const roleHeader = context.clientHeaders?.['x-hasura-role'];
+      const isAdmin = context.auth?.isAdmin;
+      const role = (isAdmin && roleHeader && roleHeader.toLowerCase() !== 'admin')
+        ? roleHeader.toLowerCase()
+        : context.auth?.role;
+      if (!role) return;
+
+      const roleSchema = getOrBuildRoleSchema(role);
+      if (!roleSchema) {
+        // No accessible types — return empty introspection
+        execution.data = {};
+        return;
+      }
+
+      // Re-execute the introspection query against the role-scoped ESM schema
+      // using the ESM graphql execute(). This avoids the CJS/ESM instanceof
+      // mismatch that causes "Cannot use GraphQLObjectType from another module"
+      // errors when Mercurius introspects the CJS-bridged schema.
+      // The document AST from Mercurius is CJS-parsed but AST nodes are plain
+      // objects compatible with the ESM execute().
+      const result = await execute({ schema: roleSchema, document });
+      execution.data = (result.data ?? {}) as Record<string, unknown>;
+      // Replace errors with those from the role-scoped execution (if any)
+      execution.errors = result.errors as typeof execution.errors ?? [];
+    },
+  );
+
+  return roleSchemaCache;
 }

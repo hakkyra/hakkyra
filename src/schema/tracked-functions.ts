@@ -406,8 +406,9 @@ export function buildTrackedFunctionFields(
         queryFields[fieldName] = fieldConfig;
       }
 
-      // Aggregate variant for SETOF query functions
-      if (config.exposedAs !== 'mutation') {
+      // Aggregate variant for ALL SETOF functions (always on Query, even for mutation-exposed)
+      // Hasura generates aggregate query fields for all SETOF tracked functions regardless of exposedAs.
+      {
         const aggFieldName = config.customRootFields?.functionAggregate
           ?? `${fieldName}Aggregate`;
         const aggType = aggregateTypes.get(key);

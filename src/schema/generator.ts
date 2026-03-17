@@ -659,12 +659,10 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     };
   }
 
-  // Add tracked function subscription fields (query-exposed functions only)
+  // Add tracked function subscription fields
   for (const trackedFn of resolvedTrackedFunctions) {
     const { config, functionInfo: fn, returnTable } = trackedFn;
     if (!returnTable) continue;
-    // Only query-exposed functions get subscriptions (not mutations)
-    if (config.exposedAs === 'mutation') continue;
 
     const key = tableKey(returnTable.schema, returnTable.name);
     const objectType = typeRegistry.get(key);
@@ -672,20 +670,22 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
     const fieldName = config.customRootFields?.function ?? toCamelCase(config.name);
 
-    // Mirror the query field's args for the subscription
-    const queryField = trackedFunctionFields.queryFields[fieldName];
-    if (!queryField) continue;
+    // List subscription — only for query-exposed functions (mutation list fields stay on mutation type)
+    if (config.exposedAs !== 'mutation') {
+      const queryField = trackedFunctionFields.queryFields[fieldName];
+      if (queryField) {
+        subscriptionFields[fieldName] = {
+          type: queryField.type!,
+          args: queryField.args,
+          description: `Subscribe to function ${config.schema}.${config.name}`,
+          resolve: (payload: unknown) => payload,
+          subscribe: makeTrackedFunctionSubscriptionSubscribe(trackedFn),
+        };
+      }
+    }
 
-    // List subscription
-    subscriptionFields[fieldName] = {
-      type: queryField.type!,
-      args: queryField.args,
-      description: `Subscribe to function ${config.schema}.${config.name}`,
-      resolve: (payload: unknown) => payload,
-      subscribe: makeTrackedFunctionSubscriptionSubscribe(trackedFn),
-    };
-
-    // Aggregate subscription for SETOF functions
+    // Aggregate subscription for ALL SETOF functions (including mutation-exposed)
+    // Hasura generates aggregate subscriptions for all SETOF tracked functions.
     if (fn.isSetReturning) {
       const aggFieldName = config.customRootFields?.functionAggregate
         ?? `${fieldName}Aggregate`;

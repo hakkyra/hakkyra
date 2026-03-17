@@ -1285,7 +1285,7 @@ Examples: `AcceptPlayerContractArgs.playerid` (String→Bigint), `CreatePaymentA
 - [x] Test: action args use correct scalar types
 - [ ] **26 args still use `String`** — see P11.4 for details
 
-### P10.4 — Missing Table Columns (Medium)
+### P10.4 — Missing Table Columns (Medium) ✅
 
 ~40 tables have columns that Hasura exposes but Hakkyra doesn't. Most are `createdAt`/`updatedAt`/`createdAtDate` timestamps, but some are functional columns. This is likely caused by columns not appearing in any role's select permission (P9.16 column visibility filtering).
 
@@ -1302,9 +1302,7 @@ Notable missing columns:
 - `PlayerEvent`: `functionId`, `groupKey`
 - `PlayerData.token`
 
-- [ ] Investigate: are these columns missing from select permissions in the neofix metadata, or is there a bug in column visibility?
-- [ ] If metadata issue: update neofix metadata to include missing columns in select permissions
-- [ ] If code issue: fix column visibility logic
+- [x] **Closed**: Explained by P12.11 — columns not in any role's select permission are intentionally excluded from the schema. This is by design (see P12.11 decision).
 
 ### P10.5 — Constraint Enum Values for Upserts (High) ✅
 
@@ -1529,7 +1527,7 @@ Native queries used inline args. Hasura wraps them in `*_arguments` input type w
 - [x] Added lowercase `uuid` scalar in `scalars.ts`, changed async action mutations/queries/subscriptions to use `uuid` instead of `Uuid` in `actions/schema.ts`
 - [x] Result queries already use the action's output type (not `OkResult`) — was fixed by P10.16
 
-### P11.10 — PG Enum Types: Enum vs Scalar (Low)
+### P11.10 — PG Enum Types: Enum vs Scalar (Low) ✅
 
 15 PG enum types are exposed as GraphQL `enum` in Hakkyra but as `scalar` in Hasura. Hasura treats PG enums as opaque scalars with `*ComparisonExp` for filtering.
 
@@ -1537,7 +1535,7 @@ Affected: `AffiliateCommissionBase`, `AffiliateCommissionType`, `ContentChannelS
 
 Hakkyra's approach (real GraphQL enums with values) is arguably better for type safety. This may be intentional divergence.
 
-- [ ] Decide: keep as enums (better DX) or match Hasura's scalar approach (strict compat)?
+- [x] **Decision**: Keep as real GraphQL enums — better DX (autocomplete, validation). Intentional divergence from Hasura's opaque scalar approach.
 
 ### P11.11 — Computed Field BoolExp Type Mismatch (Low) ✅
 
@@ -1568,13 +1566,13 @@ All 50 tables now appear in hakkyra's schema (confirmed via introspection query 
 - [x] Investigate: all 50 tables confirmed present in both DB and hakkyra schema
 - [x] Re-run comparison: tables are present, remaining differences are column-level (see P12.11)
 
-### P11.14 — `groupedAggregates` Extension (Low)
+### P11.14 — `groupedAggregates` Extension (Low) ✅
 
 Hakkyra exposes `groupedAggregates` fields on all `*Aggregate` types (~61 fields). Hasura does not have this. This is a Hakkyra-only extension.
 
 Not a bug — but for strict SDL compatibility, consider making this opt-in or removing it.
 
-- [ ] Decide: keep as extension (document divergence) or make configurable?
+- [x] **Decision**: Keep always enabled. Intentional extension beyond Hasura.
 
 ---
 
@@ -1658,9 +1656,9 @@ Hasura has 176 `AggregateBoolExp` types, Hakkyra has 96. The missing 80 types ar
 - [x] Add `bool_and` / `bool_or` fields to existing `*AggregateBoolExp` types
 - [x] 22 tests
 
-### P12.6 — Tracked Function Aggregate Root Fields Missing (High)
+### P12.6 — Tracked Function Aggregate Root Fields Missing (High) ✅
 
-6 tracked functions are missing `*Aggregate` query root fields and their subscription equivalents. These are functions that return SETOF rows and should have aggregate variants.
+6 tracked functions were missing `*Aggregate` query root fields and their subscription equivalents. These are functions that return SETOF rows and should have aggregate variants.
 
 Missing query root fields:
 - `gameSessionTransactionCountAggregate`
@@ -1670,8 +1668,11 @@ Missing query root fields:
 - `getTournamentLeaderboardAggregate`
 - `getTournamentLeaderboardCountAggregate`
 
-- [ ] Generate aggregate root fields for tracked functions returning SETOF table types
-- [ ] Add matching subscription root fields
+**Root cause**: Aggregate generation in `tracked-functions.ts` was gated by `exposedAs !== 'mutation'`. Hasura generates aggregate query fields for ALL SETOF tracked functions regardless of `exposedAs` (volatile functions default to mutation but still get aggregate on Query type).
+
+- [x] Generate aggregate root fields for ALL SETOF tracked functions (including mutation-exposed) — always on Query type
+- [x] Add matching subscription root fields for mutation-exposed SETOF functions (aggregate only, not list)
+- [x] 6 tests: schema verification (query/mutation/subscription placement) + E2E aggregate execution
 
 ### P12.7 — Missing Subscription Root Fields (Medium)
 
@@ -1719,7 +1720,7 @@ Affected (confirmed from backoffice comparison): `BalanceAvgFields.{nativeTotal,
 - [x] Fix `resolveStatAggReturnType()`: return `Numeric` for `numeric` source type, `Float` for `int`/`bigint`
 - [x] Updated 6 test assertions
 
-### P12.11 — Admin-Only Columns Not Exposed in Schema (Design Decision)
+### P12.11 — Admin-Only Columns Not Exposed in Schema (Design Decision) ✅
 
 413 fields missing in Hakkyra across many tables. **Root cause found**: NOT a DB mismatch. Both services connect to the same DB (`localhost:5432/neofix`). All columns verified present via direct DB query and introspection debug logging (all 12 `big_win` columns introspected correctly).
 
@@ -1733,8 +1734,7 @@ All corresponding BoolExp, OrderBy, StreamCursorValueInput, SelectColumn, Constr
 
 **Decision**: Hakkyra's approach (schema only shows columns accessible to at least one role) is arguably better — it keeps the schema clean and doesn't leak admin-only column names. For Hasura compat, could add an option to expose all columns.
 
-- [ ] Decide: keep current behavior (cleaner schema) or add `expose_all_columns: true` config option for Hasura compat?
-- [ ] If keeping current behavior, document this as intentional divergence
+- [x] **Decision**: Keep current behavior (schema only shows columns accessible to at least one role). Intentional divergence — cleaner schema, doesn't leak admin-only column names.
 
 ### P12.12 — Enum Comparison Exp Extra Operators (Low) ✅
 
@@ -1837,23 +1837,27 @@ Hasura includes enum-typed and UUID columns in `*MaxFields`/`*MinFields` (e.g., 
 - [x] Add ordering operators to Inet and Interval comparison expression types
 - [x] Tests in comparison-expression-fixes.test.ts
 
-### P12.22 — Role-Scoped Introspection (Medium)
+### P12.22 — Role-Scoped Introspection (Medium) ✅
 
 Hakkyra returns the full schema (4602 types) regardless of the requesting role. Hasura scopes introspection by role (e.g., 2810 types for backoffice). When using admin key with `x-hasura-role` header, hakkyra should return the role-specific schema.
 
-- [ ] Support `x-hasura-role` header with admin secret for role-scoped introspection/SDL
-- [ ] Filter schema types, fields, and root operations by the role's permissions
+**Implementation**: Mercurius `preExecution` + `onResolution` hooks intercept `__schema`/`__type` queries for non-admin roles. Introspection is re-executed against a cached per-role ESM schema (built via `filterTablesForRole` + `generateSchema` with `rootFieldTables`). Uses ESM `execute()` to avoid CJS/ESM `instanceof` mismatch. Admin + `x-hasura-role` override is handled. Cache cleared on hot reload.
 
-### P12.23 — InsertInput/SetInput Expose Admin-Only Columns to Non-Admin Roles (Medium) — blocked by P12.22
+- [x] Support `x-hasura-role` header with admin secret for role-scoped introspection
+- [x] Filter schema types, fields, and root operations by the role's permissions
+- [x] Cache per-role schemas, clear on hot reload
+- [x] 7 tests: root field filtering, type count, role override, __type queries
+
+### P12.23 — InsertInput/SetInput Expose Admin-Only Columns to Non-Admin Roles (Medium) ✅
 
 Hakkyra's InsertInput and SetInput types include ALL introspected columns regardless of role permissions. Hasura scopes these by role — backoffice InsertInput/SetInput only include columns that role has insert/update permission for.
 
 627 extra input fields found in backoffice comparison. Example: `CurrencyInsertInput` in hakkyra includes `createdAt`, `updatedAt`, `bigWinThreshold` which backoffice shouldn't see.
 
-**Blocked by P12.22 (role-scoped introspection)**: Without role-scoped introspection, all types return all columns to all roles. This is a schema-level visibility issue — the runtime enforcement already works correctly (column restrictions, presets). Scoping InsertInput/SetInput fields per role requires generating role-specific schema variants, which is the P12.22 work.
+**Resolved by P12.22**: Role-scoped introspection (P12.22) returns a per-role schema where InsertInput/SetInput types only contain columns visible to that role's permissions. The per-role schema is generated via `generateSchema()` with filtered tables (column lists from `filterTablesForRole`). Runtime enforcement already works correctly (column restrictions, presets); now introspection also reflects the role's column visibility.
 
-- [ ] Scope InsertInput columns by insert permission column list (requires P12.22)
-- [ ] Scope SetInput columns by update permission column list (requires P12.22)
+- [x] Scope InsertInput columns by insert permission column list — via P12.22 role-scoped schema
+- [x] Scope SetInput columns by update permission column list — via P12.22 role-scoped schema
 
 ### P12.24 — Extra Types Only in Hakkyra (Cleanup)
 
@@ -1863,9 +1867,9 @@ Hakkyra's InsertInput and SetInput types include ALL introspected columns regard
 - 3 extra BoolExp/SelectColumn types for native queries
 - Extra scalars: `Bytea`, `Time`, `NumericComparisonExpLm`, `BigintComparisonExpLm`
 
-- [ ] Decide on GroupBy extension: keep (document as extension) or make opt-in?
-- [ ] Decide on UpdateManyInput: replace with Hasura's `*Updates` approach (P12.3) or keep both?
-- [ ] Audit extra scalars — remove if unused
+- [x] **Decision**: Keep GroupBy extension always enabled (see P11.14 decision)
+- [ ] Audit `UpdateManyInput` — may be superseded by P12.3's `*Updates` types; remove if redundant
+- [ ] Audit extra scalars (`Bytea`, `Time`) — remove if unused
 
 ---
 
