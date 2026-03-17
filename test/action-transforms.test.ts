@@ -200,15 +200,17 @@ describe('URL path traversal protection', () => {
   };
 
   describe('interpolateUrlTemplate', () => {
-    it('rejects path traversal with slashes (../../admin)', () => {
-      // "../../admin" contains ".." segments separated by "/" — after encoding,
-      // the "/" becomes %2F but ".." remains literal in each segment.
-      expect(() =>
-        interpolateUrlTemplate(
-          '{{$base_url}}/items/{{$body.input.id}}/details',
-          variables,
-        ),
-      ).toThrow(/Path traversal/);
+    it('encodes path traversal with slashes (../../admin)', () => {
+      // "../../admin" → encodeURIComponent → "..%2F..%2Fadmin"
+      // The "/" becomes %2F, making the entire value a single URL segment.
+      // This is safe because %2F is not treated as a path separator.
+      const result = interpolateUrlTemplate(
+        '{{$base_url}}/items/{{$body.input.id}}/details',
+        variables,
+      );
+      expect(result).toBe(
+        'https://api.example.com/items/..%2F..%2Fadmin/details',
+      );
     });
 
     it('rejects bare ".." input as path traversal', () => {
@@ -319,7 +321,7 @@ describe('URL path traversal protection', () => {
       baseUrl: 'https://api.example.com/webhook',
     };
 
-    it('rejects path traversal attempts in URL templates', () => {
+    it('encodes path traversal characters in interpolated URL values', () => {
       const originalRequest = {
         url: 'https://api.example.com/webhook',
         method: 'POST' as const,
@@ -335,9 +337,10 @@ describe('URL path traversal protection', () => {
         url: '{{$base_url}}/items/{{$body.input.id}}',
       };
 
-      expect(() =>
-        applyRequestTransform(transform, originalRequest, context),
-      ).toThrow(/Path traversal/);
+      // "../../admin" is encoded to "..%2F..%2Fadmin" — safe, no real path separator
+      const result = applyRequestTransform(transform, originalRequest, context);
+      expect(result.url).not.toContain('/../');
+      expect(result.url).toContain(encodeURIComponent('../../admin'));
     });
 
     it('rejects bare ".." in URL path segment', () => {

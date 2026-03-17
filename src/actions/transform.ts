@@ -204,7 +204,19 @@ export function interpolateUrlTemplate(
     // encodeURIComponent encodes dangerous URL-structural characters (/, ?, #, etc.)
     // to their percent-encoded forms (%2F, %3F, %23). This neutralizes path traversal
     // because %2F is not treated as a path separator by HTTP clients.
-    return encodeURIComponent(stringValue);
+    const encoded = encodeURIComponent(stringValue);
+
+    // encodeURIComponent does NOT encode dots, so a bare ".." or "." value
+    // passes through unchanged and creates path traversal in the URL.
+    // Values like "../../admin" are safe because "/" becomes "%2F", making
+    // the entire value a single URL segment (no real path separator).
+    if (encoded === '..' || encoded === '.') {
+      throw new Error(
+        `Path traversal detected in interpolated value: "${stringValue}"`,
+      );
+    }
+
+    return encoded;
   });
 }
 
