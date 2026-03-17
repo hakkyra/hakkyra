@@ -1394,7 +1394,7 @@ Hakkyra uses simpler `InsertInput` types (not `ObjRelInsertInput`), and doesn't 
 - [x] **JSONB mutation operators**: `_append`, `_prepend`, `_deleteAtPath`, `_deleteElem`, `_deleteKey` for JSONB columns in update mutations — done in P12.4
 - [x] **`_inc` operator**: numeric increment operator for update mutations — done in P12.2
 - [x] **Nested insert input wrapper types**: `ObjRelInsertInput`/`ArrRelInsertInput` for relationship-aware nested inserts — done in P12.1
-- [ ] **`*Updates` input type**: Hasura's batch update input type (alternative to Hakkyra's `updateMany`) — see P12.3
+- [x] **`*Updates` input type**: Hasura's batch update input type (alternative to Hakkyra's `updateMany`) — done in P12.3
 
 ### P10.15 — `updateGameSessionMany` Casing (Low) ✅
 
@@ -1409,8 +1409,8 @@ Hakkyra returns `AsyncActionId!` for async mutation results and `GenerateTestDat
 
 - [x] Mutation return: use `uuid!` scalar instead of custom `AsyncActionId` type
 - [x] Result query return: use action handler return type, not custom `*AsyncResult` wrapper
-- [ ] **Scalar case**: Mutation returns `Uuid!` but Hasura returns `uuid!` (lowercase) — see P11.9
-- [ ] **Result type names**: Query returns `OkResult` but Hasura returns types named after the action (`generateTestData`, `updateGames`) — see P11.9
+- [x] **Scalar case**: Mutation returns `Uuid!` but Hasura returns `uuid!` (lowercase) — done in P11.9
+- [x] **Result type names**: Query returns `OkResult` but Hasura returns types named after the action (`generateTestData`, `updateGames`) — done in P11.9
 
 ### P10.17 — `playerDataReport`/`playerProfile` Return Types (Low) ✅
 
@@ -1424,8 +1424,8 @@ Hakkyra returns `String` for `playerDataReport` and `playerProfile` tracked func
 
 Hasura generates `*SelectColumn*AggregateBoolExpBool_andArgumentsColumns` and `*Bool_orArgumentsColumns` enums for aggregate boolean expressions. These are used for typed `bool_and`/`bool_or` aggregate filtering. 47 missing enums.
 
-- [ ] Generate `AggregateBoolExpBool_and` and `AggregateBoolExpBool_or` types with column-specific enum arguments
-- [ ] Only needed for tables with boolean columns used in aggregate bool expressions
+- [x] Generate `AggregateBoolExpBool_and` and `AggregateBoolExpBool_or` types with column-specific enum arguments — done in P12.5
+- [x] Only needed for tables with boolean columns used in aggregate bool expressions — done in P12.5
 
 ---
 
@@ -1674,7 +1674,7 @@ Missing query root fields:
 - [x] Add matching subscription root fields for mutation-exposed SETOF functions (aggregate only, not list)
 - [x] 6 tests: schema verification (query/mutation/subscription placement) + E2E aggregate execution
 
-### P12.7 — Missing Subscription Root Fields (Medium)
+### P12.7 — Missing Subscription Root Fields (Medium) ✅
 
 3 subscription root fields present in Hasura are missing in Hakkyra (beyond the 6 tracked function aggregates in P12.6):
 
@@ -1684,8 +1684,7 @@ Missing query root fields:
 
 These appear to be native queries or tracked functions exposed as subscriptions. Their associated types (BoolExp, SelectColumn, OrderBy, StreamCursor) also need generation.
 
-- [ ] Investigate source of these 3 subscription fields (native queries? tracked functions?)
-- [ ] Generate types and root fields to match
+- [x] **Native query subscription support** — All native queries are now exposed as subscription root fields. Subscription factory parses SQL for referenced tables and watches them via the subscription manager. SQL is wrapped in `json_agg` for subscription manager compatibility. 11 tests (6 unit + 5 E2E).
 
 ### P12.8 — Tracked Function Arg Naming Convention (Medium) ✅
 
@@ -1868,8 +1867,8 @@ Hakkyra's InsertInput and SetInput types include ALL introspected columns regard
 - Extra scalars: `Bytea`, `Time`, `NumericComparisonExpLm`, `BigintComparisonExpLm`
 
 - [x] **Decision**: Keep GroupBy extension always enabled (see P11.14 decision)
-- [ ] Audit `UpdateManyInput` — may be superseded by P12.3's `*Updates` types; remove if redundant
-- [ ] Audit extra scalars (`Bytea`, `Time`) — remove if unused
+- [x] Audit `UpdateManyInput` — renamed to `*Updates` in P12.3, actively used by `updateMany` resolvers; not redundant
+- [x] Audit extra scalars (`Bytea`, `Time`) — infrastructure for real PG types (`bytea`, `time`/`timetz`), wired into type maps and comparison expressions; kept for completeness
 
 ---
 
@@ -1970,4 +1969,5 @@ admin_ui:
 | REST permissions | 26 | Pass |
 | JWT admin role | 9 | Pass |
 | CRUD operations | 20 | Pass |
-| **Total** | **1445** | **46 suites, 1445 passing** |
+| Native query subscriptions | 11 | Pass |
+| **Total** | **1456** | **47 suites, 1456 passing** |
