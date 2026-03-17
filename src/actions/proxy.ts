@@ -182,11 +182,16 @@ export async function executeAction(options: ActionExecutionOptions): Promise<Ac
   if (!result.success) {
     // Try to parse error from response body
     let errorMessage = result.error ?? `Action handler returned ${result.statusCode}`;
+    let handlerExtensions: Record<string, unknown> | undefined;
     if (result.body) {
       try {
         const parsed = JSON.parse(result.body);
         if (parsed.message) errorMessage = parsed.message;
         else if (parsed.error) errorMessage = parsed.error;
+        // Preserve handler extensions (e.g., { code: 'INVALID_COUNTRY' })
+        if (parsed.extensions && typeof parsed.extensions === 'object') {
+          handlerExtensions = parsed.extensions;
+        }
       } catch {
         // body is not JSON — use raw
       }
@@ -194,7 +199,7 @@ export async function executeAction(options: ActionExecutionOptions): Promise<Ac
     return {
       success: false,
       error: sanitizeWebhookError(errorMessage),
-      extensions: result.statusCode ? { statusCode: result.statusCode } : undefined,
+      extensions: handlerExtensions,
     };
   }
 
