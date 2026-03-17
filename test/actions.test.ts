@@ -137,10 +137,10 @@ describe('Actions', () => {
       expect(sdl).toMatch(/type AcceptContractResult\s*\{[^}]*contractRef:\s*ID[^!]/);
     });
 
-    it('preserves numeric (lowercase) as Numeric scalar in action types', () => {
-      // numeric in SDL should map to Numeric scalar
-      expect(sdl).toMatch(/input AcceptContractInput\s*\{[^}]*depositAmount:\s*Numeric/);
-      expect(sdl).toMatch(/type AcceptContractResult\s*\{[^}]*totalAmount:\s*Numeric!/);
+    it('preserves numeric (lowercase) casing from actions.graphql SDL', () => {
+      // numeric (lowercase) in SDL should remain lowercase in schema output
+      expect(sdl).toMatch(/input AcceptContractInput\s*\{[^}]*depositAmount:\s*numeric[^!]/);
+      expect(sdl).toMatch(/type AcceptContractResult\s*\{[^}]*totalAmount:\s*numeric!/);
     });
 
     it('preserves Numeric and Uuid scalars in action output types', () => {

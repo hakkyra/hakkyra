@@ -1327,7 +1327,7 @@ Notable missing columns:
 - [x] Expose async action result queries as subscription fields
 - [x] Test: tracked function aggregates available as subscriptions
 
-### P10.7 — Nullability Mismatches (Low) ⚠️ REGRESSION
+### P10.7 — Nullability Mismatches (Low) ✅
 
 14 relationship fields have different nullability between Hakkyra and Hasura. Hakkyra marks some as non-null (`!`) where Hasura allows null.
 
@@ -1336,16 +1336,16 @@ Affected: `Balance.player`, `BigWin.currency`, `CurrentCampaignContent.campaignP
 - [x] Array relationships changed from `[Type!]!` to `[Type!]` (nullable list)
 - [x] Object relationship nullability based on FK column NOT NULL status (already implemented in P9.7c)
 - [x] `Player.data` and `Game.brands` are array relationships — now nullable `[Type!]`
-- [ ] **WRONG DIRECTION**: Hasura array relationships are `[Type!]!` (non-null list), not `[Type!]` — see P11.2
-- [ ] **11 object relationship nullability mismatches remain** — see P11.3
+- [x] **Fixed in P11.2**: Array relationships corrected to `[Type!]!` (non-null list)
+- [x] **Fixed in P11.3**: 11 object relationship nullability mismatches resolved (reverse-FK + manual_configuration always nullable)
 
-### P10.8 — `Player.lock` Cardinality (Medium) ⚠️ STILL BROKEN
+### P10.8 — `Player.lock` Cardinality (Medium) ✅
 
 Hakkyra: `Player.lock: [PlayerLock!]!` (array relationship). Hasura: `Player.lock: PlayerLock` (object relationship). The metadata likely defines `lock` as an object relationship, but Hakkyra may be interpreting it as an array.
 
 - [x] Fixed reverse-FK object relationship column mapping in config loader
 - [x] Extended merger to infer localColumns for all relationship types with remoteColumns
-- [ ] **Still array**: SDL shows `Player.lock(...): [PlayerLock!]` with array args — still not an object relationship
+- [x] **Fixed in P11.3**: Object relationships take precedence over array relationships with same name (dedup in `loader.ts`); reverse-FK object relationships now nullable as expected
 
 ### P10.9 — Enum Comparison Operators `_gt`/`_gte`/`_lt`/`_lte` (Low) ✅
 
@@ -1364,14 +1364,14 @@ Hakkyra returns `String` for array columns (e.g., `tags`, `currencies`) in `MaxF
 - [x] Aggregate type builder: use array type `[ScalarType!]` for array columns in min/max fields
 - [x] Test: aggregate min/max on array columns returns array type
 
-### P10.11 — Aggregate Stat Return Types (Low) ⚠️ PARTIAL
+### P10.11 — Aggregate Stat Return Types (Low) ✅
 
 Hakkyra uses `Float` for all aggregate stat fields (avg, stddev, variance, etc.). Hasura uses `Numeric` for `numeric`/`bigint` columns and `Int` for `integer`/`smallint` columns. 44 occurrences.
 
 - [x] Aggregate stat type builder: use `Numeric` return type for `numeric`/`bigint` source columns
 - [x] Use `Int` return type for `integer`/`smallint` source columns in sum fields
 - [x] Test: aggregate stat fields use correct return types
-- [ ] **Incomplete**: `avg`/`stddev`/`variance` fields on `int`/`bigint` columns return `Numeric`, but Hasura returns `Float` — see P11.1
+- [x] **Fixed in P11.1 + P12.10**: `avg`/`stddev`/`variance` return `Float` for `int`/`bigint` source, `Numeric` for `numeric` source
 
 ### P10.12 — `Timestamp` vs `Timestamptz` (Low) ✅
 
@@ -1393,10 +1393,10 @@ Hasura generates ~545 input types that Hakkyra doesn't: `*IncInput` (increment),
 
 Hakkyra uses simpler `InsertInput` types (not `ObjRelInsertInput`), and doesn't support JSONB mutation operators or `_inc` yet.
 
-- [ ] **JSONB mutation operators**: `_append`, `_prepend`, `_deleteAtPath`, `_deleteElem`, `_deleteKey` for JSONB columns in update mutations
-- [ ] **`_inc` operator**: numeric increment operator for update mutations
-- [ ] **Nested insert input wrapper types**: `ObjRelInsertInput`/`ArrRelInsertInput` for relationship-aware nested inserts
-- [ ] **`*Updates` input type**: Hasura's batch update input type (alternative to Hakkyra's `updateMany`)
+- [x] **JSONB mutation operators**: `_append`, `_prepend`, `_deleteAtPath`, `_deleteElem`, `_deleteKey` for JSONB columns in update mutations — done in P12.4
+- [x] **`_inc` operator**: numeric increment operator for update mutations — done in P12.2
+- [x] **Nested insert input wrapper types**: `ObjRelInsertInput`/`ArrRelInsertInput` for relationship-aware nested inserts — done in P12.1
+- [ ] **`*Updates` input type**: Hasura's batch update input type (alternative to Hakkyra's `updateMany`) — see P12.3
 
 ### P10.15 — `updateGameSessionMany` Casing (Low) ✅
 
@@ -1546,14 +1546,14 @@ Computed fields returning tracked table types (SETOF) were not included in BoolE
 - [x] Added computed field BoolExp handling in `filters.ts` — SETOF computed fields returning tracked tables now use the table's BoolExp
 - [x] Added 2 tests verifying computed field relationship filters
 
-### P11.12 — `authenticate(amount)` Scalar Case (Low)
+### P11.12 — `authenticate(amount)` Scalar Case (Low) ✅
 
 - Hakkyra: `amount: Numeric` (PascalCase)
 - Hasura: `amount: numeric` (lowercase)
 
 Hasura uses lowercase `numeric` scalar for some action args.
 
-- [ ] Investigate if this is a general issue with action arg scalar casing or specific to `authenticate`
+- [x] Fixed in P12.15: lowercase `numeric` and `jsonb` scalar variants preserve exact casing from actions.graphql SDL
 
 ### P11.13 — 50 Missing Table Types (Critical — Investigation)
 
@@ -1625,12 +1625,14 @@ Hasura generates 103 `*IncInput` types for numeric column increments during upda
 - [x] SQL compiler: `column = column + $N` for increment, `_set` takes precedence on collision
 - [x] 16 tests (schema, SQL compilation, E2E)
 
-### P12.3 — Missing Mutation Input Infrastructure: Updates (Critical)
+### P12.3 — Missing Mutation Input Infrastructure: Updates (Critical) ✅
 
 Hasura generates 127 `*Updates` types — batch update input types with `_set`, `_inc`, `where` fields. Used by `update_*_many` mutations. Hakkyra has 0.
 
-- [ ] Generate `*Updates` types for each table with update permissions
-- [ ] Wire into `update_*_many` mutations
+- [x] Renamed `*UpdateManyInput` to `*Updates` (Hasura naming)
+- [x] Added `_inc` and JSONB operator fields alongside `where` and `_set`
+- [x] Resolver extracts all operator types from each update entry
+- [x] 21 tests
 
 ### P12.4 — Missing JSONB Mutation Operators (High) ✅
 
@@ -1647,13 +1649,14 @@ These allow jsonb-specific update operations (append to array, prepend, delete a
 - [x] SQL: `||`, `#-`, `-` operators with correct casts
 - [x] 27 tests
 
-### P12.5 — Missing AggregateBoolExp Types (High)
+### P12.5 — Missing AggregateBoolExp Types (High) ✅
 
 Hasura has 176 `AggregateBoolExp` types, Hakkyra has 96. The missing 80 types are `bool_and`/`bool_or` aggregate boolean expressions and their associated `SelectColumn*AggregateBoolExp*` enum types. These allow filtering parent rows based on boolean aggregate conditions on array relationships (e.g., "campaigns where ALL rewards are active").
 
-- [ ] Generate `*AggregateBoolExpBool_and` / `*AggregateBoolExpBool_or` input types for each array relationship with boolean columns
-- [ ] Generate associated `*SelectColumn*AggregateBoolExpBool_and/orArgumentsColumns` enum types
-- [ ] Add `bool_and` / `bool_or` fields to existing `*AggregateBoolExp` types
+- [x] Generate `*AggregateBoolExpBool_and` / `*AggregateBoolExpBool_or` input types for tables with boolean columns
+- [x] Generate associated `*SelectColumn*AggregateBoolExpBool_and/orArgumentsColumns` enum types
+- [x] Add `bool_and` / `bool_or` fields to existing `*AggregateBoolExp` types
+- [x] 22 tests
 
 ### P12.6 — Tracked Function Aggregate Root Fields Missing (High)
 
@@ -1757,16 +1760,17 @@ Hakkyra includes boolean columns in `*MaxOrderBy` / `*MinOrderBy` types (e.g., `
 - [x] Add `distinctOn` arg to computed field array relationship fields (both SETOF and non-SETOF paths)
 - [x] 3 tests
 
-### P12.15 — Scalar Casing Mismatches: `Json`/`json`, `numeric`/`Numeric`, `jsonb`/`Jsonb` (Low)
+### P12.15 — Scalar Casing Mismatches: `Json`/`json`, `numeric`/`Numeric`, `jsonb`/`Jsonb` (Low) ✅
 
 Hasura uses lowercase scalars in some contexts: `numeric` for action args (e.g., `requestWithdrawal(amount: numeric!)`), `Json` (PascalCase) for tracked function args, `jsonb` (lowercase) in some types. Hakkyra consistently uses PascalCase (`Numeric`, `json`, `Jsonb`).
 
 Player role examples: `startDeposit(amount: numeric!)` → hakkyra has `Numeric!`, `updateLimit(amount: numeric)` → hakkyra has `Numeric`.
 
-- [ ] Investigate Hasura's scalar casing rules — when does it use lowercase vs PascalCase?
-- [ ] Match Hasura's casing for each scalar context
+- [x] Added lowercase `numeric` and `jsonb` scalar variants (same pattern as `uuid` from P11.9)
+- [x] Action SDL SCALAR_MAP maps lowercase entries to lowercase scalars
+- [x] 12 tests
 
-### P12.16 — Missing Aggregate OrderBy Types (Low)
+### P12.16 — Missing Aggregate OrderBy Types (Low) ✅
 
 15 `*AggregateOrderBy` types present in Hasura are missing in Hakkyra:
 - `BrandAggregateOrderBy`, `BrandMaxOrderBy`, `BrandMinOrderBy`
@@ -1775,8 +1779,8 @@ Player role examples: `startDeposit(amount: numeric!)` → hakkyra has `Numeric!
 
 These are needed for ordering parent rows by aggregate values of array relationships.
 
-- [ ] Generate `*AggregateOrderBy` types for array relationships that currently lack them
-- [ ] Investigate why Brand and PlayerLimitCounter are missing (possibly related to P11.13 DB mismatch)
+- [x] Generate `*AggregateOrderBy` types for SETOF computed field return tables (in OrderBy type builder)
+- [x] 5 tests
 
 ### P12.17 — Missing Constraint Enum Values (Low) ✅
 
@@ -1840,14 +1844,16 @@ Hakkyra returns the full schema (4602 types) regardless of the requesting role. 
 - [ ] Support `x-hasura-role` header with admin secret for role-scoped introspection/SDL
 - [ ] Filter schema types, fields, and root operations by the role's permissions
 
-### P12.23 — InsertInput/SetInput Expose Admin-Only Columns to Non-Admin Roles (Medium)
+### P12.23 — InsertInput/SetInput Expose Admin-Only Columns to Non-Admin Roles (Medium) — blocked by P12.22
 
 Hakkyra's InsertInput and SetInput types include ALL introspected columns regardless of role permissions. Hasura scopes these by role — backoffice InsertInput/SetInput only include columns that role has insert/update permission for.
 
 627 extra input fields found in backoffice comparison. Example: `CurrencyInsertInput` in hakkyra includes `createdAt`, `updatedAt`, `bigWinThreshold` which backoffice shouldn't see.
 
-- [ ] Scope InsertInput columns by insert permission column list
-- [ ] Scope SetInput columns by update permission column list
+**Blocked by P12.22 (role-scoped introspection)**: Without role-scoped introspection, all types return all columns to all roles. This is a schema-level visibility issue — the runtime enforcement already works correctly (column restrictions, presets). Scoping InsertInput/SetInput fields per role requires generating role-specific schema variants, which is the P12.22 work.
+
+- [ ] Scope InsertInput columns by insert permission column list (requires P12.22)
+- [ ] Scope SetInput columns by update permission column list (requires P12.22)
 
 ### P12.24 — Extra Types Only in Hakkyra (Cleanup)
 

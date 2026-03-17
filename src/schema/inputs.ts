@@ -7,6 +7,7 @@
  * - <Type>OnConflict        — conflict resolution for upserts
  * - <Type>SetInput          — all updatable columns (all nullable)
  * - <Type>PkColumnsInput    — primary key fields for by_pk operations
+ * - <Type>Updates           — batch update input { where, _set, _inc, JSONB ops }
  * - <Type>OrderBy           — column ordering input
  * - <Type>MutationResponse  — { affectedRows, returning }
  * - <Type>AggregateFields   — { count, sum, avg, min, max, stddev, stddevPop, stddevSamp, variance, varPop, varSamp }
@@ -313,7 +314,7 @@ export interface MutationInputTypes {
   constraintEnum: GraphQLEnumType | null;
   updateColumnEnum: GraphQLEnumType;
   selectColumnEnum: GraphQLEnumType;
-  updateManyInput: GraphQLInputObjectType | null;
+  updatesInput: GraphQLInputObjectType | null;
   /** JSONB mutation operator input types (only present when table has jsonb columns) */
   appendInput: GraphQLInputObjectType | null;
   prependInput: GraphQLInputObjectType | null;
@@ -864,6 +865,49 @@ export function buildMutationInputTypes(
             }
           }
         }
+
+        // SETOF computed field aggregate ordering — allow ordering by aggregate of the
+        // return table of set-returning (or composite-returning) computed fields
+        if (table.computedFields && functions) {
+          for (const cf of table.computedFields) {
+            const fnSchema = cf.function.schema ?? 'public';
+            const fn = functions.find(
+              (f) => f.name === cf.function.name && f.schema === fnSchema,
+            );
+            if (!fn) continue;
+
+            // Determine the return table key (same logic as type-builder.ts)
+            let returnTableKey: string | undefined;
+            const sameSchemaKey = tableKey(fnSchema, fn.returnType);
+
+            // Check if the return type matches a tracked table
+            if (allTables?.some((t) => tableKey(t.schema, t.name) === sameSchemaKey)) {
+              returnTableKey = sameSchemaKey;
+            } else {
+              // Search all tracked tables for a name match
+              for (const t of allTables ?? []) {
+                if (t.name === fn.returnType) {
+                  returnTableKey = tableKey(t.schema, t.name);
+                  break;
+                }
+              }
+            }
+
+            if (!returnTableKey) continue;
+
+            // Only add aggregate ordering for set-returning functions or
+            // non-set-returning functions that return a tracked table (composite return)
+            const cfFieldName = toCamelCase(cf.name);
+            const aggOrderByKey = `${returnTableKey}.__aggregateOrderBy`;
+            const aggOrderBy = orderByTypes.get(aggOrderByKey);
+            if (aggOrderBy) {
+              fields[`${cfFieldName}Aggregate`] = {
+                type: aggOrderBy,
+                description: `Order by aggregated values of the ${cf.name} computed field.`,
+              };
+            }
+          }
+        }
       }
 
       return fields;
@@ -1166,12 +1210,12 @@ export function buildMutationInputTypes(
     },
   });
 
-  // ── UpdateManyInput ──────────────────────────────────────────────────
-  let updateManyInput: GraphQLInputObjectType | null = null;
+  // ── Updates (batch update input — replaces old UpdateManyInput) ─────
+  let updatesInput: GraphQLInputObjectType | null = null;
   if (filterType) {
-    updateManyInput = new GraphQLInputObjectType({
-      name: `${typeName}UpdateManyInput`,
-      description: `Input type for updating multiple rows with different values in ${typeName}. Each entry specifies a WHERE clause and SET values.`,
+    updatesInput = new GraphQLInputObjectType({
+      name: `${typeName}Updates`,
+      description: `Update input for ${typeName}. Each entry specifies a WHERE clause, _set values, and optional operator fields.`,
       fields: () => {
         const fields: GraphQLInputFieldConfigMap = {
           where: { type: new GraphQLNonNull(filterType) },
@@ -1180,6 +1224,11 @@ export function buildMutationInputTypes(
         if (incInput) {
           fields['_inc'] = { type: incInput };
         }
+        if (appendInput) fields['_append'] = { type: appendInput };
+        if (prependInput) fields['_prepend'] = { type: prependInput };
+        if (deleteAtPathInput) fields['_deleteAtPath'] = { type: deleteAtPathInput };
+        if (deleteElemInput) fields['_deleteElem'] = { type: deleteElemInput };
+        if (deleteKeyInput) fields['_deleteKey'] = { type: deleteKeyInput };
         return fields;
       },
     });
@@ -1218,7 +1267,7 @@ export function buildMutationInputTypes(
     constraintEnum,
     updateColumnEnum,
     selectColumnEnum,
-    updateManyInput,
+    updatesInput,
     appendInput,
     prependInput,
     deleteAtPathInput,

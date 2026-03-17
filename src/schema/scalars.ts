@@ -246,6 +246,18 @@ export const GraphQLJsonb = new GraphQLScalarType({
   parseLiteral: parseLiteralJSON,
 });
 
+/**
+ * Lowercase `jsonb` scalar — Hasura uses this name for action argument types
+ * backed by PG function arguments (e.g., `myAction(data: jsonb!)`).
+ */
+export const GraphQLJsonbLower = new GraphQLScalarType({
+  name: 'jsonb',
+  description: 'PostgreSQL JSONB scalar. Accepts any valid JSON value.',
+  serialize: serializeJSON,
+  parseValue: parseValueJSON,
+  parseLiteral: parseLiteralJSON,
+});
+
 // ─── Smallint ─────────────────────────────────────────────────────────────────
 
 function validateSmallint(value: unknown): number {
@@ -317,6 +329,24 @@ export const GraphQLNumeric = new GraphQLScalarType({
   parseLiteral(ast) {
     if (ast.kind !== Kind.STRING && ast.kind !== Kind.INT && ast.kind !== Kind.FLOAT) {
       throw new TypeError(`Numeric must be a string or number, got: ${ast.kind}`);
+    }
+    return validateNumeric((ast as { value: string }).value);
+  },
+});
+
+/**
+ * Lowercase `numeric` scalar — Hasura uses this name for action argument types
+ * backed by PG function arguments (e.g., `startDeposit(amount: numeric!)`).
+ */
+export const GraphQLNumericLower = new GraphQLScalarType({
+  name: 'numeric',
+  description: 'An arbitrary precision decimal, serialized as a string.',
+
+  serialize: validateNumeric as GraphQLScalarSerializer<string>,
+  parseValue: validateNumeric as GraphQLScalarValueParser<string>,
+  parseLiteral(ast) {
+    if (ast.kind !== Kind.STRING && ast.kind !== Kind.INT && ast.kind !== Kind.FLOAT) {
+      throw new TypeError(`numeric must be a string or number, got: ${ast.kind}`);
     }
     return validateNumeric((ast as { value: string }).value);
   },
@@ -459,9 +489,11 @@ export const customScalars: Record<string, GraphQLScalarType> = {
   Time: GraphQLTime,
   json: GraphQLJson,
   Jsonb: GraphQLJsonb,
+  jsonb: GraphQLJsonbLower,
   Smallint: GraphQLSmallint,
   Bigint: GraphQLBigint,
   Numeric: GraphQLNumeric,
+  numeric: GraphQLNumericLower,
   Interval: GraphQLInterval,
   Bytea: GraphQLBytea,
   Inet: GraphQLInet,
