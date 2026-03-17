@@ -680,7 +680,7 @@ function makeActionResolver(
     if (!result.success) {
       throw new GraphQLError(
         result.error ?? `Action "${action.name}" failed`,
-        { extensions: { code: 'ACTION_HANDLER_ERROR', ...result.extensions } },
+        { extensions: result.extensions ?? { code: 'ACTION_HANDLER_ERROR' } },
       );
     }
 
