@@ -41,7 +41,7 @@ import type {
   ContextFactoryDeps,
 } from './server/context.js';
 import type { SubscriptionConnectionContext } from './server/types.js';
-import { buildCjsSchema, registerIntrospectionControl } from './server/schema.js';
+import { buildCjsSchema, registerIntrospectionControl, registerRoleScopedIntrospection } from './server/schema.js';
 import { initPhase2 } from './server/jobs.js';
 import {
   registerDebugHooks,
@@ -254,6 +254,14 @@ export async function createServer(
   // 8f. Introspection control: block introspection for disabled roles
   registerIntrospectionControl(server, config.introspection.disabledForRoles);
 
+  // 8g. Role-scoped introspection: filter __schema/__type results by role permissions
+  const roleSchemaCache = registerRoleScopedIntrospection({
+    server,
+    schemaModel,
+    config,
+    permissionLookup,
+  });
+
   // 9. Register REST routes
   registerRESTWithManager(server, schemaModel.tables, config, permissionLookup, connectionManager);
 
@@ -327,6 +335,7 @@ export async function createServer(
         // Clear caches on schema change
         queryCache.clear();
         sdlCache.clear();
+        roleSchemaCache.clear();
 
         server.log.info('Schema reloaded successfully');
         server.log.info('Note: REST route changes require a server restart');

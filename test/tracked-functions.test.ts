@@ -1862,3 +1862,85 @@ describe('Tracked Functions — P12.19 SETOF Mutation Query-Style Args (E2E)', (
     }
   });
 });
+
+// ─── P12.6 — Mutation-Exposed SETOF Functions Get Aggregate Query Fields ─────
+
+describe('Tracked Functions — P12.6 Mutation SETOF Aggregate on Query', () => {
+  let schema: GraphQLSchema;
+
+  beforeAll(() => {
+    resetComparisonTypeCache();
+    schema = generateSchema(schemaModel);
+  });
+
+  it('should have aggregate query field for mutation-exposed SETOF function (bulkActivateClientsAggregate)', () => {
+    const queryType = schema.getQueryType();
+    expect(queryType).toBeDefined();
+
+    const fields = queryType!.getFields();
+    const aggField = fields['bulkActivateClientsAggregate'];
+    expect(aggField).toBeDefined();
+    expect(aggField.type.toString()).toBe('ClientAggregate!');
+  });
+
+  it('should have correct args on mutation-exposed aggregate field', () => {
+    const queryType = schema.getQueryType();
+    const fields = queryType!.getFields();
+    const aggField = fields['bulkActivateClientsAggregate'];
+    expect(aggField).toBeDefined();
+
+    const argNames = aggField.args.map((a) => a.name);
+    expect(argNames).toContain('args');
+    expect(argNames).toContain('where');
+    expect(argNames).toContain('orderBy');
+    expect(argNames).toContain('limit');
+    expect(argNames).toContain('offset');
+  });
+
+  it('should NOT have bulkActivateClientsAggregate on mutation type', () => {
+    const mutationType = schema.getMutationType();
+    expect(mutationType).toBeDefined();
+
+    const fields = mutationType!.getFields();
+    expect(fields['bulkActivateClientsAggregate']).toBeUndefined();
+  });
+
+  it('should have aggregate subscription field for mutation-exposed SETOF function', () => {
+    const subscriptionType = schema.getSubscriptionType();
+    expect(subscriptionType).toBeDefined();
+
+    const fields = subscriptionType!.getFields();
+    const aggField = fields['bulkActivateClientsAggregate'];
+    expect(aggField).toBeDefined();
+    expect(aggField.type.toString()).toBe('ClientAggregate!');
+  });
+
+  it('should NOT have list subscription field for mutation-exposed function', () => {
+    const subscriptionType = schema.getSubscriptionType();
+    expect(subscriptionType).toBeDefined();
+
+    const fields = subscriptionType!.getFields();
+    // bulkActivateClients list field should only be on mutation, not on subscription
+    expect(fields['bulkActivateClients']).toBeUndefined();
+  });
+
+  it('should execute aggregate query on mutation-exposed SETOF function', async () => {
+    const { body } = await graphqlRequest(
+      `{
+        bulkActivateClientsAggregate(args: { target_status: "active" }) {
+          aggregate {
+            count
+          }
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { bulkActivateClientsAggregate: { aggregate: { count: number } } };
+    expect(data.bulkActivateClientsAggregate).toBeDefined();
+    expect(data.bulkActivateClientsAggregate.aggregate).toBeDefined();
+    expect(typeof data.bulkActivateClientsAggregate.aggregate.count).toBe('number');
+  });
+});

@@ -38,7 +38,12 @@ export interface MercuriusFastifyInstance extends FastifyInstance {
 export interface HookContext {
   auth?: {
     role?: string;
+    isAdmin?: boolean;
   };
+  /** Set by introspection preExecution hook for use in onResolution. */
+  _introspectionDocument?: import('graphql').DocumentNode;
+  /** Request headers — set by Mercurius context builder. */
+  clientHeaders?: Record<string, string>;
 }
 
 // ─── Mercurius subscription context ──────────────────────────────────────────

@@ -523,6 +523,11 @@ Hakkyra reads Hasura-compatible YAML metadata but does not implement all Hasura 
 - **Remote relationships** — Hakkyra connects to a single PostgreSQL database; cross-source joins are out of scope
 - **Apollo Federation** — Hakkyra serves a standalone GraphQL API, not a federated subgraph
 
+**Intentional divergences** (better than Hasura's approach):
+- **PG enums as GraphQL enums** — Hasura treats PG enums as opaque scalars; Hakkyra uses real GraphQL enums with values for better DX (autocomplete, validation)
+- **Column visibility** — Hakkyra only exposes columns that appear in at least one role's select permission. Hasura exposes all columns to admin regardless of permission config. Hakkyra's approach keeps the schema clean and doesn't leak admin-only column names.
+- **Grouped aggregates** — Hakkyra includes `groupedAggregates` fields on all aggregate types. Hasura does not have this. This is a Hakkyra extension always enabled.
+
 **Not implemented** (Hasura features Hakkyra does not use):
 - Remote schemas, allowlists, API limits, OpenTelemetry, network/TLS config, backend-specific config
 - Stored procedures, database customization (table name prefix/suffix, root field namespace)
