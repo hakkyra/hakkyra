@@ -552,7 +552,7 @@ describe('Upsert permission enforcement', () => {
               currencyId: "EUR"
             },
             onConflict: {
-              constraint: client_username_key,
+              constraint: clientUsernameKey,
               updateColumns: [email]
             }
           ) { id username status trustLevel }
@@ -600,7 +600,7 @@ describe('Upsert permission enforcement', () => {
               currencyId: "EUR"
             },
             onConflict: {
-              constraint: client_username_key,
+              constraint: clientUsernameKey,
               updateColumns: [email]
             }
           ) { id email }
