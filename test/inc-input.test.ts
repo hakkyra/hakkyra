@@ -147,13 +147,13 @@ describe('P12.2 — IncInput schema generation', () => {
     expect(argNames).toContain('_inc');
   });
 
-  it('should add _inc field to updateAccountMany input type', () => {
+  it('should add _inc field to AccountUpdates input type', () => {
     const typeMap = schema.getTypeMap();
-    const updateManyInput = typeMap['AccountUpdateManyInput'];
-    expect(updateManyInput).toBeDefined();
-    expect(updateManyInput).toBeInstanceOf(GraphQLInputObjectType);
+    const updatesInput = typeMap['AccountUpdates'];
+    expect(updatesInput).toBeDefined();
+    expect(updatesInput).toBeInstanceOf(GraphQLInputObjectType);
 
-    const fields = (updateManyInput as GraphQLInputObjectType).getFields();
+    const fields = (updatesInput as GraphQLInputObjectType).getFields();
     expect(fields['_inc']).toBeDefined();
   });
 

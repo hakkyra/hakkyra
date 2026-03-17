@@ -486,13 +486,13 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
     // update_many — batch updates with different values per entry
     // Hasura returns [MutationResponse] (one result per update entry)
-    if (isOpEnabled(table, 'updateMany') && mutInputs.updateManyInput) {
+    if (isOpEnabled(table, 'updateMany') && mutInputs.updatesInput) {
       mutationFields[names.updateMany] = {
         type: new GraphQLList(mutInputs.mutationResponse),
         args: {
           updates: {
             type: new GraphQLNonNull(
-              new GraphQLList(new GraphQLNonNull(mutInputs.updateManyInput)),
+              new GraphQLList(new GraphQLNonNull(mutInputs.updatesInput)),
             ),
           },
         },

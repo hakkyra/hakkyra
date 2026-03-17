@@ -349,13 +349,117 @@ export function buildFilterTypes(
       },
     });
 
-    // Build the aggregate BoolExp wrapper type
+    // Identify boolean columns (visible) for bool_and / bool_or aggregate types
+    const visibleCols = getVisibleColumns(table);
+    const booleanColumns = table.columns.filter((col) => {
+      if (visibleCols && !visibleCols.has(col.name)) return false;
+      const mapping = pgTypeToGraphQL(col.udtName, false, enumNames);
+      return mapping.name === 'Boolean' && !col.isArray;
+    });
+
+    // Build bool_and / bool_or types only when the table has boolean columns
+    let boolAndType: GraphQLInputObjectType | undefined;
+    let boolOrType: GraphQLInputObjectType | undefined;
+
+    if (booleanColumns.length > 0) {
+      // Build the arguments column enums for bool_and and bool_or
+      // Enum keys are the camelCase field names (matching Hasura's graphql-default convention)
+      const boolAndEnumValues: Record<string, { value: string }> = {};
+      const boolOrEnumValues: Record<string, { value: string }> = {};
+      for (const col of booleanColumns) {
+        const fieldName = getColumnFieldName(table, col.name);
+        boolAndEnumValues[fieldName] = { value: col.name };
+        boolOrEnumValues[fieldName] = { value: col.name };
+      }
+
+      const boolAndArgsEnum = new GraphQLEnumType({
+        name: `${typeName}SelectColumn${typeName}AggregateBoolExpBool_andArgumentsColumns`,
+        description: `Boolean column arguments for ${typeName} bool_and aggregate.`,
+        values: boolAndEnumValues,
+      });
+
+      const boolOrArgsEnum = new GraphQLEnumType({
+        name: `${typeName}SelectColumn${typeName}AggregateBoolExpBool_orArgumentsColumns`,
+        description: `Boolean column arguments for ${typeName} bool_or aggregate.`,
+        values: boolOrEnumValues,
+      });
+
+      // Build the bool_and helper type (lowercase-start name per Hasura convention)
+      boolAndType = new GraphQLInputObjectType({
+        name: `${lcTypeName}AggregateBoolExpBool_and`,
+        description: `Bool_and aggregate filter for ${typeName}.`,
+        fields: () => {
+          const fields: Record<string, { type: GraphQLInputType }> = {};
+
+          // arguments: SelectColumn...Bool_andArgumentsColumns! (required)
+          fields['arguments'] = {
+            type: new GraphQLNonNull(boolAndArgsEnum),
+          };
+
+          // distinct: Boolean (optional)
+          fields['distinct'] = { type: GraphQLBoolean };
+
+          // filter: BoolExp (optional)
+          const remoteBoolExp = filterTypes.get(key);
+          if (remoteBoolExp) {
+            fields['filter'] = { type: remoteBoolExp };
+          }
+
+          // predicate: BooleanComparisonExp! (required)
+          fields['predicate'] = {
+            type: new GraphQLNonNull(getComparisonType('Boolean')),
+          };
+
+          return fields;
+        },
+      });
+
+      // Build the bool_or helper type (lowercase-start name per Hasura convention)
+      boolOrType = new GraphQLInputObjectType({
+        name: `${lcTypeName}AggregateBoolExpBool_or`,
+        description: `Bool_or aggregate filter for ${typeName}.`,
+        fields: () => {
+          const fields: Record<string, { type: GraphQLInputType }> = {};
+
+          // arguments: SelectColumn...Bool_orArgumentsColumns! (required)
+          fields['arguments'] = {
+            type: new GraphQLNonNull(boolOrArgsEnum),
+          };
+
+          // distinct: Boolean (optional)
+          fields['distinct'] = { type: GraphQLBoolean };
+
+          // filter: BoolExp (optional)
+          const remoteBoolExp = filterTypes.get(key);
+          if (remoteBoolExp) {
+            fields['filter'] = { type: remoteBoolExp };
+          }
+
+          // predicate: BooleanComparisonExp! (required)
+          fields['predicate'] = {
+            type: new GraphQLNonNull(getComparisonType('Boolean')),
+          };
+
+          return fields;
+        },
+      });
+    }
+
+    // Build the aggregate BoolExp wrapper type with count and optional bool_and/bool_or
+    const aggBoolExpFields: Record<string, { type: GraphQLInputType }> = {
+      count: { type: countType },
+    };
+    if (boolAndType) {
+      aggBoolExpFields['bool_and'] = { type: boolAndType };
+    }
+    if (boolOrType) {
+      aggBoolExpFields['bool_or'] = { type: boolOrType };
+    }
+
     const aggBoolExpType = new GraphQLInputObjectType({
       name: `${typeName}AggregateBoolExp`,
       description: `Aggregate boolean expression filter for ${typeName}.`,
-      fields: {
-        count: { type: countType },
-      },
+      fields: aggBoolExpFields,
     });
 
     aggregateBoolExpTypes.set(key, aggBoolExpType);

@@ -242,8 +242,8 @@ export function makeUpdateByPkResolver(
 /**
  * Creates a resolver for the `update<Table>Many` mutation field.
  *
- * Arguments: updates (required) — array of { where, _set }
- * Returns: <Type>MutationResponse { affectedRows, returning }
+ * Arguments: updates (required) — array of { where, _set, _inc, _append, _prepend, _deleteAtPath, _deleteElem, _deleteKey }
+ * Returns: [<Type>MutationResponse] { affectedRows, returning }
  */
 export function makeUpdateManyResolver(
   table: TableInfo,
@@ -258,7 +258,7 @@ export function makeUpdateManyResolver(
       throw permissionDenied('update', `${table.schema}.${table.name}`, auth.role);
     }
 
-    const rawUpdates = args.updates as Array<{ where: Record<string, unknown>; _set: Record<string, unknown>; _inc?: Record<string, unknown> }>;
+    const rawUpdates = args.updates as Array<Record<string, unknown>>;
     if (!rawUpdates || rawUpdates.length === 0) {
       return [];
     }
@@ -281,11 +281,12 @@ export function makeUpdateManyResolver(
       auth.isAdmin,
     );
 
-    // Compile each update
+    // Compile each update — extract all operator fields from each entry
     const updates = rawUpdates.map((entry) => ({
       where: remapBoolExp(entry.where as BoolExp | undefined, columnMap) ?? ({} as BoolExp),
-      _set: remapKeys(entry._set as Record<string, unknown>, columnMap) ?? {},
+      _set: remapKeys(entry._set as Record<string, unknown> | undefined, columnMap) ?? {},
       _inc: remapKeys(entry._inc as Record<string, unknown> | undefined, columnMap),
+      jsonbOps: extractJsonbOps(entry, columnMap),
     }));
 
     const compiledQueries = compileUpdateMany({

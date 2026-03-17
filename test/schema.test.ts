@@ -127,11 +127,11 @@ describe('GraphQL Schema Generation', () => {
       expect(updateByPkSetArg).toBeDefined();
       expect(updateByPkSetArg!.type).not.toBeInstanceOf(GraphQLNonNull);
 
-      // updateMany — _set inside the UpdateManyInput type should be nullable
+      // updateMany — _set inside the Updates type should be nullable
       const updateManyField = fields['updateClientMany'];
       const updatesArg = updateManyField.args.find((a) => a.name === 'updates');
       expect(updatesArg).toBeDefined();
-      // Unwrap NonNull > List > NonNull to get the UpdateManyInput type
+      // Unwrap NonNull > List > NonNull to get the Updates type
       const listType = (updatesArg!.type as GraphQLNonNull<any>).ofType as GraphQLList<any>;
       const inputType = (listType.ofType as GraphQLNonNull<any>).ofType as GraphQLInputObjectType;
       const setField = inputType.getFields()['_set'];
