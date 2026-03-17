@@ -48,14 +48,14 @@ function unwrap(schema: z.ZodTypeAny): { inner: z.ZodTypeAny; isOptional: boolea
   while (true) {
     if (current instanceof z.ZodOptional) {
       isOptional = true;
-      current = current.unwrap();
+      current = current.unwrap() as z.ZodTypeAny;
     } else if (current instanceof z.ZodDefault) {
       isOptional = true; // defaults make a field effectively optional in YAML
       defaultValue = current._def.defaultValue;
-      current = current._def.innerType;
+      current = current._def.innerType as z.ZodTypeAny;
     } else if (current instanceof z.ZodNullable) {
       isOptional = true;
-      current = current.unwrap();
+      current = current.unwrap() as z.ZodTypeAny;
     } else {
       break;
     }
@@ -74,18 +74,18 @@ function zodTypeName(schema: z.ZodTypeAny): string {
     return vals.map((v: unknown) => JSON.stringify(v)).join(' | ');
   }
   if (schema instanceof z.ZodEnum) {
-    const opts = (schema as z.ZodEnum<[string, ...string[]]>).options;
+    const opts = (schema as unknown as { options: string[] }).options;
     return opts.map((v: string) => `"${v}"`).join(' | ');
   }
   if (schema instanceof z.ZodArray) {
-    return `${zodTypeName(schema._def.element)}[]`;
+    return `${zodTypeName(schema._def.element as z.ZodTypeAny)}[]`;
   }
   if (schema instanceof z.ZodObject) return 'object';
   if (schema instanceof z.ZodRecord) {
-    return `Record<${zodTypeName(schema._def.keyType)}, ${zodTypeName(schema._def.valueType)}>`;
+    return `Record<${zodTypeName(schema._def.keyType as z.ZodTypeAny)}, ${zodTypeName(schema._def.valueType as z.ZodTypeAny)}>`;
   }
   if (schema instanceof z.ZodMap) {
-    return `Map<${zodTypeName(schema._def.keyType)}, ${zodTypeName(schema._def.valueType)}>`;
+    return `Map<${zodTypeName(schema._def.keyType as z.ZodTypeAny)}, ${zodTypeName(schema._def.valueType as z.ZodTypeAny)}>`;
   }
   if (schema instanceof z.ZodUnion) {
     return (schema._def.options as z.ZodTypeAny[])
@@ -105,7 +105,7 @@ function zodTypeName(schema: z.ZodTypeAny): string {
 /** Extract enum values from a schema (if applicable). */
 function getEnumValues(schema: z.ZodTypeAny): string[] | undefined {
   if (schema instanceof z.ZodEnum) {
-    return (schema as z.ZodEnum<[string, ...string[]]>).options as string[];
+    return (schema as unknown as { options: string[] }).options;
   }
   return undefined;
 }
@@ -153,7 +153,7 @@ function walkField(name: string, schema: z.ZodTypeAny): FieldDoc {
 
   // Recurse into arrays of objects
   if (inner instanceof z.ZodArray) {
-    const elementType = inner._def.element;
+    const elementType = inner._def.element as z.ZodTypeAny;
     const { inner: elementInner } = unwrap(elementType);
     if (elementInner instanceof z.ZodObject) {
       field.children = walkObject(elementInner as z.ZodObject<z.ZodRawShape>);
@@ -162,7 +162,7 @@ function walkField(name: string, schema: z.ZodTypeAny): FieldDoc {
 
   // Recurse into record values if they are objects
   if (inner instanceof z.ZodRecord) {
-    const valueType = inner._def.valueType;
+    const valueType = inner._def.valueType as z.ZodTypeAny;
     const { inner: valueInner } = unwrap(valueType);
     if (valueInner instanceof z.ZodObject) {
       field.children = walkObject(valueInner as z.ZodObject<z.ZodRawShape>);
