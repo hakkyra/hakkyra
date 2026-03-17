@@ -65,6 +65,6 @@
         branchId:
           nullable: false
           type: uuid
-      code: "SELECT id, name FROM client WHERE branch_id = {{branchId}}"
+      code: "SELECT id, username AS name FROM client WHERE branch_id = {{branchId}}"
       returns: ClientNameResult
       root_field_name: clientNamesByBranch

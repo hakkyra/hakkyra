@@ -43,6 +43,8 @@ import {
   DEFAULT_SESSION_NAMESPACE,
 } from '../auth/session-namespace.js';
 import { OrderByDirection } from './inputs.js';
+import { randomUUID } from 'crypto';
+import { createAsyncQueue } from './subscription-resolvers.js';
 
 // ─── Type Mapping ────────────────────────────────────────────────────────────
 
@@ -356,6 +358,7 @@ export function buildNativeQueryFields(
   logicalModels: LogicalModel[],
 ): NativeQueryFields {
   const queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
+  const subscriptionFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};
   const outputTypes: GraphQLObjectType[] = [];
   const inputTypes: GraphQLInputObjectType[] = [];
   const logicalModelMap = new Map<string, LogicalModel>();
@@ -419,9 +422,21 @@ export function buildNativeQueryFields(
       resolve: makeNativeQueryResolver(nq, logicalModel),
       description: `Native query: ${nq.rootFieldName}`,
     };
+
+    // Build subscription field — watches tables referenced in the SQL
+    const referencedTables = extractReferencedTables(nq.code);
+    if (referencedTables.length > 0) {
+      subscriptionFields[nq.rootFieldName] = {
+        type: returnType,
+        args: fieldArgs,
+        description: `Subscribe to native query: ${nq.rootFieldName}`,
+        resolve: (payload: unknown) => payload,
+        subscribe: makeNativeQuerySubscriptionSubscribe(nq, logicalModel, referencedTables),
+      };
+    }
   }
 
-  return { queryFields, outputTypes, inputTypes };
+  return { queryFields, subscriptionFields, outputTypes, inputTypes };
 }
 
 function getOrCreateLogicalModelType(model: LogicalModel): GraphQLObjectType {
@@ -513,10 +528,161 @@ function makeNativeQueryResolver(
   };
 }
 
+// ─── SQL Table Reference Extraction ──────────────────────────────────────────
+
+/**
+ * Extract table names referenced in a SQL query (FROM/JOIN clauses).
+ * Used to determine which tables a native query subscription should watch.
+ *
+ * Returns schema-qualified table keys (e.g., "public.client").
+ */
+export function extractReferencedTables(sql: string): string[] {
+  const tables = new Set<string>();
+  // Match FROM/JOIN followed by optional schema-qualified table name.
+  // Skip subquery opens: FROM (SELECT ...)
+  const regex = /\b(?:FROM|JOIN)\s+(?!\()("?[\w]+"?(?:\."?[\w]+"?)?)/gi;
+  let match;
+  while ((match = regex.exec(sql)) !== null) {
+    const raw = match[1].replace(/"/g, '');
+    if (raw.includes('.')) {
+      tables.add(raw);
+    } else {
+      tables.add(`public.${raw}`);
+    }
+  }
+  return Array.from(tables);
+}
+
+// ─── Subscription Factory ───────────────────────────────────────────────────
+
+/**
+ * Wrap a raw SQL query so it returns a single row with a "data" column
+ * containing a JSON array, matching the format the subscription manager expects.
+ */
+function wrapForSubscription(innerSQL: string): string {
+  return `SELECT coalesce(json_agg(row_to_json("__nq_sub")), '[]'::json) AS "data" FROM (${innerSQL}) AS "__nq_sub"`;
+}
+
+/**
+ * Creates a `subscribe` function for native query subscription fields.
+ *
+ * Watches the tables referenced in the native query's SQL. When any
+ * referenced table changes, re-executes the native query and pushes
+ * the result if it changed (hash-diff handled by subscription manager).
+ */
+function makeNativeQuerySubscriptionSubscribe(
+  nq: NativeQuery,
+  logicalModel: LogicalModel,
+  referencedTables: string[],
+): (_parent: unknown, args: Record<string, unknown>, context: ResolverContext) => AsyncIterableIterator<unknown> {
+  const { sql: parameterizedSQL, paramNames } = parseNativeQuerySQL(nq.code);
+  const primaryTable = referencedTables[0];
+  const additionalTables = referencedTables.slice(1);
+
+  return (_parent, args, context) => {
+    const { auth, subscriptionManager } = context;
+
+    if (!subscriptionManager) {
+      throw new Error('Subscription manager is not available');
+    }
+
+    // ── Permission check ──────────────────────────────────────────────
+    const nqArgs = (args.args ?? {}) as Record<string, unknown>;
+    const params: unknown[] = paramNames.map((name) => nqArgs[name] ?? null);
+
+    let compiledSQL: string;
+    let compiledParams: unknown[];
+    let allowedColumns: Set<string> | null = null;
+
+    if (!auth.isAdmin) {
+      const perm = logicalModel.selectPermissions.find((p) => p.role === auth.role);
+      if (!perm) {
+        throw new Error(
+          `Permission denied: role "${auth.role}" does not have access to native query "${nq.rootFieldName}"`,
+        );
+      }
+
+      allowedColumns = new Set(perm.columns);
+      const filterKeys = Object.keys(perm.filter);
+
+      if (filterKeys.length > 0) {
+        const { sql: filterSQL, params: filterParams } = compilePermissionFilter(
+          perm.filter,
+          auth,
+          params.length,
+        );
+        const innerSQL = `SELECT * FROM (${parameterizedSQL}) AS __nq WHERE ${filterSQL}`;
+        compiledSQL = wrapForSubscription(innerSQL);
+        compiledParams = [...params, ...filterParams];
+      } else {
+        compiledSQL = wrapForSubscription(parameterizedSQL);
+        compiledParams = params;
+      }
+    } else {
+      compiledSQL = wrapForSubscription(parameterizedSQL);
+      compiledParams = params;
+    }
+
+    // ── Column filter helper ──────────────────────────────────────────
+    function filterColumns(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+      if (!allowedColumns) return rows;
+      return rows.map((row) => {
+        const filtered: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(row)) {
+          if (allowedColumns!.has(key)) {
+            filtered[key] = value;
+          }
+        }
+        return filtered;
+      });
+    }
+
+    const queue = createAsyncQueue<unknown>();
+    const subscriptionId = randomUUID();
+
+    async function* generate(): AsyncGenerator<unknown> {
+      try {
+        const initialData = await subscriptionManager!.register({
+          id: subscriptionId,
+          tableKey: primaryTable,
+          query: { sql: compiledSQL, params: compiledParams },
+          session: auth,
+          relatedTableKeys: additionalTables.length > 0 ? additionalTables : undefined,
+          push: (data: unknown) => {
+            if (Array.isArray(data)) {
+              queue.push(filterColumns(data as Record<string, unknown>[]));
+            } else {
+              queue.push(data);
+            }
+          },
+        });
+
+        // Yield the initial result
+        if (Array.isArray(initialData)) {
+          yield filterColumns(initialData as Record<string, unknown>[]);
+        } else {
+          yield initialData;
+        }
+
+        // Yield subsequent updates from the queue
+        for await (const value of queue.iterator) {
+          yield value;
+        }
+      } finally {
+        subscriptionManager!.unregister(subscriptionId);
+        queue.done();
+      }
+    }
+
+    return generate();
+  };
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface NativeQueryFields {
   queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>>;
+  subscriptionFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>>;
   outputTypes: GraphQLObjectType[];
   inputTypes: GraphQLInputObjectType[];
 }

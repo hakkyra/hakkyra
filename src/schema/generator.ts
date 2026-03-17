@@ -702,6 +702,11 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
     }
   }
 
+  // Add native query subscription fields
+  for (const [name, fieldConfig] of Object.entries(nativeQueryFieldResult.subscriptionFields)) {
+    subscriptionFields[name] = fieldConfig;
+  }
+
   // Add async action result subscription fields
   for (const [name, fieldConfig] of Object.entries(actionFields.subscriptionFields)) {
     subscriptionFields[name] = fieldConfig;
