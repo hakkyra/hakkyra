@@ -561,7 +561,7 @@ describe('Security', () => {
       const token = await tokens.backoffice();
       const { status, body } = await graphqlRequest(
         `query {
-          searchClients(args: { search_term: "'; DROP TABLE client; --" }) {
+          searchClients(args: { searchTerm: "'; DROP TABLE client; --" }) {
             id username
           }
         }`,
@@ -585,7 +585,7 @@ describe('Security', () => {
       const token = await tokens.backoffice();
       const { status, body } = await graphqlRequest(
         `query {
-          searchClients(args: { search_term: "' UNION SELECT * FROM branch --" }) {
+          searchClients(args: { searchTerm: "' UNION SELECT * FROM branch --" }) {
             id username
           }
         }`,
@@ -603,7 +603,7 @@ describe('Security', () => {
       const token = await tokens.backoffice();
       const { status, body } = await graphqlRequest(
         `query {
-          searchClients(args: { search_term: "alice'; DELETE FROM client WHERE '1'='1" }) {
+          searchClients(args: { searchTerm: "alice'; DELETE FROM client WHERE '1'='1" }) {
             id username
           }
         }`,
@@ -626,7 +626,7 @@ describe('Security', () => {
       const token = await tokens.backoffice();
       const { status, body } = await graphqlRequest(
         `query {
-          searchClients(args: { search_term: "' OR '1'='1" }) {
+          searchClients(args: { searchTerm: "' OR '1'='1" }) {
             id username
           }
         }`,
@@ -647,7 +647,7 @@ describe('Security', () => {
       const token = await tokens.backoffice();
       const { status, body } = await graphqlRequest(
         `query {
-          searchClients(args: { search_term: "alice" }) {
+          searchClients(args: { searchTerm: "alice" }) {
             id username
           }
         }`,
@@ -923,7 +923,7 @@ describe('Security', () => {
     it('tracked function query respects graphql.maxLimit', async () => {
       const token = await tokens.backoffice();
       const { status, body } = await graphqlRequest(
-        `query { searchClients(args: { search_term: "" }, limit: 200) { id } }`,
+        `query { searchClients(args: { searchTerm: "" }, limit: 200) { id } }`,
         undefined,
         { authorization: `Bearer ${token}` },
       );

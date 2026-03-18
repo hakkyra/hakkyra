@@ -144,7 +144,7 @@ describe('JWT admin_role_is_admin — E2E', () => {
     const token = await createAdminJWT();
 
     const { status, body } = await graphqlRequest(
-      `query { searchClients(args: { search_term: "alice" }) { id username } }`,
+      `query { searchClients(args: { searchTerm: "alice" }) { id username } }`,
       undefined,
       { authorization: `Bearer ${token}` },
     );
@@ -158,7 +158,7 @@ describe('JWT admin_role_is_admin — E2E', () => {
   it('admin-secret user can always access tracked functions (baseline)', async () => {
     // Baseline: verify admin secret grants isAdmin: true and bypasses function perms
     const { status, body } = await graphqlRequest(
-      `query { searchClients(args: { search_term: "alice" }) { id username } }`,
+      `query { searchClients(args: { searchTerm: "alice" }) { id username } }`,
       undefined,
       { 'x-hasura-admin-secret': ADMIN_SECRET },
     );
@@ -178,7 +178,7 @@ describe('JWT admin_role_is_admin — E2E', () => {
     });
 
     const { status, body } = await graphqlRequest(
-      `query { searchClients(args: { search_term: "alice" }) { id username } }`,
+      `query { searchClients(args: { searchTerm: "alice" }) { id username } }`,
       undefined,
       {
         authorization: `Bearer ${token}`,
@@ -201,7 +201,7 @@ describe('JWT admin_role_is_admin — E2E', () => {
     });
 
     const { status, body } = await graphqlRequest(
-      `query { searchClients(args: { search_term: "alice" }) { id username } }`,
+      `query { searchClients(args: { searchTerm: "alice" }) { id username } }`,
       undefined,
       { authorization: `Bearer ${token}` },
     );

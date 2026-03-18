@@ -315,8 +315,8 @@ export function buildTrackedFunctionFields(
     if (userArgs.length > 0) {
       const argsFields: Record<string, { type: GraphQLInputType }> = {};
       for (const arg of userArgs) {
-        // P12.8: Use the PG parameter name directly (Hasura convention)
-        argsFields[arg.name] = {
+        // P12.8: Convert PG parameter name to camelCase (Hasura convention)
+        argsFields[toCamelCase(arg.name)] = {
           type: pgArgTypeToGraphQL(arg.pgType, enumTypes, enumNames),
         };
       }
@@ -739,8 +739,8 @@ export function extractFuncArgs(
       continue;
     }
 
-    // User argument: get from args input (P12.8: use raw PG arg name)
-    const value = fnArgs?.[argName];
+    // User argument: get from args input using camelCase (Hasura convention)
+    const value = fnArgs?.[toCamelCase(argName)];
 
     // If not provided and this arg has a PG DEFAULT, omit it
     if (value === undefined && i >= firstDefaultIdx) continue;

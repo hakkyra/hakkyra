@@ -1243,10 +1243,10 @@ describe('GraphQL Schema Generation', () => {
       expect(argsArg).toBeDefined();
       // args should be NonNull (P11.6)
       expect(argsArg!.type).toBeInstanceOf(GraphQLNonNull);
-      // The args input type should have a playerId field
+      // The args input type should have a playerId field (camelCase from PG player_id)
       const argsType = (argsArg!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['player_id']).toBeDefined();
+      expect(argsFields['playerId']).toBeDefined();
     });
 
     it('should NOT have where/orderBy/limit/offset args on scalar-returning functions', () => {
@@ -1272,8 +1272,8 @@ describe('GraphQL Schema Generation', () => {
       // args is NonNull (P11.6), unwrap to get the InputObjectType
       const argsType = (argsArg!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['p_id']).toBeDefined();
-      expect(argsFields['p_id'].type.toString()).toBe('Uuid');
+      expect(argsFields['pId']).toBeDefined();
+      expect(argsFields['pId'].type.toString()).toBe('Uuid');
     });
 
     it('should use Numeric scalar for numeric-typed function args', () => {
@@ -1281,8 +1281,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['p_min_balance']).toBeDefined();
-      expect(argsFields['p_min_balance'].type.toString()).toBe('Numeric');
+      expect(argsFields['pMinBalance']).toBeDefined();
+      expect(argsFields['pMinBalance'].type.toString()).toBe('Numeric');
     });
 
     it('should use Jsonb scalar for jsonb-typed function args', () => {
@@ -1290,8 +1290,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['p_metadata']).toBeDefined();
-      expect(argsFields['p_metadata'].type.toString()).toBe('Jsonb');
+      expect(argsFields['pMetadata']).toBeDefined();
+      expect(argsFields['pMetadata'].type.toString()).toBe('Jsonb');
     });
 
     it('should use json scalar for json-typed function args', () => {
@@ -1299,8 +1299,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['p_extra']).toBeDefined();
-      expect(argsFields['p_extra'].type.toString()).toBe('json');
+      expect(argsFields['pExtra']).toBeDefined();
+      expect(argsFields['pExtra'].type.toString()).toBe('json');
     });
 
     it('should use Bigint scalar for bigint-typed function args', () => {
@@ -1308,8 +1308,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['p_limit']).toBeDefined();
-      expect(argsFields['p_limit'].type.toString()).toBe('Bigint');
+      expect(argsFields['pLimit']).toBeDefined();
+      expect(argsFields['pLimit'].type.toString()).toBe('Bigint');
     });
 
     it('should use Bpchar scalar for bpchar-typed function args', () => {
@@ -1317,8 +1317,8 @@ describe('GraphQL Schema Generation', () => {
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
-      expect(argsFields['p_brand_code']).toBeDefined();
-      expect(argsFields['p_brand_code'].type.toString()).toBe('Bpchar');
+      expect(argsFields['pBrandCode']).toBeDefined();
+      expect(argsFields['pBrandCode'].type.toString()).toBe('Bpchar');
     });
   });
 

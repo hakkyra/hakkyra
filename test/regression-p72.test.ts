@@ -176,7 +176,7 @@ describe('Regression: db5e112 — relationship where filters on tracked function
     const { status, body } = await graphqlRequest(
       `query {
         searchClients(
-          args: { search_term: "" }
+          args: { searchTerm: "" }
           where: { branch: { name: { _eq: "TestBranch" } } }
         ) {
           id
@@ -207,7 +207,7 @@ describe('Regression: db5e112 — relationship where filters on tracked function
     const { status, body } = await graphqlRequest(
       `query {
         searchClientsAggregate(
-          args: { search_term: "" }
+          args: { searchTerm: "" }
           where: { branch: { name: { _eq: "TestBranch" } } }
         ) {
           aggregate {
