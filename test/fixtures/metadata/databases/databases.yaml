@@ -58,7 +58,8 @@
         branchId:
           nullable: false
           type: uuid
-      code: "SELECT count(*)::bigint as \"count\" FROM client WHERE branch_id = {{branchId}}"
+      # trailing `;` is intentional — Hasura accepts it (P13.18)
+      code: "SELECT count(*)::bigint as \"count\" FROM client WHERE branch_id = {{branchId}};"
       returns: BranchClientCount
       root_field_name: branchClientCount
     - arguments:

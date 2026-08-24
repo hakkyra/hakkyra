@@ -249,7 +249,13 @@ export function parseNativeQuerySQL(code: string): { sql: string; paramNames: st
   const paramNames: string[] = [];
   const paramIndex = new Map<string, number>();
 
-  const sql = code.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => {
+  // Strip trailing whitespace and statement terminators — a trailing `;` is
+  // normal when the SQL was pasted out of psql (Hasura accepts it), but every
+  // codepath that inlines the query as a subquery (stringify projection,
+  // permission filter, subscription wrap) would hit a PG syntax error.
+  const trimmedCode = code.replace(/[\s;]+$/, '');
+
+  const sql = trimmedCode.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => {
     let idx = paramIndex.get(name);
     if (idx === undefined) {
       paramNames.push(name);
