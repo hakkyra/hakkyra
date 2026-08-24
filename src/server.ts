@@ -229,6 +229,13 @@ export async function createServer(
     graphiql: process.env['NODE_ENV'] !== 'production',
     path: '/graphql',
     queryDepth: config.graphql.queryDepth,
+    // mercurius's default route response schema types errors[].extensions.code
+    // as a string, so fast-json-stringify coerces structured codes (arrays,
+    // objects) to "[object Object]". Serialize responses with JSON.stringify
+    // instead so handler extensions pass through untouched.
+    additionalRouteOptions: {
+      serializerCompiler: () => (data: unknown) => JSON.stringify(data),
+    },
     // Hasura error shape: { message, extensions } only — no top-level locations/path.
     errorFormatter: (result, context) => {
       const formatted = mercurius.defaultErrorFormatter(result, context);

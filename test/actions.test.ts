@@ -508,6 +508,30 @@ describe('Actions', () => {
       expect(body.errors![0]).not.toHaveProperty('path');
     });
 
+    it('preserves non-string extensions.code from the handler (P13.16)', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      const structuredCode = [
+        { code: 'invalid_type', path: ['amount'], message: 'Expected number, received string' },
+      ];
+      webhook.onPath('/actions/create-payment', () => ({
+        code: 400,
+        body: { message: 'Invalid input', extensions: { code: structuredCode } },
+      }));
+
+      const { body } = await gql(
+        `mutation($input: CreatePaymentInput!) {
+          createPayment(input: $input) { status }
+        }`,
+        { input: { amount: -10, currencyId: 'usd' } },
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(body.errors).toBeDefined();
+      expect(body.errors![0].message).toBe('Invalid input');
+      expect(body.errors![0].extensions?.code).toEqual(structuredCode);
+    });
+
     it('returns error for unauthenticated requests', async () => {
       const { body } = await gql(
         `mutation($input: CreatePaymentInput!) {
