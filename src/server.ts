@@ -50,6 +50,7 @@ import {
   registerHealthEndpoints,
   registerDocEndpoints,
 } from './server/routes.js';
+import { registerScheduledEventRoutes } from './scheduled-events/index.js';
 
 // ─── Server Factory ──────────────────────────────────────────────────────────
 
@@ -284,6 +285,9 @@ export async function createServer(
   // 9b. Register Hasura-style REST endpoints (query collections)
   registerHasuraREST(server, config, contextDeps);
 
+  // 9c. Scheduled event metadata RPC (create/delete/get_invocations)
+  registerScheduledEventRoutes(server, { pool: primaryPool, schemaName });
+
   // ── Health / readiness endpoints ────────────────────────────────────────
   registerHealthEndpoints(server, connectionManager);
 
@@ -380,6 +384,7 @@ export async function createServer(
       await phase2.eventManager?.stop();
       await phase2.cronManager?.stop();
       await phase2.actionManager?.stop();
+      await phase2.scheduledEventManager?.stop();
       await phase2.jobQueue?.stop();
       await server.close();
       await connectionManager.shutdown();

@@ -776,6 +776,14 @@ export const RawServerConfigSchema = z
       .strict()
       .optional()
       .describe('SQL generation tuning'),
+    scheduled_events: z
+      .object({
+        poll_interval_ms: z.number().optional().describe('How often to poll for due one-off scheduled events in milliseconds'),
+        batch_size: z.number().optional().describe('Maximum scheduled events claimed per poll'),
+      })
+      .strict()
+      .optional()
+      .describe('One-off scheduled event delivery settings'),
     schema: z
       .object({
         default_operations: z

@@ -29,6 +29,7 @@ import { createRedisFanoutBridge } from '../subscriptions/redis-fanout.js';
 import type { RedisFanoutBridge } from '../subscriptions/redis-fanout.js';
 import { registerInvokeRoute } from '../events/invoke.js';
 import { registerAsyncActionStatusRoute } from '../actions/rest.js';
+import { createScheduledEventManager } from '../scheduled-events/index.js';
 import type { SubscriptionRef, AsyncActionRef } from './context.js';
 import { asPinoLogger } from './types.js';
 
@@ -50,6 +51,7 @@ export interface Phase2Result {
   eventManager: ServiceManager | undefined;
   cronManager: ServiceManager | undefined;
   actionManager: ServiceManager | undefined;
+  scheduledEventManager: ServiceManager | undefined;
   changeListener: ChangeListener | undefined;
   subscriptionMgr: SubscriptionManager | undefined;
   redisFanout: RedisFanoutBridge | undefined;
@@ -79,6 +81,7 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
   let eventManager: ServiceManager | undefined;
   let cronManager: ServiceManager | undefined;
   let actionManager: ServiceManager | undefined;
+  let scheduledEventManager: ServiceManager | undefined;
   let changeListener: ChangeListener | undefined;
   let subscriptionMgr: SubscriptionManager | undefined;
   let redisFanout: RedisFanoutBridge | undefined;
@@ -89,7 +92,23 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
     server.log.warn(
       `Database URL env var "${primaryUrlEnv}" not set — skipping Phase 2 features (events, crons, subscriptions)`,
     );
-    return { jobQueue, eventManager, cronManager, actionManager, changeListener, subscriptionMgr, redisFanout };
+    return { jobQueue, eventManager, cronManager, actionManager, scheduledEventManager, changeListener, subscriptionMgr, redisFanout };
+  }
+
+  // One-off scheduled events — independent of the job queue (table-based
+  // retry state, Hasura hdb_scheduled_events equivalent)
+  try {
+    scheduledEventManager = createScheduledEventManager({
+      pool: primaryPool,
+      logger: log,
+      schemaName,
+      pollIntervalMs: config.scheduledEvents.pollIntervalMs,
+      batchSize: config.scheduledEvents.batchSize,
+    });
+    await scheduledEventManager.init();
+  } catch (err) {
+    server.log.warn({ err }, 'Scheduled event initialization failed — continuing without');
+    scheduledEventManager = undefined;
   }
 
   try {
@@ -247,5 +266,5 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
     subscriptionMgr = undefined;
   }
 
-  return { jobQueue, eventManager, cronManager, actionManager, changeListener, subscriptionMgr, redisFanout };
+  return { jobQueue, eventManager, cronManager, actionManager, scheduledEventManager, changeListener, subscriptionMgr, redisFanout };
 }

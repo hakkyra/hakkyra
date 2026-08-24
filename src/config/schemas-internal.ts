@@ -544,6 +544,10 @@ export const HakkyraConfigSchema = z.object({
     unnestThreshold: z.number().default(500).describe('Values above which IN lists use UNNEST'),
     batchChunkSize: z.number().default(100).describe('Rows per chunk for batch operations'),
   }).default({ arrayAnyThreshold: 20, unnestThreshold: 500, batchChunkSize: 100 }).describe('SQL generation tuning'),
+  scheduledEvents: z.object({
+    pollIntervalMs: z.number().default(10000).describe('Poll interval for due one-off scheduled events (ms)'),
+    batchSize: z.number().default(100).describe('Max scheduled events claimed per poll'),
+  }).default({ pollIntervalMs: 10000, batchSize: 100 }).describe('One-off scheduled event delivery'),
   introspection: IntrospectionConfigSchema.default({ disabledForRoles: [] }).describe('Introspection access control'),
   schema: z.object({
     defaultOperations: OperationsConfigSchema.default({

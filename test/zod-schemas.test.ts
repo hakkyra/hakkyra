@@ -1836,6 +1836,10 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
         unnestThreshold: 500,
         batchChunkSize: 100,
       });
+      expect(result.scheduledEvents).toEqual({
+        pollIntervalMs: 10000,
+        batchSize: 100,
+      });
       expect(result.graphql).toEqual({
         queryDepth: 10,
         maxLimit: 100,

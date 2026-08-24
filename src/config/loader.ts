@@ -379,6 +379,10 @@ export async function loadConfig(
       unnestThreshold: serverConfig?.sql?.unnest_threshold,
       batchChunkSize: serverConfig?.sql?.batch_chunk_size,
     }),
+    scheduledEvents: stripUndefined({
+      pollIntervalMs: serverConfig?.scheduled_events?.poll_interval_ms,
+      batchSize: serverConfig?.scheduled_events?.batch_size,
+    }),
     introspection: introspectionConfig,
     schema: transformSchemaConfig(serverConfig),
   };
