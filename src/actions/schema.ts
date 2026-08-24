@@ -661,7 +661,7 @@ function makeActionResolver(
     context: ResolverContext,
   ): Promise<unknown> => {
     // Check permissions
-    if (!checkActionPermission(action, context.auth)) {
+    if (!checkActionPermission(action, context.auth, context.inheritedRoles)) {
       throw new GraphQLError(
         `Not authorized to execute action "${action.name}"`,
         { extensions: { code: 'FORBIDDEN' } },
@@ -704,7 +704,7 @@ function makeAsyncActionResolver(
     context: ResolverContext,
   ): Promise<unknown> => {
     // Check permissions
-    if (!checkActionPermission(action, context.auth)) {
+    if (!checkActionPermission(action, context.auth, context.inheritedRoles)) {
       throw new GraphQLError(
         `Not authorized to execute action "${action.name}"`,
         { extensions: { code: 'FORBIDDEN' } },
@@ -751,7 +751,7 @@ function makeAsyncActionResultResolver(
     context: ResolverContext,
   ): Promise<unknown> => {
     // Check permissions — same as the action itself
-    if (!checkActionPermission(action, context.auth)) {
+    if (!checkActionPermission(action, context.auth, context.inheritedRoles)) {
       throw new GraphQLError(
         `Not authorized to query result of action "${action.name}"`,
         { extensions: { code: 'FORBIDDEN' } },
@@ -874,7 +874,7 @@ function makeAsyncActionResultSubscribe(
     const { auth, subscriptionManager, pool } = context;
 
     // Check permissions — same as the action query
-    if (!checkActionPermission(action, auth)) {
+    if (!checkActionPermission(action, auth, context.inheritedRoles)) {
       throw new GraphQLError(
         `Not authorized to subscribe to result of action "${action.name}"`,
         { extensions: { code: 'FORBIDDEN' } },

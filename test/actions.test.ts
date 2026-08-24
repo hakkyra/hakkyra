@@ -12,6 +12,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { MockWebhookServer } from './helpers/mock-webhook.js';
+import { checkActionPermission } from '../src/actions/permissions.js';
+import type { ActionConfig, SessionVariables } from '../src/types.js';
 import {
   TEST_DB_URL,
   METADATA_DIR,
@@ -706,5 +708,45 @@ describe('Actions', () => {
       expect(payload.session_variables['x-hasura-default-role']).toBe('client');
       expect(payload.session_variables['x-hasura-allowed-roles']).toBeDefined();
     });
+  });
+});
+
+// ─── Unit: checkActionPermission with inherited roles ────────────────────────
+
+describe('checkActionPermission inherited roles', () => {
+  const action = {
+    name: 'campaignQuery',
+    permissions: [{ role: 'campaign' }],
+  } as unknown as ActionConfig;
+
+  const inheritedRoles: Record<string, string[]> = {
+    backoffice_administrator: ['backoffice', 'campaign', 'administrator', 'manager'],
+  };
+
+  const session = (roles: string[]): SessionVariables => ({
+    role: roles[0],
+    allowedRoles: roles,
+    isAdmin: false,
+    claims: {},
+  });
+
+  it('allows a session whose inherited role includes a permitted constituent', () => {
+    expect(
+      checkActionPermission(action, session(['backoffice_administrator', 'backoffice']), inheritedRoles),
+    ).toBe(true);
+  });
+
+  it('denies when no allowed role or constituent matches', () => {
+    expect(checkActionPermission(action, session(['backoffice']), inheritedRoles)).toBe(false);
+  });
+
+  it('still works without inheritedRoles argument', () => {
+    expect(checkActionPermission(action, session(['campaign']))).toBe(true);
+  });
+
+  it('admin always allowed', () => {
+    expect(
+      checkActionPermission(action, { ...session(['other']), isAdmin: true }, inheritedRoles),
+    ).toBe(true);
   });
 });

@@ -169,6 +169,7 @@ export async function initPhase2(deps: Phase2Deps): Promise<Phase2Result> {
   registerAsyncActionStatusRoute(server, {
     pool: primaryPool,
     actions: config.actions,
+    inheritedRoles: config.inheritedRoles,
   });
 
   // Subscriptions

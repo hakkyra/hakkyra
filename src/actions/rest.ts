@@ -19,6 +19,8 @@ import { checkActionPermission } from './permissions.js';
 export interface AsyncActionStatusDeps {
   pool: Pool;
   actions: ActionConfig[];
+  /** Inherited role definitions (role → constituent roles) for permission expansion. */
+  inheritedRoles?: Record<string, string[]>;
 }
 
 // ─── Route registration ────────────────────────────────────────────────────
@@ -90,7 +92,7 @@ export function registerAsyncActionStatusRoute(
             });
             return;
           }
-        } else if (!checkActionPermission(actionConfig, session)) {
+        } else if (!checkActionPermission(actionConfig, session, deps.inheritedRoles)) {
           void reply.code(403).send({
             error: 'forbidden',
             message: 'Not authorized to view this action status',
