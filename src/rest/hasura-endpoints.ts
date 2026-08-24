@@ -84,21 +84,37 @@ export function registerHasuraRestEndpoints(
           // Execute the GraphQL query through Mercurius
           const result = await fastify.graphql(queryString, context, variables);
 
-          void reply.code(200).send(result);
+          // Hasura REST endpoints return the contents of `data` directly,
+          // without the GraphQL `{ data }` envelope (encodeHTTPResp in
+          // Hasura.GraphQL.Transport.HTTP.Protocol). Errors use Hasura's API
+          // error format with a real HTTP status — REST routes encode QErrs
+          // with `encodeQErr id`, unlike /v1/graphql which forces 200.
+          if (result.errors && result.errors.length > 0) {
+            void reply.code(400).send({
+              path: '$',
+              error: result.errors[0].message,
+              code: 'validation-failed',
+            });
+          } else {
+            void reply.code(200).send(result.data);
+          }
         } catch (err) {
           request.log.error({ err, endpoint: endpoint.name }, 'Error executing Hasura REST endpoint');
           // Mercurius throws errors with statusCode and errors properties for
-          // validation failures — return them as standard GraphQL error responses
+          // validation failures — Hasura reports these as 400 validation-failed
           const mercErr = err as MercuriusExecutionError;
-          if (mercErr.statusCode && mercErr.errors) {
-            void reply.code(200).send({
-              data: null,
-              errors: mercErr.errors,
+          if (mercErr.errors && mercErr.errors.length > 0) {
+            void reply.code(400).send({
+              path: '$',
+              error: mercErr.errors[0].message,
+              code: 'validation-failed',
             });
           } else {
             const message = err instanceof Error ? err.message : 'Internal server error';
             void reply.code(500).send({
-              errors: [{ message }],
+              path: '$',
+              error: message,
+              code: 'unexpected',
             });
           }
         }

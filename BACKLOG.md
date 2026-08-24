@@ -2066,6 +2066,62 @@ back several actions, so the mapping is one-to-many.
 Found in the acme migration: 3 failures in `searchPlayers`, all
 `Cannot query field "player" on type "PlayerRef"`.
 
+### P13.9 — Hasura REST endpoints return the raw GraphQL envelope (P0) ✅
+- [x] Send `result.data` on success, not the whole `{ data, errors }` result
+- [x] Confirm the error-response shape against real Hasura before changing it
+- [x] Add a test asserting the success body has no `data` wrapper
+
+Resolved. Error shape confirmed from Hasura source rather than a live instance:
+`Hasura.Server.Rest` responses go through `encodeHTTPResp` ("Encode for HTTP
+Response without `data` envelope"), and the `api/rest` route in
+`Hasura.Server.App` uses `mkSpockAction encodeQErr id` — QErrs are encoded in
+Hasura's API error format `{"path": "$", "error": msg, "code": code}` with the
+real HTTP status preserved (unlike `/v1/graphql`, which forces 200 and the
+GraphQL `{errors}` shape). Validation/permission failures are `400
+validation-failed`; internal failures `500 unexpected`. Hakkyra now maps
+GraphQL errors (thrown validation errors and in-band execution errors alike)
+to `400 {path, error, code: "validation-failed"}` and unexpected exceptions to
+`500 {path, error, code: "unexpected"}`. Per-class Hasura codes for runtime DB
+errors (`constraint-violation`, `postgres-error`, ...) would need PG error
+classification and are not implemented.
+
+`src/rest/hasura-endpoints.ts:87` does `reply.code(200).send(result)`, where
+`result` is Mercurius's complete GraphQL response. Hasura's REST endpoints
+return the contents of `data` directly.
+
+```
+POST /api/rest/functions/payment/list
+
+Hakkyra: {"data":{"payment":[{"id":"15", ...}]}}
+Hasura:  {"payment":[{"id":"15", ...}]}
+```
+
+The extra layer breaks any client that unwraps by position rather than by a
+known key. acme's api-client does exactly that
+(`packages/api-client/src/base.ts:78`):
+
+```js
+protected post = async <I, O>(type: string, body: I): Promise<O> => {
+  const response = await this.request(type, { method: "POST" }, null, body);
+  return Object.values(response)[0] as O;   // expects { payment: [...] }
+};
+```
+
+With the envelope it returns `{payment: [...]}` instead of the array, so every
+REST call through the client yields the wrong shape. This is wide: the client
+is what user-authored functions use to reach the API, so any function doing a
+REST read gets a wrapped object. It fails late and confusingly — the call
+succeeds, the data is just one level too deep.
+
+Observed as `expected { payment: [ ... ] } to have property 'length'` in
+acme's function test-operations, after the P13.1-P13.8 fixes had cleared the
+errors that were masking it.
+
+Error paths (`:94`, `:100`) send `{data: null, errors}` and `{errors}`. Those
+may also differ from Hasura, which has its own REST error format — worth
+checking against a real instance rather than assuming, since the success-path
+fix does not settle it.
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.
@@ -2158,7 +2214,7 @@ admin_ui:
 | Permission gaps | 49 | Pass |
 | Relationship gaps | 68 | Pass |
 | Security tests | 28 | Pass |
-| Hasura REST endpoints | 5 | Pass |
+| Hasura REST endpoints | 26 | Pass |
 | Config unsupported | 37 | Pass |
 | REST permissions | 26 | Pass |
 | JWT admin role | 9 | Pass |
@@ -2167,4 +2223,4 @@ admin_ui:
 | Stringify numeric (P13.2) | 8 | Pass |
 | PG enum scalars (P13.1) | 7 | Pass |
 | Scheduled events (P13.4) | 10 | Pass |
-| **Total** | **1960** | **67 suites, 1960 passing, 1 todo** |
+| **Total** | **1973** | **67 suites, 1973 passing, 1 todo** |

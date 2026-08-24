@@ -21,20 +21,22 @@ describe('Query Collections & Hasura REST Endpoints', () => {
       expect(config.queryCollections).toBeDefined();
       expect(config.queryCollections.length).toBe(1);
       expect(config.queryCollections[0].name).toBe('allowed_queries');
-      expect(config.queryCollections[0].queries.size).toBe(6);
+      expect(config.queryCollections[0].queries.size).toBe(8);
       expect(config.queryCollections[0].queries.has('GetClientById')).toBe(true);
       expect(config.queryCollections[0].queries.has('ListClients')).toBe(true);
       expect(config.queryCollections[0].queries.has('GetClientAccounts')).toBe(true);
       expect(config.queryCollections[0].queries.has('ListInvoices')).toBe(true);
       expect(config.queryCollections[0].queries.has('GetClientSummary')).toBe(true);
       expect(config.queryCollections[0].queries.has('ListActiveServicePlans')).toBe(true);
+      expect(config.queryCollections[0].queries.has('ListCurrencies')).toBe(true);
+      expect(config.queryCollections[0].queries.has('ListClientNames')).toBe(true);
     });
 
     it('should load Hasura REST endpoints from fixture metadata', async () => {
       const cleanDir = await getCleanMetadataDir();
       const config = await loadConfig(cleanDir, SERVER_CONFIG_PATH);
       expect(config.hasuraRestEndpoints).toBeDefined();
-      expect(config.hasuraRestEndpoints.length).toBe(6);
+      expect(config.hasuraRestEndpoints.length).toBe(8);
 
       const ep = config.hasuraRestEndpoints.find((e) => e.name === 'get_client_by_id');
       expect(ep).toBeDefined();
@@ -143,22 +145,81 @@ describe('Query Collections & Hasura REST Endpoints', () => {
       await closePool();
     });
 
-    it('should return GraphQL validation errors as proper error responses', async () => {
-      // The fixture queries use Hasura naming conventions (uuid, client_bool_exp)
-      // which don't match Hakkyra's schema (Uuid, ClientBoolExp).
-      // The endpoint should return these as GraphQL errors in the response body,
-      // not as HTTP 500 errors.
-      const addr = getServerAddress();
-      const res = await fetch(`${addr}/api/rest/api/v1/clients?limit=2`, {
-        headers: {
-          'x-hasura-admin-secret': ADMIN_SECRET,
-        },
+    // ── P13.9: Hasura response shape ────────────────────────────────────
+    // Real Hasura REST endpoints return the contents of `data` directly on
+    // success (no GraphQL envelope) and errors in the Hasura API error
+    // format `{ path, error, code }` with a real HTTP status code — REST
+    // routes use `encodeQErr id`, unlike /v1/graphql which forces 200.
+
+    describe('Hasura response shape (P13.9)', () => {
+      it('returns the contents of data without the GraphQL envelope on success', async () => {
+        const addr = getServerAddress();
+        const res = await fetch(`${addr}/api/rest/api/v1/currencies`, {
+          headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json() as Record<string, unknown>;
+        expect(body).not.toHaveProperty('data');
+        expect(body).not.toHaveProperty('errors');
+        const currencies = body['currency'] as Array<Record<string, unknown>>;
+        expect(Array.isArray(currencies)).toBe(true);
+        expect(currencies.length).toBeGreaterThan(0);
+        expect(currencies[0]).toHaveProperty('id');
+        expect(currencies[0]).toHaveProperty('name');
       });
-      expect(res.status).toBe(200);
-      const body = await res.json() as { data?: unknown; errors?: unknown[] };
-      // Should have errors because fixture query uses Hasura naming conventions
-      expect(body.errors).toBeDefined();
-      expect(body.errors!.length).toBeGreaterThan(0);
+
+      it('returns unwrapped data for anonymous role on a public endpoint', async () => {
+        const addr = getServerAddress();
+        const res = await fetch(`${addr}/api/rest/api/v1/currencies`);
+        expect(res.status).toBe(200);
+        const body = await res.json() as Record<string, unknown>;
+        expect(body).not.toHaveProperty('data');
+        expect(Array.isArray(body['currency'])).toBe(true);
+      });
+
+      it('returns 400 with Hasura error format for validation errors', async () => {
+        // The fixture query uses Hasura naming conventions (uuid, client_bool_exp)
+        // which don't match Hakkyra's schema — a validation failure. Hasura
+        // returns these as HTTP 400 with { path, error, code }.
+        const addr = getServerAddress();
+        const res = await fetch(`${addr}/api/rest/api/v1/clients?limit=2`, {
+          headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+        });
+        expect(res.status).toBe(400);
+        const body = await res.json() as { path?: string; error?: string; code?: string };
+        expect(body.path).toBe('$');
+        expect(typeof body.error).toBe('string');
+        expect(body.code).toBe('validation-failed');
+        expect(body).not.toHaveProperty('data');
+        expect(body).not.toHaveProperty('errors');
+      });
+
+      it('returns 400 with Hasura error format for execution-time permission errors', async () => {
+        // ListClientNames validates against Hakkyra's schema, but the anonymous
+        // role has no select permission on the client table — the error
+        // surfaces during execution, not validation.
+        const addr = getServerAddress();
+        const res = await fetch(`${addr}/api/rest/api/v1/client-names`);
+        expect(res.status).toBe(400);
+        const body = await res.json() as { path?: string; error?: string; code?: string };
+        expect(body.path).toBe('$');
+        expect(typeof body.error).toBe('string');
+        expect(body.code).toBe('validation-failed');
+        expect(body).not.toHaveProperty('data');
+        expect(body).not.toHaveProperty('errors');
+      });
+
+      it('returns unwrapped data for a role with permission on a restricted endpoint', async () => {
+        const addr = getServerAddress();
+        const token = await tokens.backoffice();
+        const res = await fetch(`${addr}/api/rest/api/v1/client-names`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json() as Record<string, unknown>;
+        expect(body).not.toHaveProperty('data');
+        expect(Array.isArray(body['clients'])).toBe(true);
+      });
     });
 
     it('should register routes for all configured endpoints', async () => {
@@ -171,6 +232,8 @@ describe('Query Collections & Hasura REST Endpoints', () => {
         '/api/rest/api/v1/invoices',
         '/api/rest/api/v1/client/:clientId/summary',
         '/api/rest/api/v1/service-plans/active',
+        '/api/rest/api/v1/currencies',
+        '/api/rest/api/v1/client-names',
       ];
       for (const ep of endpoints) {
         const res = await fetch(`${addr}${ep}`, {
@@ -198,12 +261,12 @@ describe('Query Collections & Hasura REST Endpoints', () => {
 
     it('should enforce authentication on REST endpoints', async () => {
       const addr = getServerAddress();
-      // Without auth, should still get 200 but with GraphQL errors from resolver permissions
+      // Without auth the anonymous role is used — no permission on client table,
+      // so the endpoint returns a Hasura-format error (not a 401)
       const res = await fetch(`${addr}/api/rest/api/v1/clients`);
-      expect(res.status).toBe(200);
-      const body = await res.json() as { data?: unknown; errors?: unknown[] };
-      // Anonymous role has no permission on client table
-      expect(body.errors).toBeDefined();
+      expect(res.status).toBe(400);
+      const body = await res.json() as { path?: string; error?: string; code?: string };
+      expect(body.code).toBe('validation-failed');
     });
 
     it('should pass admin secret auth through to GraphQL execution', async () => {
@@ -211,9 +274,10 @@ describe('Query Collections & Hasura REST Endpoints', () => {
       const res = await fetch(`${addr}/api/rest/api/v1/clients`, {
         headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
       });
-      expect(res.status).toBe(200);
-      // The request should reach the GraphQL engine (not be rejected at HTTP level)
-      const body = await res.json() as { data?: unknown; errors?: unknown[] };
+      // The request should reach the GraphQL engine (not be rejected at HTTP level);
+      // the fixture query itself fails validation, hence 400 rather than 401
+      expect(res.status).not.toBe(401);
+      const body = await res.json() as Record<string, unknown>;
       expect(body).toBeDefined();
     });
 
@@ -223,8 +287,8 @@ describe('Query Collections & Hasura REST Endpoints', () => {
       const res = await fetch(`${addr}/api/rest/api/v1/clients`, {
         headers: { authorization: `Bearer ${token}` },
       });
-      expect(res.status).toBe(200);
-      const body = await res.json() as { data?: unknown; errors?: unknown[] };
+      expect(res.status).not.toBe(401);
+      const body = await res.json() as Record<string, unknown>;
       expect(body).toBeDefined();
     });
 
@@ -236,9 +300,11 @@ describe('Query Collections & Hasura REST Endpoints', () => {
           headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
         },
       );
-      expect(res.status).toBe(200);
-      const body = await res.json() as { data?: unknown; errors?: unknown[] };
-      // Expect a GraphQL response (either data or errors, but valid shape)
+      // The fixture query fails validation (uuid scalar) but the request must
+      // be routed and executed — not rejected as unknown route or crash
+      expect(res.status).not.toBe(404);
+      expect(res.status).not.toBe(500);
+      const body = await res.json() as Record<string, unknown>;
       expect(body).toBeDefined();
       expect(typeof body).toBe('object');
     });
@@ -257,11 +323,12 @@ describe('Query Collections & Hasura REST Endpoints', () => {
           const res = await fetch(`${addr}${ep}`, {
             headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
           });
-          // Admin secret should pass auth — request reaches GraphQL engine (HTTP 200)
-          expect(res.status, `${ep} should return 200 for admin`).toBe(200);
-          const body = await res.json() as { data?: unknown; errors?: unknown[] };
-          // Response should be a valid GraphQL envelope (data and/or errors)
-          expect(body, `${ep} should return a GraphQL response`).toHaveProperty('errors');
+          // Admin secret should pass auth — the request reaches the GraphQL
+          // engine, where these fixture queries fail validation (400 with
+          // Hasura error format), proving execution was attempted
+          expect(res.status, `${ep} should reach the engine for admin`).toBe(400);
+          const body = await res.json() as { path?: string; error?: string; code?: string };
+          expect(body.code, `${ep} should return a Hasura-format error`).toBe('validation-failed');
         }
       });
 
@@ -271,9 +338,9 @@ describe('Query Collections & Hasura REST Endpoints', () => {
         const res = await fetch(`${addr}/api/rest/api/v1/clients`, {
           headers: { authorization: `Bearer ${token}` },
         });
-        expect(res.status).toBe(200);
-        const body = await res.json() as { data?: unknown; errors?: unknown[] };
-        // Backoffice has select permission on client table — request reaches engine
+        expect(res.status).not.toBe(401);
+        const body = await res.json() as Record<string, unknown>;
+        // Backoffice passes auth — request reaches engine
         expect(body).toBeDefined();
         expect(typeof body).toBe('object');
       });
@@ -284,23 +351,23 @@ describe('Query Collections & Hasura REST Endpoints', () => {
         const res = await fetch(`${addr}/api/rest/api/v1/clients`, {
           headers: { authorization: `Bearer ${token}` },
         });
-        // Client role has select permission on client table (with row filter)
-        expect(res.status).toBe(200);
-        const body = await res.json() as { data?: unknown; errors?: unknown[] };
+        // Client role passes auth — request reaches engine
+        expect(res.status).not.toBe(401);
+        const body = await res.json() as Record<string, unknown>;
         expect(body).toBeDefined();
         expect(typeof body).toBe('object');
       });
 
       it('unauthenticated request falls back to anonymous role and gets permission errors', async () => {
         const addr = getServerAddress();
-        // No auth headers — unauthorizedRole config maps to 'anonymous'
+        // No auth headers — unauthorizedRole config maps to 'anonymous'.
+        // Should not be rejected with 401 (unauthorizedRole is configured);
+        // the error is a GraphQL-level one in Hasura format
         const res = await fetch(`${addr}/api/rest/api/v1/clients`);
-        // Should not be rejected at HTTP level (unauthorizedRole is configured)
-        expect(res.status).toBe(200);
-        const body = await res.json() as { data?: unknown; errors?: unknown[] };
-        // Anonymous role has no select permission on client table — expect errors
-        expect(body.errors).toBeDefined();
-        expect(body.errors!.length).toBeGreaterThan(0);
+        expect(res.status).toBe(400);
+        const body = await res.json() as { path?: string; error?: string; code?: string };
+        expect(body.path).toBe('$');
+        expect(body.code).toBe('validation-failed');
       });
 
       it('invalid admin secret is rejected with 401', async () => {
@@ -344,8 +411,9 @@ describe('Query Collections & Hasura REST Endpoints', () => {
             headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
           },
         );
-        expect(res.status).toBe(200);
-        const body = await res.json() as { data?: unknown; errors?: unknown[] };
+        // Auth passes; the fixture query fails validation in the engine
+        expect(res.status).not.toBe(401);
+        const body = await res.json() as Record<string, unknown>;
         expect(body).toBeDefined();
         expect(typeof body).toBe('object');
       });
@@ -355,11 +423,12 @@ describe('Query Collections & Hasura REST Endpoints', () => {
         const res = await fetch(
           `${addr}/api/rest/api/v1/client/:id?id=${ALICE_ID}`,
         );
-        expect(res.status).toBe(200);
-        const body = await res.json() as { data?: unknown; errors?: unknown[] };
-        // Anonymous has no select permission on client table
-        expect(body.errors).toBeDefined();
-        expect(body.errors!.length).toBeGreaterThan(0);
+        // Anonymous is not rejected with 401; the GraphQL-level error comes
+        // back in Hasura format
+        expect(res.status).toBe(400);
+        const body = await res.json() as { path?: string; error?: string; code?: string };
+        expect(body.path).toBe('$');
+        expect(body.code).toBe('validation-failed');
       });
     });
   });

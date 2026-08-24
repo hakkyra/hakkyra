@@ -49,6 +49,26 @@
       query_name: GetClientSummary
   comment: "Get client summary from materialized view"
 
+- name: list_currencies
+  url: /api/v1/currencies
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: ListCurrencies
+  comment: "List all currencies (valid Hakkyra naming, public)"
+
+- name: list_client_names
+  url: /api/v1/client-names
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: ListClientNames
+  comment: "List client names (valid Hakkyra naming, restricted roles)"
+
 - name: list_active_service_plans
   url: /api/v1/service-plans/active
   methods:

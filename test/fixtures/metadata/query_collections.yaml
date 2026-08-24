@@ -97,6 +97,25 @@
             }
           }
 
+      - name: ListCurrencies
+        query: |
+          query ListCurrencies {
+            currency {
+              id
+              name
+              symbol
+            }
+          }
+
+      - name: ListClientNames
+        query: |
+          query ListClientNames {
+            clients(limit: 5) {
+              id
+              username
+            }
+          }
+
       - name: ListActiveServicePlans
         query: |
           query ListActiveServicePlans($branchId: uuid) {
