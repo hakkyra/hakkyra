@@ -452,6 +452,17 @@ RETURNS SETOF client AS $$
   SELECT * FROM client WHERE status = 'active'
 $$ LANGUAGE SQL STABLE;
 
+-- ─── Tracked function: leading-underscore argument names (P13.13) ────────
+
+CREATE OR REPLACE FUNCTION fn_insert_reward(
+  _code text,
+  _uniq_key text DEFAULT NULL,
+  _properties json DEFAULT '{}'::json
+)
+RETURNS SETOF client AS $$
+  SELECT * FROM client WHERE username = _code
+$$ LANGUAGE SQL STABLE;
+
 -- ─── Indexes ────────────────────────────────────────────────────────────────
 
 CREATE INDEX idx_client_branch ON client(branch_id);

@@ -2217,6 +2217,37 @@ are not substitutes for the column scalar.
 Found in acme: a reward-crediting function fails, surfacing as
 `Operation failed` two layers up.
 
+### P13.13 — Tracked function argument names drop the leading underscore (P0) ✅
+- [x] Preserve a leading underscore when camelCasing function argument names
+- [x] Keep the rest of the conversion (snake_case -> camelCase) unchanged
+
+A PG function whose arguments start with `_` gets PascalCase GraphQL fields with
+the underscore removed, so a query written against Hasura fails validation:
+
+```
+Field "_code" is not defined by type "FnInsertRewardArgs". Did you mean "Code"?
+```
+
+For `public.fn_insert_reward(_code text, _uniq_key text, _properties json)`:
+
+| Source | Argument names |
+|--------|----------------|
+| PG function | `_code`, `_uniq_key`, `_properties` |
+| Hasura | `_code`, `_uniqKey`, `_properties` |
+| Hakkyra | `Code`, `UniqKey`, `Properties` |
+
+The leading underscore is being treated as a word separator, which capitalises
+the following letter and then drops the underscore. Hasura keeps the underscore
+and camelCases only the remainder — note `_uniq_key` -> `_uniqKey`, so the
+internal separators are converted normally.
+
+Leading underscores are a common convention for PL/pgSQL argument names (used to
+avoid collisions with column names), so this likely affects every tracked
+function following it.
+
+Found while verifying P13.12: with the `Json` scalar fixed, the same
+`creditReward` endpoint now fails here instead.
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.

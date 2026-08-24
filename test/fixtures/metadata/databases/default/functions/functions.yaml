@@ -9,3 +9,4 @@
 - "!include public_latest_clients.yaml"
 - "!include public_search_clients_advanced.yaml"
 - "!include public_bulk_activate_clients.yaml"
+- "!include public_fn_insert_reward.yaml"

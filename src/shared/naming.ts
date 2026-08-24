@@ -20,10 +20,15 @@ export function toPascalCase(str: string): string {
 /**
  * Convert a snake_case string to camelCase.
  * "created_at" -> "createdAt", "user_id" -> "userId"
+ *
+ * Leading underscores are preserved rather than treated as separators,
+ * matching Hasura: "_uniq_key" -> "_uniqKey". They are a common PL/pgSQL
+ * convention for function argument names (avoiding column name collisions).
  */
 export function toCamelCase(str: string): string {
-  const parts = str.split('_');
-  return parts[0] + parts.slice(1).map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('');
+  const leading = /^_+/.exec(str)?.[0] ?? '';
+  const parts = str.slice(leading.length).split('_');
+  return leading + parts[0] + parts.slice(1).map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join('');
 }
 
 /**

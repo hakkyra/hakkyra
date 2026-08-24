@@ -7,7 +7,7 @@ import type { SchemaModel, TableInfo, FunctionInfo, TrackedFunctionConfig } from
 import { resolveTrackedFunctions } from '../src/schema/tracked-functions.js';
 import { generateSchema } from '../src/schema/generator.js';
 import { resetComparisonTypeCache } from '../src/schema/filters.js';
-import type { GraphQLSchema } from 'graphql';
+import type { GraphQLSchema, GraphQLNonNull, GraphQLInputObjectType } from 'graphql';
 import {
   getPool, closePool, waitForDb, makeSession,
   startServer, stopServer, getServerAddress, graphqlRequest, tokens, createJWT,
@@ -78,6 +78,15 @@ beforeAll(async () => {
     "CREATE OR REPLACE FUNCTION public.latest_clients(cutoff timestamptz DEFAULT now() - interval '1 year') " +
     "RETURNS SETOF client AS $fn$ " +
     "SELECT * FROM client WHERE created_at >= cutoff " +
+    "$fn$ LANGUAGE SQL STABLE;"
+  );
+
+  // Create a function with leading-underscore argument names (P13.13)
+  await pool.query(
+    "CREATE OR REPLACE FUNCTION public.fn_insert_reward(" +
+    "_code text, _uniq_key text DEFAULT NULL, _properties json DEFAULT '{}'::json) " +
+    "RETURNS SETOF client AS $fn$ " +
+    "SELECT * FROM client WHERE username = _code " +
     "$fn$ LANGUAGE SQL STABLE;"
   );
 
@@ -722,6 +731,65 @@ describe('Tracked Functions — PG arg naming convention (P12.8)', () => {
     } finally {
       await pool.query(`UPDATE client SET status = 'on_hold' WHERE id = $1`, [CHARLIE_ID]);
     }
+  });
+});
+
+describe('Tracked Functions — Leading-underscore arg names (P13.13)', () => {
+  // Hasura keeps a leading underscore and camelCases only the remainder:
+  // _code -> _code, _uniq_key -> _uniqKey. Leading underscores are a common
+  // PL/pgSQL convention to avoid collisions with column names.
+
+  it('toCamelCase preserves leading underscores and camelCases the rest', async () => {
+    const { toCamelCase } = await import('../src/shared/naming.js');
+    expect(toCamelCase('_code')).toBe('_code');
+    expect(toCamelCase('_uniq_key')).toBe('_uniqKey');
+    expect(toCamelCase('_properties')).toBe('_properties');
+    expect(toCamelCase('__internal_id')).toBe('__internalId');
+    // Internal separators keep converting as before
+    expect(toCamelCase('uniq_key')).toBe('uniqKey');
+    expect(toCamelCase('code')).toBe('code');
+  });
+
+  it('exposes underscore-prefixed PG args with the underscore preserved', () => {
+    resetComparisonTypeCache();
+    const schema = generateSchema(schemaModel);
+    const queryType = schema.getQueryType()!;
+    const field = queryType.getFields()['fnInsertReward'];
+    expect(field).toBeDefined();
+
+    const argsArg = field.args.find((a) => a.name === 'args');
+    expect(argsArg).toBeDefined();
+    const argsType = (argsArg!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
+    expect(argsType.name).toBe('FnInsertRewardArgs');
+
+    const argsFields = argsType.getFields();
+    expect(argsFields['_code']).toBeDefined();
+    expect(argsFields['_uniqKey']).toBeDefined();
+    expect(argsFields['_properties']).toBeDefined();
+    expect(argsFields['_properties'].type.toString()).toBe('Json');
+
+    // The broken PascalCase names must be gone
+    expect(argsFields['Code']).toBeUndefined();
+    expect(argsFields['UniqKey']).toBeUndefined();
+    expect(argsFields['Properties']).toBeUndefined();
+  });
+
+  it('executes with underscore-prefixed argument names (acme repro)', async () => {
+    const { body } = await graphqlRequest(
+      `query {
+        fnInsertReward(args: { _code: "alice", _uniqKey: "key-1" }) {
+          id
+          username
+        }
+      }`,
+      undefined,
+      { 'x-hasura-admin-secret': ADMIN_SECRET },
+    );
+
+    expect(body.errors).toBeUndefined();
+    const data = body.data as { fnInsertReward: AnyRow[] };
+    expect(data.fnInsertReward).toHaveLength(1);
+    expect(data.fnInsertReward[0].username).toBe('alice');
   });
 });
 

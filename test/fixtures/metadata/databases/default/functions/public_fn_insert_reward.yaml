@@ -1,0 +1,6 @@
+function:
+  name: fn_insert_reward
+  schema: public
+permissions:
+  - role: backoffice
+  - role: administrator
