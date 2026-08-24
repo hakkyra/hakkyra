@@ -629,6 +629,235 @@ describe('Action Relationships', () => {
     });
   });
 
+  describe('relationships nested under an action relationship (P13.11)', () => {
+    const PLAYER_ONE_ID = 'df000000-0000-0000-0000-000000000001';
+    const PLAYER_TWO_ID = 'df000000-0000-0000-0000-000000000002';
+    const ACCOUNT_ALICE_ID = 'e0000000-0000-0000-0000-000000000001';
+
+    it('resolves an array relationship on a table reached through an action relationship', async () => {
+      webhook.onPath('/actions/adjust-account', () => ({
+        code: 200,
+        body: {
+          ledgerEntryId: 'e0000000-0000-0000-0000-000000000099',
+          clientId: ALICE_ID,
+          newBalance: 150.0,
+          success: true,
+        },
+      }));
+
+      const { body } = await gql(
+        `mutation($input: AdjustAccountInput!) {
+          adjustAccount(input: $input) {
+            success
+            client {
+              id
+              accounts {
+                id
+                active
+                currency {
+                  id
+                }
+              }
+            }
+          }
+        }`,
+        {
+          input: {
+            clientId: ALICE_ID,
+            amount: 50,
+            currencyId: 'usd',
+            reason: 'Refund',
+            type: 'credit',
+          },
+        },
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as any).adjustAccount;
+      expect(data.client.id).toBe(ALICE_ID);
+      expect(data.client.accounts).toEqual([
+        { id: ACCOUNT_ALICE_ID, active: true, currency: { id: 'EUR' } },
+      ]);
+    });
+
+    it('returns [] for a nested array relationship with no matching rows', async () => {
+      webhook.onPath('/actions/adjust-account', () => ({
+        code: 200,
+        body: {
+          ledgerEntryId: 'e0000000-0000-0000-0000-000000000099',
+          clientId: ALICE_ID,
+          newBalance: 150.0,
+          success: true,
+        },
+      }));
+
+      const { body } = await gql(
+        `mutation($input: AdjustAccountInput!) {
+          adjustAccount(input: $input) {
+            client {
+              id
+              accounts(where: { active: { _eq: false } }) {
+                id
+              }
+            }
+          }
+        }`,
+        {
+          input: {
+            clientId: ALICE_ID,
+            amount: 0,
+            currencyId: 'usd',
+            reason: 'No-op',
+            type: 'adjustment',
+          },
+        },
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as any).adjustAccount;
+      expect(data.client.accounts).toEqual([]);
+    });
+
+    it('resolves a manual_configuration object relationship nested under an action relationship', async () => {
+      webhook.onPath('/actions/adjust-account', () => ({
+        code: 200,
+        body: {
+          ledgerEntryId: 'e0000000-0000-0000-0000-000000000099',
+          clientId: ALICE_ID,
+          newBalance: 150.0,
+          success: true,
+        },
+      }));
+
+      const { body } = await gql(
+        `mutation($input: AdjustAccountInput!) {
+          adjustAccount(input: $input) {
+            client {
+              id
+              primaryAccount {
+                id
+              }
+            }
+          }
+        }`,
+        {
+          input: {
+            clientId: ALICE_ID,
+            amount: 0,
+            currencyId: 'usd',
+            reason: 'No-op',
+            type: 'adjustment',
+          },
+        },
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as any).adjustAccount;
+      expect(data.client.primaryAccount).toEqual({ id: ACCOUNT_ALICE_ID });
+    });
+
+    it('resolves relationships nested under an action array relationship', async () => {
+      webhook.onPath('/actions/adjust-account', () => ({
+        code: 200,
+        body: {
+          ledgerEntryId: 'e0000000-0000-0000-0000-000000000099',
+          clientId: ALICE_ID,
+          newBalance: 150.0,
+          success: true,
+        },
+      }));
+
+      const { body } = await gql(
+        `mutation($input: AdjustAccountInput!) {
+          adjustAccount(input: $input) {
+            ledgerEntries {
+              id
+              client {
+                username
+              }
+            }
+          }
+        }`,
+        {
+          input: {
+            clientId: ALICE_ID,
+            amount: 0,
+            currencyId: 'usd',
+            reason: 'No-op',
+            type: 'adjustment',
+          },
+        },
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as any).adjustAccount;
+      expect(data.ledgerEntries.length).toBeGreaterThanOrEqual(3);
+      for (const entry of data.ledgerEntries) {
+        expect(entry.client).toEqual({ username: 'alice' });
+      }
+    });
+
+    it('resolves a nested object relationship through the custom-type relationship path', async () => {
+      webhook.onPath('/actions/get-player-ref', () => ({
+        code: 200,
+        body: { id: PLAYER_ONE_ID },
+      }));
+
+      const { body } = await gql(
+        `query {
+          getPlayerRef(playerId: "${PLAYER_ONE_ID}") {
+            id
+            player {
+              id
+              lock {
+                reason
+              }
+            }
+          }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as any).getPlayerRef;
+      expect(data.player.id).toBe(PLAYER_ONE_ID);
+      expect(data.player.lock).toEqual({ reason: 'Maintenance' });
+    });
+
+    it('nested object relationship resolves to null when no related row exists', async () => {
+      webhook.onPath('/actions/get-player-ref', () => ({
+        code: 200,
+        body: { id: PLAYER_TWO_ID },
+      }));
+
+      const { body } = await gql(
+        `query {
+          getPlayerRef(playerId: "${PLAYER_TWO_ID}") {
+            id
+            player {
+              id
+              lock {
+                reason
+              }
+            }
+          }
+        }`,
+        undefined,
+        { 'x-hasura-admin-secret': ADMIN_SECRET },
+      );
+
+      expect(body.errors).toBeUndefined();
+      const data = (body.data as any).getPlayerRef;
+      expect(data.player.id).toBe(PLAYER_TWO_ID);
+      expect(data.player.lock).toBeNull();
+    });
+  });
+
   describe('backward compatibility', () => {
     it('actions without relationships work unchanged', async () => {
       const token = await createJWT({

@@ -37,9 +37,11 @@ import type {
   GraphQLInputType,
   GraphQLNamedType,
   GraphQLFieldConfigMap,
+  GraphQLResolveInfo,
 } from 'graphql';
 import type { ActionConfig, ActionRelationship, TableInfo, BoolExp } from '../types.js';
 import { customScalars } from '../schema/scalars.js';
+import { parseResolveInfo } from '../schema/resolve-info.js';
 import type { ResolverContext } from '../schema/resolvers/index.js';
 import { checkActionPermission } from './permissions.js';
 import { executeAction } from './proxy.js';
@@ -342,6 +344,7 @@ function makeActionRelationshipResolver(
     parent: Record<string, unknown>,
     _args: unknown,
     context: ResolverContext,
+    info: GraphQLResolveInfo,
   ): Promise<unknown> => {
     const { auth, queryWithSession, permissionLookup } = context;
 
@@ -375,18 +378,33 @@ function makeActionRelationshipResolver(
       return rel.type === 'object' ? null : [];
     }
 
-    // Select all permitted columns
+    // Parse the selection set so the remote table's own relationships are
+    // compiled into the same SELECT, exactly like the direct query path
+    const parsed = parseResolveInfo(
+      info,
+      remoteTable,
+      context.tables,
+      permissionLookup,
+      auth,
+      context.functions,
+    );
+
+    // Select the requested columns (compileSelect filters against permissions);
+    // fall back to all permitted columns when nothing scalar was requested
     const allColumns = remoteTable.columns.map((c) => c.name);
-    const columns =
+    const fallbackColumns =
       !perm || perm.columns === '*'
         ? allColumns
         : allColumns.filter((c) => (perm.columns as string[]).includes(c));
+    const columns = parsed.columns.length > 0 ? parsed.columns : fallbackColumns;
 
     const compiled = compileSelect({
       table: remoteTable,
       columns,
       where: whereConditions as BoolExp,
       limit: rel.type === 'object' ? 1 : undefined,
+      relationships: parsed.relationships.length > 0 ? parsed.relationships : undefined,
+      jsonbPaths: parsed.jsonbPaths,
       permission: perm
         ? {
             filter: perm.filter,

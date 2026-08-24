@@ -2122,6 +2122,70 @@ may also differ from Hasura, which has its own REST error format — worth
 checking against a real instance rather than assuming, since the success-path
 fix does not settle it.
 
+### P13.10 — REST query parameters are not coerced to variable types (P0) ✅
+- [x] Coerce GET query params and route params to the types the named query declares
+- [x] Cover Boolean, Int, Float, and lists; leave String and custom scalars alone
+- [x] Test a GET endpoint whose query takes a non-String variable
+
+`src/rest/hasura-endpoints.ts:62-69` builds GET variables by spreading the
+Fastify query object:
+
+```js
+const queryParams = request.query as Record<string, string>;
+variables = { ...queryParams };
+```
+
+Query strings are always strings, so a query declaring `$registration: Boolean`
+receives `"true"` and validation rejects it. Hasura coerces query params to the
+declared variable types before executing.
+
+```
+GET /api/rest/functions/authentication/list?registration=true
+
+400 {"path":"$","error":"Variable \"$registration\" got invalid value \"true\";
+     Boolean cannot represent a non boolean value: \"true\"",
+     "code":"validation-failed"}
+```
+
+Route params (`:id` and friends, merged at `:68`) have the same problem when the
+variable is an `Int`/`ID`.
+
+This is high impact and hard to trace: acme's function runtime reaches the API
+through these REST endpoints, so any function calling a GET endpoint with a
+non-String argument fails. The failure surfaces several layers away — the
+function throws, the calling service catches it and rethrows a generic message,
+and the test only ever sees `Operation failed`. Three acme integration
+failures traced back to this one line.
+
+### P13.11 — Relationships nested under an action relationship resolve to null (P0) ✅
+- [x] Resolve table relationships on a type reached through an action relationship
+- [x] Return `[]` for array relationships with no rows, never null
+
+Following an action relationship into a table and then requesting one of that
+table's own relationships returns null. For an array relationship, typed
+`[T!]!`, that violates the schema:
+
+```
+Cannot return null for non-nullable field Player.dataRows.
+```
+
+The same relationship is fine when reached directly, so this is specific to the
+action-relationship path added in P13.8:
+
+```graphql
+# works — dataRows resolves to []
+{ player(limit: 2) { id dataRows { key } } }
+
+# fails — Cannot return null for non-nullable field Player.dataRows
+{ searchPlayers(query: "...") { player { id dataRows { key value } } } }
+```
+
+`dataRows` is an array relationship on `public.player` using
+`manual_configuration` (column_mapping `id: player_id` to `public.player_data`).
+
+Found in acme's `searchPlayers` spec, in a case named "tests relation
+configuration through action response".
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.
