@@ -33,8 +33,21 @@ CREATE TABLE IF NOT EXISTS ${quoteIdent(schemaName)}.event_log (
   next_retry TIMESTAMPTZ DEFAULT now(),
   status TEXT DEFAULT 'pending',
   last_error TEXT,
-  response_status INTEGER
+  response_status INTEGER,
+  response_body TEXT
 )
+`;
+}
+
+/**
+ * Idempotent migrations for columns added after the table was first created.
+ * CREATE TABLE IF NOT EXISTS does not add new columns to existing tables.
+ */
+export function migrateEventLogSQL(schemaName: string): string {
+  return `
+ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS delivered BOOLEAN DEFAULT false;
+ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;
+ALTER TABLE ${quoteIdent(schemaName)}.event_log ADD COLUMN IF NOT EXISTS response_body TEXT;
 `;
 }
 
@@ -57,5 +70,6 @@ END $$
 export async function ensureEventSchema(pool: Pool, schemaName: string = 'hakkyra'): Promise<void> {
   await pool.query(createSchemaSQL(schemaName));
   await pool.query(createEventLogSQL(schemaName));
+  await pool.query(migrateEventLogSQL(schemaName));
   await pool.query(createIndexesSQL(schemaName));
 }

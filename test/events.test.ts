@@ -338,8 +338,9 @@ describe('Event Triggers', () => {
 
   describe('retry with exponential backoff', () => {
     it('retries on failure then succeeds when webhook recovers', async () => {
-      // Configure webhook to fail initially
+      // Configure webhook to fail initially, with a recognizable response body
       webhook.responseCode = 500;
+      webhook.responseBody = { ok: true, handled: 'invoice' };
 
       // Insert a test invoice
       await pool.query(
@@ -373,12 +374,15 @@ describe('Event Triggers', () => {
       }, 15000);
 
       const failedResult = await pool.query(
-        `SELECT retry_count, status, last_error, response_status FROM hakkyra.event_log
+        `SELECT retry_count, status, last_error, response_status, response_body FROM hakkyra.event_log
          WHERE trigger_name = 'test_invoice_created'
          ORDER BY created_at DESC LIMIT 1`,
       );
       expect(failedResult.rows[0].retry_count).toBeGreaterThanOrEqual(1);
       expect(failedResult.rows[0].response_status).toBe(500);
+      // The handler's response body is retained even for failed attempts
+      expect(failedResult.rows[0].response_body).toBeTruthy();
+      expect(JSON.parse(failedResult.rows[0].response_body)).toEqual({ ok: true, handled: 'invoice' });
 
       // Now switch webhook to succeed
       webhook.responseCode = 200;
@@ -402,13 +406,15 @@ describe('Event Triggers', () => {
       }, 15000);
 
       const deliveredResult = await pool.query(
-        `SELECT status, delivered_at, response_status FROM hakkyra.event_log
+        `SELECT status, delivered_at, response_status, response_body FROM hakkyra.event_log
          WHERE trigger_name = 'test_invoice_created'
          ORDER BY created_at DESC LIMIT 1`,
       );
       expect(deliveredResult.rows[0].status).toBe('delivered');
       expect(deliveredResult.rows[0].delivered_at).not.toBeNull();
       expect(deliveredResult.rows[0].response_status).toBe(200);
+      // Hasura's event_invocation_logs.response equivalent: the handler's output
+      expect(JSON.parse(deliveredResult.rows[0].response_body)).toEqual({ ok: true, handled: 'invoice' });
     });
   });
 

@@ -152,8 +152,8 @@ export async function registerEventWorkers(
             const { eventId } = job.data;
             await pool.query(
               `UPDATE ${quoteIdent(schemaName)}.event_log SET status = 'delivered', delivered = true, delivered_at = now(),
-               response_status = $2 WHERE id = $1`,
-              [eventId, result.statusCode],
+               response_status = $2, response_body = $3 WHERE id = $1`,
+              [eventId, result.statusCode, result.body ?? null],
             );
           },
 
@@ -164,13 +164,15 @@ export async function registerEventWorkers(
                retry_count = retry_count + 1,
                last_error = $2,
                response_status = $3,
-               status = CASE WHEN retry_count + 1 >= $4 THEN 'failed' ELSE 'pending' END,
-               next_retry = now() + interval '1 second' * $5
+               response_body = $4,
+               status = CASE WHEN retry_count + 1 >= $5 THEN 'failed' ELSE 'pending' END,
+               next_retry = now() + interval '1 second' * $6
                WHERE id = $1`,
               [
                 eventId,
                 result.error ?? `HTTP ${result.statusCode}`,
                 result.statusCode,
+                result.body ?? null,
                 trigger.retryConf.numRetries,
                 trigger.retryConf.intervalSec * Math.pow(2, 0), // backoff handled by pg-boss
               ],
