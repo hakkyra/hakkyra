@@ -701,6 +701,99 @@ describe('Actions', () => {
       expect(payload.input.category).toBe('BLOG');
       expect(payload.input.amount).toBe('42.50');
     });
+
+    // Hasura forwards action inputs with the JSON types the caller sent —
+    // stringify_numeric_types affects output serialization only (P13.15).
+    it('forwards numeric arguments sent as JSON numbers without stringifying', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/accept-contract', () => ({
+        code: 200,
+        body: {
+          id: 'contract-123',
+          totalAmount: '100.00',
+          walletId: 'f0000000-0000-0000-0000-000000000042',
+          accepted: true,
+        },
+      }));
+
+      await gql(
+        `mutation($input: AcceptContractInput!) {
+          acceptContractWithToken(input: $input) { accepted }
+        }`,
+        {
+          input: {
+            contractId: 'contract-123',
+            token: 'abc-token',
+            depositAmount: 250.5,
+          },
+        },
+        { authorization: `Bearer ${token}` },
+      );
+
+      const [req] = webhook.requests;
+      const payload = req.body as any;
+      expect(payload.input.depositAmount).toBe(250.5);
+    });
+
+    it('forwards Bigint and Numeric arguments sent as JSON numbers without stringifying', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/content-event', () => ({
+        code: 200,
+        body: { eventId: 'a0000000-0000-0000-0000-000000000003', category: 'NEWS', success: true },
+      }));
+
+      await gql(
+        `mutation($input: ContentEventInput!) {
+          contentEvent(input: $input) { success }
+        }`,
+        {
+          input: {
+            playerId: 376,
+            tags: [],
+            category: 'NEWS',
+            amount: 100,
+          },
+        },
+        { authorization: `Bearer ${token}` },
+      );
+
+      const [req] = webhook.requests;
+      const payload = req.body as any;
+      expect(payload.input.playerId).toBe(376);
+      expect(payload.input.amount).toBe(100);
+    });
+
+    it('forwards inline numeric literals as JSON numbers', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/accept-contract', () => ({
+        code: 200,
+        body: {
+          id: 'contract-123',
+          totalAmount: '100.00',
+          walletId: 'f0000000-0000-0000-0000-000000000042',
+          accepted: true,
+        },
+      }));
+
+      await gql(
+        `mutation {
+          acceptContractWithToken(input: {
+            contractId: "contract-123",
+            token: "abc-token",
+            depositAmount: 99.5
+          }) { accepted }
+        }`,
+        undefined,
+        { authorization: `Bearer ${token}` },
+      );
+
+      const [req] = webhook.requests;
+      const payload = req.body as any;
+      expect(payload.input.depositAmount).toBe(99.5);
+    });
   });
 
   describe('session variables', () => {

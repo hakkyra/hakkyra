@@ -308,14 +308,38 @@ function validateBigInt(value: unknown): string {
   return str;
 }
 
+/**
+ * Input parsing keeps the caller's JSON type (number stays number, string
+ * stays string) — Hasura forwards inputs as sent; stringification applies to
+ * output only.
+ */
+function parseBigIntInput(value: unknown): string | number {
+  if (typeof value === 'number') {
+    if (!Number.isInteger(value)) {
+      throw new TypeError(`Invalid Bigint: "${value}". Must be an integer.`);
+    }
+    return value;
+  }
+  return validateBigInt(value);
+}
+
+/** Integer literal → number when exactly representable, string otherwise. */
+function parseBigIntLiteral(raw: string): string | number {
+  const num = Number(raw);
+  return Number.isSafeInteger(num) ? num : validateBigInt(raw);
+}
+
 export const GraphQLBigint = new GraphQLScalarType({
   name: 'Bigint',
   description: 'A 64-bit integer, serialized as a string to avoid precision loss.',
 
   serialize: validateBigInt as GraphQLScalarSerializer<string>,
-  parseValue: validateBigInt as GraphQLScalarValueParser<string>,
+  parseValue: parseBigIntInput as GraphQLScalarValueParser<string | number>,
   parseLiteral(ast) {
-    if (ast.kind !== Kind.STRING && ast.kind !== Kind.INT) {
+    if (ast.kind === Kind.INT) {
+      return parseBigIntLiteral((ast as { value: string }).value);
+    }
+    if (ast.kind !== Kind.STRING) {
       throw new TypeError(`Bigint must be a string or integer, got: ${ast.kind}`);
     }
     return validateBigInt((ast as { value: string }).value);
@@ -332,14 +356,36 @@ function validateNumeric(value: unknown): string {
   return str;
 }
 
+/** See parseBigIntInput — inputs keep the caller's JSON type. */
+function parseNumericInput(value: unknown): string | number {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new TypeError(`Invalid Numeric: "${value}". Must be a numeric value.`);
+    }
+    return value;
+  }
+  return validateNumeric(value);
+}
+
+/** Numeric literal → number; oversized integer literals stay strings. */
+function parseNumericLiteral(kind: string, raw: string): string | number {
+  if (kind === Kind.INT) {
+    return parseBigIntLiteral(raw);
+  }
+  return Number(raw);
+}
+
 export const GraphQLNumeric = new GraphQLScalarType({
   name: 'Numeric',
   description: 'An arbitrary precision decimal, serialized as a string.',
 
   serialize: validateNumeric as GraphQLScalarSerializer<string>,
-  parseValue: validateNumeric as GraphQLScalarValueParser<string>,
+  parseValue: parseNumericInput as GraphQLScalarValueParser<string | number>,
   parseLiteral(ast) {
-    if (ast.kind !== Kind.STRING && ast.kind !== Kind.INT && ast.kind !== Kind.FLOAT) {
+    if (ast.kind === Kind.INT || ast.kind === Kind.FLOAT) {
+      return parseNumericLiteral(ast.kind, (ast as { value: string }).value);
+    }
+    if (ast.kind !== Kind.STRING) {
       throw new TypeError(`Numeric must be a string or number, got: ${ast.kind}`);
     }
     return validateNumeric((ast as { value: string }).value);
@@ -355,9 +401,12 @@ export const GraphQLNumericLower = new GraphQLScalarType({
   description: 'An arbitrary precision decimal, serialized as a string.',
 
   serialize: validateNumeric as GraphQLScalarSerializer<string>,
-  parseValue: validateNumeric as GraphQLScalarValueParser<string>,
+  parseValue: parseNumericInput as GraphQLScalarValueParser<string | number>,
   parseLiteral(ast) {
-    if (ast.kind !== Kind.STRING && ast.kind !== Kind.INT && ast.kind !== Kind.FLOAT) {
+    if (ast.kind === Kind.INT || ast.kind === Kind.FLOAT) {
+      return parseNumericLiteral(ast.kind, (ast as { value: string }).value);
+    }
+    if (ast.kind !== Kind.STRING) {
       throw new TypeError(`numeric must be a string or number, got: ${ast.kind}`);
     }
     return validateNumeric((ast as { value: string }).value);
