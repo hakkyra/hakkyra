@@ -487,7 +487,7 @@ Action handler URLs support `{{ENV_VAR}}` template interpolation — the same sy
 - **Synchronous** — proxy request and return response inline
 - **Asynchronous** — return immediately, deliver result via webhook later
 - **Request/response transforms** — template-based URL, body, and header rewriting
-- **Action relationships** — map action output fields to database table relationships
+- **Action relationships** — map action output fields to database table relationships; declared either on the action (`actions[].relationships`) or on the output type (`custom_types.objects[].relationships` — the form Hasura's console writes)
 
 ## Native Queries
 

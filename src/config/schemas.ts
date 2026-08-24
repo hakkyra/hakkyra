@@ -398,6 +398,12 @@ const ActionRelationshipSchema = z
   .strict()
   .describe('Action relationship to a tracked table');
 
+export const RawCustomTypeRelationshipSchema = ActionRelationshipSchema.extend({
+  source: z.string().optional().describe('Database source name (Hasura metadata) — accepted and ignored'),
+})
+  .strict()
+  .describe('Relationship declared on a custom output type (custom_types.objects[].relationships)');
+
 export const RawActionSchema = z
   .object({
     name: z.string().describe('Action name — used as the GraphQL field name'),
@@ -427,7 +433,7 @@ export const RawActionSchema = z
 export const RawActionsYamlSchema = z
   .object({
     actions: z.array(RawActionSchema).optional().describe('List of action definitions'),
-    custom_types: z.unknown().optional().describe('Custom type definitions (parsed from actions.graphql)'),
+    custom_types: z.unknown().optional().describe('Custom type declarations (Hasura metadata) — type shapes come from actions.graphql; objects[].relationships are honored, other content is ignored with a warning'),
   })
   .strict()
   .describe('Top-level actions.yaml schema');

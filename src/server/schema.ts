@@ -277,6 +277,7 @@ export function registerRoleScopedIntrospection(
       const esmSchema = generateSchema(filteredModel, {
         actions: config.actions,
         actionsGraphql: config.actionsGraphql,
+        customTypeRelationships: config.customTypeRelationships,
         trackedFunctions: config.trackedFunctions,
         rootFieldTables,
         pgEnumsAsScalars: config.graphql.pgEnumsAsScalars,

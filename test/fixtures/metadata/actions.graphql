@@ -167,3 +167,23 @@ type ContentEventResult {
   metadata: Jsonb
   success: Boolean!
 }
+
+# ── Actions: searchPlayers / getPlayerRef (custom_types relationships) ─────────
+extend type Query {
+  searchPlayers(input: SearchPlayersInput!): [PlayerSearchResult!]!
+  getPlayerRef(playerId: uuid!): PlayerRef
+}
+
+input SearchPlayersInput {
+  q: String!
+}
+
+type PlayerSearchResult {
+  score: Float!
+  playerId: uuid!
+  ref: PlayerRef!
+}
+
+type PlayerRef {
+  id: uuid!
+}

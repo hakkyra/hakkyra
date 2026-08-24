@@ -2013,6 +2013,59 @@ scalar mode), and the referon affiliate router's direct insert into
 `hdb_catalog.hdb_scheduled_events` should target `hakkyra.scheduled_events`
 (same column names).
 
+### P13.8 — Action relationships declared on custom types are never loaded (P0) ✅
+- [x] Parse `custom_types.objects[].relationships` in `actions.yaml`
+- [x] Attach them to the action(s) whose output type matches the object name
+  (implemented type-keyed via `config.customTypeRelationships` → the schema
+  builder's `typeRelationships` map, which also covers output types nested
+  inside other output types — closer to Hasura's type-level semantics than
+  per-action attachment)
+- [x] Keep supporting `actions[].relationships` (both forms should work;
+  merged by relationship name, action-level wins on a collision)
+- [x] Warn instead of silently dropping unknown `custom_types` content
+
+`src/config/schemas.ts:430` declares `custom_types: z.unknown()`, so the whole
+block is accepted and then discarded. `src/config/loader.ts:1101` only reads
+`raw.relationships` on the **action** object.
+
+Hasura does not put action relationships there. Its console writes them onto the
+custom output **type**, under `custom_types.objects[]`:
+
+```yaml
+custom_types:
+  objects:
+    - name: PlayerRef
+      relationships:
+        - name: player
+          type: object
+          source: default
+          remote_table:
+            schema: public
+            name: player
+          field_mapping:
+            id: id
+```
+
+So a Hasura metadata export never populates the path Hakkyra reads, and action
+relationships silently do not exist. The failure surfaces far from the cause,
+as a schema error on query:
+
+```
+Cannot query field "player" on type "PlayerRef"
+```
+
+Nothing warns at startup — the field is simply absent, so this looks like a
+schema generation bug rather than a config one.
+
+The existing relationship machinery is fine (`src/actions/schema.ts:355-359`
+already resolves `fieldMapping` against the remote table). Only the loading
+path needs work: read the objects list, index relationships by object name,
+and merge them into the actions that return that type. Note one output type can
+back several actions, so the mapping is one-to-many.
+
+Found in the acme migration: 3 failures in `searchPlayers`, all
+`Cannot query field "player" on type "PlayerRef"`.
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.
@@ -2095,7 +2148,7 @@ admin_ui:
 | GROUP BY | 18 | Pass |
 | Action transforms | 32 | Pass |
 | Batch operations | 26 | Pass |
-| Action relationships | 13 | Pass |
+| Action relationships | 22 | Pass |
 | Statistical aggregates | 15 | Pass |
 | Zod schemas | 241 | Pass |
 | Tracked functions | 43 | Pass |

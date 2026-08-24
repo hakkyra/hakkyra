@@ -53,6 +53,7 @@ import {
   RawTrackedFunctionSchema,
   RawActionSchema,
   RawActionsYamlSchema,
+  RawCustomTypeRelationshipSchema,
   RawCronTriggerSchema,
   RawServerConfigSchema,
   RawIntrospectionConfigSchema,
@@ -304,7 +305,7 @@ export async function loadConfig(
   }
 
   const trackedFunctions = await loadAllFunctions(absMetadataDir);
-  const actions = await loadActions(absMetadataDir);
+  const { actions, customTypeRelationships } = await loadActions(absMetadataDir);
   const actionsGraphql = await loadActionsGraphql(absMetadataDir);
   const cronTriggers = await loadCronTriggers(absMetadataDir);
   const serverConfig = await loadServerConfig(serverConfigPath);
@@ -330,6 +331,7 @@ export async function loadConfig(
     trackedFunctions,
     actions,
     actionsGraphql: actionsGraphql ?? undefined,
+    customTypeRelationships,
     cronTriggers,
     rest: transformRESTConfig(serverConfig),
     queryCollections,
@@ -1057,20 +1059,130 @@ async function loadRestEndpoints(
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
-async function loadActions(metadataDir: string): Promise<ActionConfig[]> {
+interface LoadedActions {
+  actions: ActionConfig[];
+  customTypeRelationships: Record<string, ActionRelationship[]>;
+}
+
+async function loadActions(metadataDir: string): Promise<LoadedActions> {
   const actionsPath = path.join(metadataDir, 'actions.yaml');
   const raw = await readYamlIfExists(actionsPath);
-  if (!raw) return [];
+  if (!raw) return { actions: [], customTypeRelationships: {} };
 
   let rawActions: RawAction[] = [];
+  let customTypes: unknown;
   if (Array.isArray(raw)) {
     rawActions = raw.map((entry) => RawActionSchema.parse(entry));
   } else if (typeof raw === 'object' && raw !== null && 'actions' in raw) {
     const parsed = RawActionsYamlSchema.parse(raw);
     rawActions = parsed.actions ?? [];
+    customTypes = parsed.custom_types;
   }
 
-  return rawActions.map(transformAction);
+  const { relationships: customTypeRelationships, warnings } =
+    extractCustomTypeRelationships(customTypes);
+  for (const warning of warnings) {
+    log.warn(warning);
+  }
+
+  return { actions: rawActions.map(transformAction), customTypeRelationships };
+}
+
+/** custom_types sections Hasura writes; everything else is unknown content. */
+const KNOWN_CUSTOM_TYPES_SECTIONS = new Set(['enums', 'input_objects', 'objects', 'scalars']);
+/** Keys of a custom_types.objects[] entry that Hakkyra understands or knowingly ignores. */
+const KNOWN_CUSTOM_TYPE_OBJECT_KEYS = new Set(['name', 'description', 'fields', 'relationships']);
+
+/**
+ * Extract action relationships declared on custom output types
+ * (`custom_types.objects[].relationships` in actions.yaml — where the Hasura
+ * console writes them), keyed by output type name.
+ *
+ * Type shapes themselves come from actions.graphql, so the rest of the
+ * custom_types block is informational; unknown content is reported as a
+ * warning instead of being silently dropped. Malformed relationship entries
+ * throw, since the user clearly intended them to take effect.
+ */
+export function extractCustomTypeRelationships(customTypes: unknown): {
+  relationships: Record<string, ActionRelationship[]>;
+  warnings: string[];
+} {
+  const relationships: Record<string, ActionRelationship[]> = {};
+  const warnings: string[] = [];
+  if (customTypes === undefined || customTypes === null) {
+    return { relationships, warnings };
+  }
+  if (typeof customTypes !== 'object' || Array.isArray(customTypes)) {
+    warnings.push('custom_types in actions.yaml is not an object — ignored');
+    return { relationships, warnings };
+  }
+
+  const ct = customTypes as Record<string, unknown>;
+  for (const key of Object.keys(ct)) {
+    if (!KNOWN_CUSTOM_TYPES_SECTIONS.has(key)) {
+      warnings.push(`custom_types.${key} in actions.yaml is not supported — ignored`);
+    }
+  }
+
+  const objects = ct['objects'];
+  if (objects === undefined || objects === null) {
+    return { relationships, warnings };
+  }
+  if (!Array.isArray(objects)) {
+    warnings.push('custom_types.objects in actions.yaml is not a list — ignored');
+    return { relationships, warnings };
+  }
+
+  for (const entry of objects) {
+    if (typeof entry !== 'object' || entry === null || typeof (entry as Record<string, unknown>)['name'] !== 'string') {
+      warnings.push('custom_types.objects entry without a name in actions.yaml — ignored');
+      continue;
+    }
+    const obj = entry as Record<string, unknown>;
+    const typeName = obj['name'] as string;
+    for (const key of Object.keys(obj)) {
+      if (!KNOWN_CUSTOM_TYPE_OBJECT_KEYS.has(key)) {
+        warnings.push(`custom_types.objects[${typeName}].${key} in actions.yaml is not supported — ignored`);
+      }
+    }
+
+    const rawRels = obj['relationships'];
+    if (rawRels === undefined || rawRels === null) continue;
+    if (!Array.isArray(rawRels)) {
+      throw new Error(`custom_types.objects[${typeName}].relationships in actions.yaml must be a list`);
+    }
+    if (rawRels.length === 0) continue;
+
+    relationships[typeName] = rawRels.map((rel, i) => {
+      const result = RawCustomTypeRelationshipSchema.safeParse(rel);
+      if (!result.success) {
+        throw new Error(
+          `Invalid relationship at custom_types.objects[${typeName}].relationships[${i}] in actions.yaml: ${result.error.message}`,
+        );
+      }
+      return transformActionRelationship(result.data);
+    });
+  }
+
+  return { relationships, warnings };
+}
+
+function transformActionRelationship(rel: {
+  name: string;
+  type: 'object' | 'array';
+  remote_table: string | { schema: string; name: string };
+  field_mapping: Record<string, string>;
+}): ActionRelationship {
+  const remoteTable =
+    typeof rel.remote_table === 'string'
+      ? { schema: 'public', name: rel.remote_table }
+      : { schema: rel.remote_table.schema, name: rel.remote_table.name };
+  return {
+    name: rel.name,
+    type: rel.type,
+    remoteTable,
+    fieldMapping: rel.field_mapping,
+  };
 }
 
 function transformAction(raw: RawAction): ActionConfig {
@@ -1100,20 +1212,7 @@ function transformAction(raw: RawAction): ActionConfig {
 
   let relationships: ActionRelationship[] | undefined;
   if (raw.relationships && raw.relationships.length > 0) {
-    relationships = raw.relationships.map((rel) => {
-      let remoteTable: { schema: string; name: string };
-      if (typeof rel.remote_table === 'string') {
-        remoteTable = { schema: 'public', name: rel.remote_table };
-      } else {
-        remoteTable = { schema: rel.remote_table.schema, name: rel.remote_table.name };
-      }
-      return {
-        name: rel.name,
-        type: rel.type,
-        remoteTable,
-        fieldMapping: rel.field_mapping,
-      };
-    });
+    relationships = raw.relationships.map(transformActionRelationship);
   }
 
   return {

@@ -27,7 +27,7 @@ import type {
   GraphQLFieldConfigMap,
   GraphQLFieldConfigArgumentMap,
 } from 'graphql';
-import type { SchemaModel, TableInfo, EnumInfo, ActionConfig, OperationsConfig } from '../types.js';
+import type { SchemaModel, TableInfo, EnumInfo, ActionConfig, ActionRelationship, OperationsConfig } from '../types.js';
 import { buildActionFields } from '../actions/schema.js';
 import { pgEnumToGraphQLName } from '../introspection/type-map.js';
 import { customScalars, makeOpaqueEnumScalar } from './scalars.js';
@@ -180,6 +180,8 @@ function buildEnumTypes(
 export interface GenerateSchemaOptions {
   actions?: ActionConfig[];
   actionsGraphql?: string;
+  /** Relationships declared on custom output types (custom_types.objects[].relationships), keyed by type name */
+  customTypeRelationships?: Record<string, ActionRelationship[]>;
   trackedFunctions?: TrackedFunctionConfig[];
   /** If provided, only these tables get root query/mutation/subscription fields.
    *  All tables still get object types (needed for relationship resolution). */
@@ -398,6 +400,7 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
         tables,
         tableTypeRegistry: typeRegistry,
         enumTypes,
+        customTypeRelationships: options.customTypeRelationships,
       })
     : { queryFields: {}, mutationFields: {}, subscriptionFields: {}, types: [] };
 

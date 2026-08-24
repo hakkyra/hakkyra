@@ -124,6 +124,28 @@ actions:
     permissions:
       - role: client
 
+  # Query: search players — custom_types relationships on a nested output type
+  - name: searchPlayers
+    definition:
+      kind: synchronous
+      type: query
+      handler: "{{TEST_SERVER_URL}}/actions/search-players"
+      forward_client_headers: false
+      timeout: 10
+    permissions:
+      - role: backoffice
+
+  # Query: fetch player ref — custom_types relationship on the action return type
+  - name: getPlayerRef
+    definition:
+      kind: synchronous
+      type: query
+      handler: "{{TEST_SERVER_URL}}/actions/get-player-ref"
+      forward_client_headers: false
+      timeout: 10
+    permissions:
+      - role: backoffice
+
 custom_types:
   input_objects:
     - name: CreatePaymentInput
@@ -134,12 +156,38 @@ custom_types:
     - name: ProcessServiceInput
     - name: AcceptContractInput
     - name: ContentEventInput
+    - name: SearchPlayersInput
   objects:
     - name: PaymentResult
     - name: AdjustAccountResult
+      relationships:
+        - name: client
+          type: object
+          remote_table: { schema: public, name: client }
+          field_mapping:
+            clientId: id
     - name: VerificationRequestResult
     - name: DiscountEligibilityResult
     - name: ScheduleConsultationResult
     - name: ProcessServiceResult
     - name: AcceptContractResult
     - name: ContentEventResult
+    - name: PlayerSearchResult
+    - name: PlayerRef
+      relationships:
+        - name: player
+          type: object
+          source: default
+          remote_table:
+            schema: public
+            name: player
+          field_mapping:
+            id: id
+        - name: locks
+          type: array
+          source: default
+          remote_table:
+            schema: public
+            name: player_lock
+          field_mapping:
+            id: player_id

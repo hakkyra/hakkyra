@@ -69,6 +69,12 @@ export interface ActionSchemaOptions {
   tableTypeRegistry?: Map<string, GraphQLObjectType>;
   /** PG-introspected enum types, keyed by GraphQL enum name */
   enumTypes?: Map<string, EnumLikeType>;
+  /**
+   * Relationships declared on custom output types
+   * (custom_types.objects[].relationships — the Hasura form),
+   * keyed by output type name.
+   */
+  customTypeRelationships?: Record<string, ActionRelationship[]>;
 }
 
 // ─── SDL Type Resolution ────────────────────────────────────────────────────
@@ -498,6 +504,20 @@ export function buildActionFields(
         }
       }
       typeRelationships.set(returnTypeName, existing);
+    }
+
+    // Relationships declared on the custom types themselves (the Hasura form).
+    // These are keyed by type name directly, so they also cover output types
+    // nested inside other output types. On a name collision the action-level
+    // declaration above wins.
+    for (const [typeName, rels] of Object.entries(options.customTypeRelationships ?? {})) {
+      const existing = typeRelationships.get(typeName) ?? [];
+      for (const rel of rels) {
+        if (!existing.some((r) => r.name === rel.name)) {
+          existing.push(rel);
+        }
+      }
+      typeRelationships.set(typeName, existing);
     }
   }
 

@@ -447,6 +447,188 @@ describe('Action Relationships', () => {
     });
   });
 
+  describe('custom_types relationships (Hasura form)', () => {
+    const PLAYER_ONE_ID = 'df000000-0000-0000-0000-000000000001';
+    const PLAYER_TWO_ID = 'df000000-0000-0000-0000-000000000002';
+
+    describe('config loading', () => {
+      it('parses custom_types.objects[].relationships into customTypeRelationships', async () => {
+        const { loadConfig } = await import('../src/config/loader.js');
+        const config = await loadConfig(METADATA_DIR, SERVER_CONFIG_PATH);
+
+        expect(config.customTypeRelationships).toBeDefined();
+        expect(config.customTypeRelationships['PlayerRef']).toEqual([
+          {
+            name: 'player',
+            type: 'object',
+            remoteTable: { schema: 'public', name: 'player' },
+            fieldMapping: { id: 'id' },
+          },
+          {
+            name: 'locks',
+            type: 'array',
+            remoteTable: { schema: 'public', name: 'player_lock' },
+            fieldMapping: { id: 'player_id' },
+          },
+        ]);
+        expect(config.customTypeRelationships['AdjustAccountResult']).toEqual([
+          {
+            name: 'client',
+            type: 'object',
+            remoteTable: { schema: 'public', name: 'client' },
+            fieldMapping: { clientId: 'id' },
+          },
+        ]);
+      });
+
+      it('objects without relationships do not appear in customTypeRelationships', async () => {
+        const { loadConfig } = await import('../src/config/loader.js');
+        const config = await loadConfig(METADATA_DIR, SERVER_CONFIG_PATH);
+
+        expect(config.customTypeRelationships['PaymentResult']).toBeUndefined();
+        expect(config.customTypeRelationships['DiscountEligibilityResult']).toBeUndefined();
+      });
+
+      it('warns on unknown custom_types content instead of silently dropping it', async () => {
+        const loader = await import('../src/config/loader.js');
+        const extract = (loader as Record<string, unknown>)['extractCustomTypeRelationships'] as (
+          customTypes: unknown,
+        ) => { relationships: Record<string, unknown[]>; warnings: string[] };
+        expect(extract).toBeTypeOf('function');
+
+        const { relationships, warnings } = extract({
+          enums: [],
+          scalars: [],
+          interfaces: [{ name: 'Node' }],
+          objects: [
+            {
+              name: 'Foo',
+              unexpected_key: true,
+              relationships: [
+                {
+                  name: 'bar',
+                  type: 'object',
+                  remote_table: { schema: 'public', name: 'client' },
+                  field_mapping: { barId: 'id' },
+                },
+              ],
+            },
+          ],
+        });
+
+        // Known content is still extracted
+        expect(relationships['Foo']).toHaveLength(1);
+        // Unknown content produces warnings
+        expect(warnings.some((w) => w.includes('interfaces'))).toBe(true);
+        expect(warnings.some((w) => w.includes('unexpected_key'))).toBe(true);
+      });
+
+      it('warns and ignores when custom_types is not an object', async () => {
+        const loader = await import('../src/config/loader.js');
+        const extract = (loader as Record<string, unknown>)['extractCustomTypeRelationships'] as (
+          customTypes: unknown,
+        ) => { relationships: Record<string, unknown[]>; warnings: string[] };
+
+        const { relationships, warnings } = extract('nonsense');
+        expect(relationships).toEqual({});
+        expect(warnings.length).toBeGreaterThan(0);
+      });
+    });
+
+    describe('schema generation', () => {
+      let sdl: string;
+
+      beforeAll(async () => {
+        const res = await fetch(`${serverAddress}/sdl`, { headers: { 'x-hasura-admin-secret': ADMIN_SECRET } });
+        sdl = await res.text();
+      });
+
+      it('object relationship declared on a custom type appears on that type', () => {
+        expect(sdl).toMatch(/type PlayerRef\s*\{[^}]*player:\s*Player\b/);
+      });
+
+      it('array relationship declared on a custom type appears on that type', () => {
+        expect(sdl).toMatch(/type PlayerRef\s*\{[^}]*locks:\s*\[PlayerLock!\]!/);
+      });
+
+      it('custom_types relationships merge with action-level relationships on the same type', () => {
+        // AdjustAccountResult has ledgerEntries from actions[].relationships
+        // and client from custom_types.objects[].relationships
+        expect(sdl).toMatch(/type AdjustAccountResult\s*\{[^}]*ledgerEntries:\s*\[LedgerEntry!\]!/);
+        expect(sdl).toMatch(/type AdjustAccountResult\s*\{[^}]*client:\s*Client\b/);
+      });
+    });
+
+    describe('relationship resolution', () => {
+      it('resolves relationships on the action return type', async () => {
+        webhook.onPath('/actions/get-player-ref', () => ({
+          code: 200,
+          body: { id: PLAYER_ONE_ID },
+        }));
+
+        const { body } = await gql(
+          `query {
+            getPlayerRef(playerId: "${PLAYER_ONE_ID}") {
+              id
+              player {
+                id
+                name
+              }
+              locks {
+                reason
+              }
+            }
+          }`,
+          undefined,
+          { 'x-hasura-admin-secret': ADMIN_SECRET },
+        );
+
+        expect(body.errors).toBeUndefined();
+        const data = (body.data as any).getPlayerRef;
+        expect(data.id).toBe(PLAYER_ONE_ID);
+        expect(data.player).toEqual({ id: PLAYER_ONE_ID, name: 'PlayerOne' });
+        expect(data.locks).toEqual([{ reason: 'Maintenance' }]);
+      });
+
+      it('resolves relationships on nested output types within list results', async () => {
+        webhook.onPath('/actions/search-players', () => ({
+          code: 200,
+          body: [
+            { score: 1.0, playerId: PLAYER_ONE_ID, ref: { id: PLAYER_ONE_ID } },
+            { score: 0.5, playerId: PLAYER_TWO_ID, ref: { id: PLAYER_TWO_ID } },
+          ],
+        }));
+
+        const { body } = await gql(
+          `query {
+            searchPlayers(input: { q: "player" }) {
+              score
+              ref {
+                id
+                player {
+                  name
+                }
+                locks {
+                  reason
+                }
+              }
+            }
+          }`,
+          undefined,
+          { 'x-hasura-admin-secret': ADMIN_SECRET },
+        );
+
+        expect(body.errors).toBeUndefined();
+        const data = (body.data as any).searchPlayers;
+        expect(data).toHaveLength(2);
+        expect(data[0].ref.player.name).toBe('PlayerOne');
+        expect(data[0].ref.locks).toEqual([{ reason: 'Maintenance' }]);
+        expect(data[1].ref.player.name).toBe('PlayerTwo');
+        expect(data[1].ref.locks).toEqual([]);
+      });
+    });
+  });
+
   describe('backward compatibility', () => {
     it('actions without relationships work unchanged', async () => {
       const token = await createJWT({

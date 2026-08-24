@@ -128,6 +128,7 @@ export async function createServer(
   const graphqlSchema = generateSchema(schemaModel, {
     actions: config.actions,
     actionsGraphql: config.actionsGraphql,
+    customTypeRelationships: config.customTypeRelationships,
     trackedFunctions: config.trackedFunctions,
     pgEnumsAsScalars: config.graphql.pgEnumsAsScalars,
   });
@@ -339,6 +340,7 @@ export async function createServer(
         const newSchema = generateSchema(newMerge.model, {
           actions: newConfig.actions,
           actionsGraphql: newConfig.actionsGraphql,
+          customTypeRelationships: newConfig.customTypeRelationships,
           pgEnumsAsScalars: newConfig.graphql.pgEnumsAsScalars,
         });
 

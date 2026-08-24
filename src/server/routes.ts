@@ -211,6 +211,7 @@ export function registerDocEndpoints(deps: DocEndpointsDeps): Map<string, string
           const filteredSchema = generateSchema(filteredModel, {
             actions: config.actions,
             actionsGraphql: config.actionsGraphql,
+            customTypeRelationships: config.customTypeRelationships,
             trackedFunctions: config.trackedFunctions,
             rootFieldTables,
             pgEnumsAsScalars: config.graphql.pgEnumsAsScalars,

@@ -495,6 +495,7 @@ export const HakkyraConfigSchema = z.object({
   trackedFunctions: z.array(TrackedFunctionConfigSchema).default([]).describe('Tracked SQL functions'),
   actions: z.array(ActionConfigSchema).describe('Action definitions'),
   actionsGraphql: z.string().optional().describe('Raw GraphQL SDL for action custom types'),
+  customTypeRelationships: z.record(z.string(), z.array(ActionRelationshipSchema)).default({}).describe('Action relationships declared on custom output types (custom_types.objects[].relationships), keyed by output type name'),
   cronTriggers: z.array(CronTriggerConfigSchema).describe('Cron trigger definitions'),
   rest: RESTConfigSchema.describe('REST API settings'),
   queryCollections: z.array(QueryCollectionSchema).default([]).describe('Query collections'),
