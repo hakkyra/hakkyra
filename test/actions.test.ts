@@ -485,6 +485,29 @@ describe('Actions', () => {
       expect(body.errors![0].extensions?.code).toBe('ACTION_HANDLER_ERROR');
     });
 
+    it('action errors match Hasura shape: message + extensions only, no locations/path', async () => {
+      const token = await createJWT({ role: 'client', userId: ALICE_ID, allowedRoles: ['client'] });
+
+      webhook.onPath('/actions/create-payment', () => ({
+        code: 400,
+        body: { message: 'Invalid payment amount', extensions: { code: 'VALIDATION' } },
+      }));
+
+      const { body } = await gql(
+        `mutation($input: CreatePaymentInput!) {
+          createPayment(input: $input) { status }
+        }`,
+        { input: { amount: -10, currencyId: 'usd' } },
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect(body.errors).toBeDefined();
+      expect(body.errors![0].message).toBe('Invalid payment amount');
+      expect(body.errors![0].extensions).toBeDefined();
+      expect(body.errors![0]).not.toHaveProperty('locations');
+      expect(body.errors![0]).not.toHaveProperty('path');
+    });
+
     it('returns error for unauthenticated requests', async () => {
       const { body } = await gql(
         `mutation($input: CreatePaymentInput!) {

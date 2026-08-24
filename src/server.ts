@@ -226,6 +226,21 @@ export async function createServer(
     graphiql: process.env['NODE_ENV'] !== 'production',
     path: '/graphql',
     queryDepth: config.graphql.queryDepth,
+    // Hasura error shape: { message, extensions } only — no top-level locations/path.
+    errorFormatter: (result, context) => {
+      const formatted = mercurius.defaultErrorFormatter(result, context);
+      if (formatted.response.errors) {
+        formatted.response.errors = formatted.response.errors.map((err) => {
+          const clean: { message: string; extensions?: Record<string, unknown> } = {
+            message: err.message,
+          };
+          const ext = (err as { extensions?: Record<string, unknown> }).extensions;
+          if (ext && Object.keys(ext).length > 0) clean.extensions = ext;
+          return clean;
+        }) as typeof formatted.response.errors;
+      }
+      return formatted;
+    },
     context: (request) => {
       const auth = request.session ?? ANONYMOUS_SESSION;
       return buildResolverContext(contextDeps, auth, request.headers as Record<string, string>);
