@@ -436,6 +436,36 @@ Schedule recurring webhook invocations:
     retry_interval_seconds: 60
 ```
 
+## One-Off Scheduled Events
+
+Fire a single webhook at a chosen time — Hasura's `hdb_scheduled_events`
+equivalent. Create events via the Hasura-compatible metadata RPC (admin only):
+
+```bash
+curl -X POST http://localhost:3000/v1/metadata \
+  -H "x-hasura-admin-secret: $ADMIN_SECRET" \
+  -d '{
+    "type": "create_scheduled_event",
+    "args": {
+      "webhook": "{{CORE_SERVER_URL}}welcome-email",
+      "schedule_at": "2026-09-01T12:00:00Z",
+      "payload": { "user_id": 42 },
+      "headers": [{ "name": "x-secret", "value_from_env": "WEBHOOK_SECRET" }],
+      "retry_conf": { "num_retries": 3, "retry_interval_seconds": 60 },
+      "comment": "welcome email"
+    }
+  }'
+```
+
+Or insert directly into `hakkyra.scheduled_events` (same column names as
+Hasura's `hdb_catalog.hdb_scheduled_events`: `webhook_conf`, `scheduled_time`,
+`payload`, `header_conf`, `retry_conf`, `comment`). A poller (every 10s by
+default, `scheduled_events.poll_interval_ms`) delivers due events with
+per-event retry; every attempt is recorded in
+`hakkyra.scheduled_event_invocations` and can be read back with
+`{ "type": "get_scheduled_event_invocations", "args": { "event_id": "..." } }`.
+`delete_scheduled_event` cancels a pending event.
+
 ## Actions
 
 Proxy GraphQL mutations/queries to external HTTP handlers (Hasura-compatible):

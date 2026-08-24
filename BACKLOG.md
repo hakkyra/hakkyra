@@ -1883,8 +1883,15 @@ Everything below is a behavioural difference from Hasura, not a startup failure.
 Note on failure counts: 13 of the 50 are `"before all"` hook failures, and each
 one fails its whole describe block, so defects are far fewer than failures.
 
-### P13.1 — PG enums need a Hasura-compatible scalar mode (P0)
-- [ ] Add `graphql.pg_enums_as_scalars` (default true for Hasura compatibility)
+### P13.1 — PG enums need a Hasura-compatible scalar mode (P0) ✅
+- [x] Add `graphql.pg_enums_as_scalars` (default true for Hasura compatibility)
+
+**Implemented:** native PG enums become opaque pass-through scalars with the
+same GraphQL names (`payment_state` → `PaymentState` scalar), accepting string
+literals (and ENUM literals for leniency) and returning raw DB values.
+Table-based enums (`is_enum: true`) stay real GraphQL enums in both modes.
+The main test fixture opts out (`pg_enums_as_scalars: false`) to keep the
+enum-mode suite; `test/pg-enum-scalars.test.ts` covers the scalar default.
 
 `src/schema/generator.ts:132-149` builds a `GraphQLEnumType` for every PG enum
 unconditionally. The README documents this as an intentional improvement over
@@ -1911,9 +1918,20 @@ Blast radius in acme: 13 PG enum types backing real columns, `payment_state`
 alone on 6. Affects external API consumers (the backoffice frontend is a
 separate repo), so it cannot be fixed on the server side alone.
 
-### P13.2 — `stringify_numeric_types` is not applied to aggregates (P0)
-- [ ] Apply `shouldCastToText` to aggregate output
-- [ ] Apply it to native query / logical model fields
+### P13.2 — `stringify_numeric_types` is not applied to aggregates (P0) ✅
+- [x] Apply `shouldCastToText` to aggregate output
+- [x] Apply it to native query / logical model fields
+
+**Implemented:** aggregate SQL casts by the aggregate *result* type
+(count → int8 → `"0"`, sum(int4) → int8, avg → numeric/float8) at all output
+sites (root, GROUP BY, nested relationship aggregates, computed fields);
+native queries get a projection wrapper casting stringify-typed logical model
+fields (also inside `row_to_json` for subscriptions). The CJS built-in
+Int/Float serializers pass SQL-cast strings through (same precedent as the
+existing String literal coercion patch), gated on the config at call time.
+Also fixed while here: the root/subscription aggregate resolvers ignored
+requested column aggregates (`sum { balance }` returned null) outside the
+groupBy path — they now parse the selection (permission-filtered).
 
 `shouldCastToText` is only wired in at `src/sql/select.ts:536` (plain columns)
 and `:559` (computed fields). Aggregate results bypass it, so with
@@ -1922,8 +1940,10 @@ and `:559` (computed fields). Aggregate results bypass it, so with
 
 Observed: `expected 3000 to be a string`, `expected +0 to equal '0'`.
 
-### P13.3 — Action permissions ignore inherited roles (P0)
-- [ ] Expand inherited roles in `checkActionPermission`
+### P13.3 — Action permissions ignore inherited roles (P0) ✅
+- [x] Expand inherited roles in `checkActionPermission` (single-level, matching
+  the table-permission merge; threaded through GraphQL resolvers and the async
+  action status REST route)
 
 `src/actions/permissions.ts:20` does a flat
 `action.permissions.some((p) => session.allowedRoles.includes(p.role))`.
@@ -1938,9 +1958,20 @@ Observed: `campaignQuery` permits role `campaign`; a JWT carrying
 though `backoffice_administrator` has `role_set: [backoffice, campaign,
 administrator, manager]`. Hasura allows it.
 
-### P13.4 — One-off scheduled events (feature)
-- [ ] Support scheduling a single future webhook, Hasura `hdb_scheduled_events` equivalent
-- [ ] Expose invocation results for scheduled events
+### P13.4 — One-off scheduled events (feature) ✅
+- [x] Support scheduling a single future webhook, Hasura `hdb_scheduled_events` equivalent
+- [x] Expose invocation results for scheduled events
+
+**Implemented:** `src/scheduled-events/` — `{schema}.scheduled_events` +
+`{schema}.scheduled_event_invocations` tables mirroring Hasura's hdb_catalog
+column names (webhook_conf, scheduled_time, retry_conf, header_conf, payload,
+status, tries, next_retry_at, comment), so acme's direct INSERT only needs
+the table name changed. A poller (default 10s, `scheduled_events.poll_interval_ms`)
+claims due rows with FOR UPDATE SKIP LOCKED (scheduled → locked → delivered |
+error, stale locks reclaimed after 5 min), delivers with per-event retry_conf,
+and logs every attempt. `POST /v1/metadata` (admin only) serves
+`create_scheduled_event`, `delete_scheduled_event`, and
+`get_scheduled_event_invocations`. Independent of the job queue.
 
 Only recurring cron triggers exist. Hasura lets a client insert into
 `hdb_catalog.hdb_scheduled_events` to fire one webhook at a chosen time, with
@@ -1949,28 +1980,38 @@ its own `retry_conf` and payload.
 This is the only finding that blocks **production** code rather than tests:
 acme's referon affiliate router schedules one-off events on registration.
 
-### P13.5 — Event log does not retain webhook response bodies (feature)
-- [ ] Store the webhook response body alongside `response_status`
+### P13.5 — Event log does not retain webhook response bodies (feature) ✅
+- [x] Store the webhook response body alongside `response_status`
+  (`response_body TEXT`, stored on success and failure; idempotent
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` migrations for existing deployments)
 
 `src/events/schema.ts:36` keeps `response_status INTEGER` and `last_error` only.
 Hasura's `event_invocation_logs.response` holds the full response, which is how
 callers assert that an event handler produced the right output. There is
 currently no way to recover a handler's output after delivery.
 
-### P13.6 — Action errors carry `locations` and `path` (minor)
-- [ ] Match Hasura's action error shape
+### P13.6 — Action errors carry `locations` and `path` (minor) ✅
+- [x] Match Hasura's action error shape — a Mercurius `errorFormatter` strips
+  top-level `locations`/`path` from ALL GraphQL errors (Hasura never emits
+  them), leaving `{ message, extensions }`
 
 Hasura returns action errors as `{ message, extensions }`. Hakkyra adds
 graphql-js's default `locations` and `path`, which changes the shape every
 client's error handling sees.
 
 ### P13.7 — Re-triage after the above
-- [ ] Re-run the acme integration suite once P13.1-P13.3 land
+- [ ] Re-run the acme integration suite now that P13.1-P13.6 have landed
 
 About 24 failures are not yet attributed. Several look like enum fallout
 (`Invalid input` on Deposits/Withdrawal, where `payment_state` is an enum), so
 they should not be chased until P13.1 is resolved — otherwise the work goes
 into cascades rather than causes.
+
+Note for the re-run: the acme Hakkyra deployment can drop any explicit
+`graphql.pg_enums_as_scalars` setting (the default is now the Hasura-compatible
+scalar mode), and the referon affiliate router's direct insert into
+`hdb_catalog.hdb_scheduled_events` should target `hakkyra.scheduled_events`
+(same column names).
 
 ## YAML Configuration Documentation
 
@@ -2070,4 +2111,7 @@ admin_ui:
 | JWT admin role | 9 | Pass |
 | CRUD operations | 20 | Pass |
 | Native query subscriptions | 11 | Pass |
-| **Total** | **1456** | **47 suites, 1456 passing** |
+| Stringify numeric (P13.2) | 8 | Pass |
+| PG enum scalars (P13.1) | 7 | Pass |
+| Scheduled events (P13.4) | 10 | Pass |
+| **Total** | **1960** | **67 suites, 1960 passing, 1 todo** |
