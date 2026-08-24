@@ -2369,6 +2369,81 @@ would still fall back to the poll for jobs enqueued by another instance, which
 is an argument for lowering `pollingIntervalSeconds` as well (floor 500ms, per
 `MIN_POLLING_INTERVAL_MS`).
 
+### P13.18 — A trailing `;` in native query code breaks every wrapped query (P0)
+- [x] Strip trailing whitespace and `;` in `parseNativeQuerySQL` — the single
+      choke point shared by the resolver and the subscription path
+- [x] Cover a native query whose `code` ends with `;` in the native query tests
+
+`applyStringifyProjection` inlines the native query as a subquery
+(`src/schema/native-queries.ts:86`):
+
+```js
+return proj ? `SELECT ${proj} FROM (${sql}) AS "__nq_str"` : sql;
+```
+
+A statement terminator inside `(...)` is a syntax error, so the query fails
+before it reaches PG's planner:
+
+```
+POST /api/rest/functions/counterProgress/rtp  {"counterProgressId": 1}
+
+{"path":"$","error":"syntax error at or near \";\"","code":"validation-failed"}
+```
+
+Hasura accepts the same metadata — a trailing `;` in `code` is normal when the
+SQL was pasted out of psql, and acme has it in one of three native queries.
+
+Two properties make this look intermittent rather than systematic:
+
+- The wrap only happens when `buildStringifyProjection` returns something, so a
+  native query with no int8/numeric/bigint field in its logical model passes the
+  raw SQL through and the terminator is harmless.
+- The row-level permission filter wraps a second time
+  (`src/schema/native-queries.ts:540`), so a non-admin role can hit the same
+  error on a query that admin runs fine.
+
+Found in acme: `counterProgressRtp` ends with `... ON cp.id =
+a.counter_progress_id;` and 400s; `counterProgressAverageBet` — same `Bigint!`
+argument, same endpoint plumbing, no terminator — returns
+`{"counterProgressAverageBet":[{"averageBet":"0"}]}`.
+
+### P13.19 — Insert with an empty object is rejected instead of DEFAULT VALUES (P0)
+- [x] `compileInsertOne`: emit `INSERT INTO t DEFAULT VALUES` when no columns remain
+      (`src/sql/insert.ts:254`)
+- [x] Batch paths: emit `INSERT INTO t SELECT FROM generate_series(1, n)`
+      (`src/sql/insert.ts:615`, `src/sql/insert.ts:671`)
+- [x] Keep the error for the case it was written for — a non-empty object whose
+      every column was stripped by insert permissions must still be a permission
+      failure, not a row of defaults
+
+`insert_<table>_one(object: {})` is the idiomatic Hasura way to insert an
+all-defaults row. Hakkyra builds the column list from the object's keys and
+throws when it is empty:
+
+```
+PUT /api/rest/functions/person  {}
+
+{"path":"$","error":"No columns to insert into \"public\".\"person\"","code":"validation-failed"}
+```
+
+`public.person` is entirely defaulted — `id` serial, `active` default true,
+`created_at`/`updated_at` default `now()` — so the correct SQL is
+`INSERT INTO "public"."person" DEFAULT VALUES RETURNING "id"`.
+
+All three forms were checked against PG 17; the `generate_series` one covers
+multi-row, where `DEFAULT VALUES` is single-row only:
+
+```sql
+insert into t default values returning id;                  -- INSERT 0 1
+insert into t select from generate_series(1,3) returning id; -- INSERT 0 3
+insert into t (id) values (default),(default) returning id;  -- INSERT 0 2
+```
+
+Found in acme: `fn-create-person` is `mutation CreatePerson {
+insertPersonOne(object: {}) { id } }`, reached through `PUT
+/api/rest/functions/person` with an empty body from
+`packages/api-client/src/player.ts` `createPerson()`.
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.

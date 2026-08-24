@@ -250,12 +250,17 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
   const data = prepareInsertData(opts.object, opts.table, opts.permission, opts.session);
 
   const columnNames = Object.keys(data);
-  if (columnNames.length === 0) {
+  if (columnNames.length === 0 && Object.keys(opts.object).length > 0) {
+    // Every provided column was stripped — a permission failure, not defaults
     throw new Error(`No columns to insert into "${opts.table.schema}"."${opts.table.name}"`);
   }
 
+  // An empty object is the idiomatic Hasura way to insert an all-defaults row
   const quotedColumns = columnNames.map(quoteIdentifier).join(', ');
   const valuePlaceholders = columnNames.map((col) => params.add(data[col])).join(', ');
+  const insertBody = columnNames.length === 0
+    ? `DEFAULT VALUES`
+    : `(${quotedColumns})\nVALUES (${valuePlaceholders})`;
 
   // Build ON CONFLICT clause
   const onConflictClause = opts.onConflict
@@ -298,8 +303,7 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
 
     const sql = [
       `WITH "_inserted" AS (`,
-      `  INSERT INTO ${tableRef} (${quotedColumns})`,
-      `  VALUES (${valuePlaceholders})${onConflictClause}`,
+      `  INSERT INTO ${tableRef} ${insertBody}${onConflictClause}`,
       `  RETURNING *`,
       `)`,
       `SELECT json_build_object(${returningFields}) AS "data"`,
@@ -320,10 +324,7 @@ export function compileInsertOne(opts: InsertOneOptions): CompiledQuery {
     ? `\nRETURNING json_build_object(${simpleReturningFields}) AS "data"`
     : '';
 
-  const sql = [
-    `INSERT INTO ${tableRef} (${quotedColumns})`,
-    `VALUES (${valuePlaceholders})`,
-  ].join('\n') + onConflictClause + returningClause;
+  const sql = `INSERT INTO ${tableRef} ${insertBody}` + onConflictClause + returningClause;
 
   return { sql, params: params.getParams() };
 }
@@ -500,6 +501,12 @@ function compileInsertChunk(
     return `(${values.join(', ')})`;
   });
 
+  // All-defaults batch: `VALUES ()` is invalid, so select n empty rows instead
+  // (`DEFAULT VALUES` is single-row only)
+  const insertBody = columnNames.length === 0
+    ? `SELECT FROM generate_series(1, ${preparedObjects.length})`
+    : `(${quotedColumns})\n  VALUES ${valueRows.join(',\n  ')}`;
+
   // Build ON CONFLICT clause
   const onConflictClause = opts.onConflict
     ? buildOnConflictSQL(opts.onConflict, params, opts.table, opts.session)
@@ -539,8 +546,7 @@ function compileInsertChunk(
 
     const sql = [
       `WITH "_inserted" AS (`,
-      `  INSERT INTO ${tableRef} (${quotedColumns})`,
-      `  VALUES ${valueRows.join(',\n  ')}${onConflictClause}`,
+      `  INSERT INTO ${tableRef} ${insertBody}${onConflictClause}`,
       `  RETURNING *`,
       `)`,
       `SELECT coalesce(json_agg(json_build_object(${returningFields})), '[]'::json) AS "data"`,
@@ -562,10 +568,7 @@ function compileInsertChunk(
     ? `\nRETURNING json_build_object(${simpleReturningFields}) AS "data"`
     : '';
 
-  const sql = [
-    `INSERT INTO ${tableRef} (${quotedColumns})`,
-    `VALUES ${valueRows.join(',\n')}`,
-  ].join('\n') + onConflictClause + returningClause;
+  const sql = `INSERT INTO ${tableRef} ${insertBody}` + onConflictClause + returningClause;
 
   return { sql, params: params.getParams() };
 }
@@ -611,14 +614,17 @@ export function compileInsert(opts: InsertOptions): CompiledQuery {
   }
   const columnNames = [...columnSet];
 
-  if (columnNames.length === 0) {
+  if (columnNames.length === 0 && opts.objects.some((obj) => Object.keys(obj).length > 0)) {
+    // Every provided column was stripped — a permission failure, not defaults
     throw new Error(`No columns to insert into "${opts.table.schema}"."${opts.table.name}"`);
   }
 
   const unnestThreshold = opts.unnestThreshold ?? UNNEST_THRESHOLD;
 
   // UNNEST optimization for large homogeneous inserts
+  // (all-defaults batches — zero columns — go through compileInsertChunk)
   if (
+    columnNames.length > 0 &&
     preparedObjects.length >= unnestThreshold &&
     isHomogeneous(preparedObjects, columnNames)
   ) {
@@ -667,7 +673,8 @@ export function compileInsertBatch(opts: InsertOptions): CompiledQuery[] {
   }
   const columnNames = [...columnSet];
 
-  if (columnNames.length === 0) {
+  if (columnNames.length === 0 && opts.objects.some((obj) => Object.keys(obj).length > 0)) {
+    // Every provided column was stripped — a permission failure, not defaults
     throw new Error(`No columns to insert into "${opts.table.schema}"."${opts.table.name}"`);
   }
 
@@ -675,7 +682,9 @@ export function compileInsertBatch(opts: InsertOptions): CompiledQuery[] {
 
   // UNNEST optimization — uses only N params (one per column, as arrays),
   // so a single query can handle any batch size
+  // (all-defaults batches — zero columns — go through compileInsertChunk)
   if (
+    columnNames.length > 0 &&
     preparedObjects.length >= unnestThreshold &&
     isHomogeneous(preparedObjects, columnNames)
   ) {
