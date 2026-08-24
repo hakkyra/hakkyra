@@ -128,6 +128,7 @@ export async function createServer(
     actions: config.actions,
     actionsGraphql: config.actionsGraphql,
     trackedFunctions: config.trackedFunctions,
+    pgEnumsAsScalars: config.graphql.pgEnumsAsScalars,
   });
 
   // 6. Create Fastify server
@@ -334,6 +335,7 @@ export async function createServer(
         const newSchema = generateSchema(newMerge.model, {
           actions: newConfig.actions,
           actionsGraphql: newConfig.actionsGraphql,
+          pgEnumsAsScalars: newConfig.graphql.pgEnumsAsScalars,
         });
 
         // Rebuild the CJS schema for Mercurius

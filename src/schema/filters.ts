@@ -21,6 +21,7 @@ import type { GraphQLInputType } from 'graphql';
 import type { TableInfo, ColumnInfo, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
+import type { EnumLikeType } from './scalars.js';
 import { getTypeName, toCamelCase, getColumnFieldName, tableKey, getRelFieldName, getVisibleColumns, type TypeRegistry } from './type-builder.js';
 
 // ─── Scalar Comparison Input Types ──────────────────────────────────────────
@@ -159,7 +160,7 @@ function getComparisonType(scalarName: string): GraphQLInputObjectType {
  * not expose ordering operators for table-based enum comparison types.
  */
 function getEnumComparisonType(
-  enumType: GraphQLEnumType,
+  enumType: EnumLikeType,
   isTableEnum?: boolean,
 ): GraphQLInputObjectType {
   const name = `${enumType.name}ComparisonExp`;
@@ -238,7 +239,7 @@ function getArrayComparisonType(scalarName: string): GraphQLInputObjectType {
  */
 function columnComparisonType(
   column: ColumnInfo,
-  enumTypes: Map<string, GraphQLEnumType>,
+  enumTypes: Map<string, EnumLikeType>,
   enumNames: Set<string>,
   tableEnumGraphQLNames?: Set<string>,
 ): GraphQLInputObjectType {
@@ -286,7 +287,7 @@ function columnComparisonType(
 export function buildFilterTypes(
   tables: TableInfo[],
   _typeRegistry: TypeRegistry,
-  enumTypes: Map<string, GraphQLEnumType>,
+  enumTypes: Map<string, EnumLikeType>,
   enumNames: Set<string>,
   selectColumnEnums?: Map<string, GraphQLEnumType>,
   functions?: FunctionInfo[],

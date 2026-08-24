@@ -762,6 +762,7 @@ export const RawServerConfigSchema = z
         query_depth: z.number().optional().describe('Maximum allowed query nesting depth'),
         max_limit: z.number().optional().describe('Maximum rows returned by any query'),
         max_batch_size: z.number().optional().describe('Maximum number of operations in a batched GraphQL request'),
+        pg_enums_as_scalars: z.boolean().optional().describe('Expose PostgreSQL enums as opaque String scalars like Hasura (true, default) or as GraphQL enum types (false)'),
       })
       .strict()
       .optional()

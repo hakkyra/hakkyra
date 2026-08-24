@@ -21,6 +21,7 @@ import {
   GraphQLInt,
   GraphQLEnumType,
   GraphQLInputObjectType,
+  GraphQLScalarType,
 } from 'graphql';
 import type {
   GraphQLFieldConfigMap,
@@ -29,7 +30,9 @@ import type {
 import type { SchemaModel, TableInfo, EnumInfo, ActionConfig, OperationsConfig } from '../types.js';
 import { buildActionFields } from '../actions/schema.js';
 import { pgEnumToGraphQLName } from '../introspection/type-map.js';
-import { customScalars } from './scalars.js';
+import { customScalars, makeOpaqueEnumScalar } from './scalars.js';
+import type { EnumLikeType } from './scalars.js';
+export type { EnumLikeType } from './scalars.js';
 import {
   buildObjectType,
   getTypeName,
@@ -126,11 +129,26 @@ function isOpEnabled(table: TableInfo, op: keyof OperationsConfig): boolean {
 
 // ─── Enum Builder ───────────────────────────────────────────────────────────
 
-function buildEnumTypes(enums: EnumInfo[]): Map<string, GraphQLEnumType> {
-  const enumTypes = new Map<string, GraphQLEnumType>();
+function buildEnumTypes(
+  enums: EnumInfo[],
+  pgEnumsAsScalars: boolean,
+  tableEnumRawNames: Set<string>,
+): Map<string, EnumLikeType> {
+  const enumTypes = new Map<string, EnumLikeType>();
 
   for (const enumInfo of enums) {
     const name = pgEnumToGraphQLName(enumInfo.name);
+
+    // Native PG enums in scalar mode: opaque pass-through scalar (Hasura
+    // treats native enum columns as text-like fields). Values stay raw.
+    if (pgEnumsAsScalars && !tableEnumRawNames.has(enumInfo.name)) {
+      enumTypes.set(name, makeOpaqueEnumScalar(
+        name,
+        `PostgreSQL enum ${enumInfo.schema}.${enumInfo.name} exposed as an opaque string scalar (Hasura-compatible).`,
+      ));
+      continue;
+    }
+
     const values: Record<string, { value: string }> = {};
     for (const val of enumInfo.values) {
       // UPPER_CASE enum values per graphql-default naming convention
@@ -166,6 +184,10 @@ export interface GenerateSchemaOptions {
   /** If provided, only these tables get root query/mutation/subscription fields.
    *  All tables still get object types (needed for relationship resolution). */
   rootFieldTables?: Set<string>;
+  /** Expose native PG enums as opaque string scalars like Hasura (default true).
+   *  Set false to generate real GraphQL enum types with UPPER_CASE values.
+   *  Table-based enums (is_enum: true) are real enums in both modes. */
+  pgEnumsAsScalars?: boolean;
 }
 
 export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptions): GraphQLSchema {
@@ -173,7 +195,12 @@ export function generateSchema(model: SchemaModel, options?: GenerateSchemaOptio
 
   // ── Step 1: Initialize registries ──────────────────────────────────────
   const typeRegistry: TypeRegistry = new Map();
-  const enumTypes = buildEnumTypes(enums);
+  // Table-based enums (is_enum: true) are registered in model.enums under
+  // `${table.name}_enum`; they stay real GraphQL enums in both enum modes.
+  const tableEnumRawNames = new Set(
+    tables.filter((t) => t.isEnum).map((t) => `${t.name}_enum`),
+  );
+  const enumTypes = buildEnumTypes(enums, options?.pgEnumsAsScalars ?? true, tableEnumRawNames);
   const enumNames = new Set(enums.map((e) => e.name));
 
   // ── Step 2: Build filter types (needed by object types for array rel args)

@@ -537,7 +537,8 @@ export const HakkyraConfigSchema = z.object({
     queryDepth: z.number().default(10).describe('Maximum query nesting depth'),
     maxLimit: z.number().default(100).describe('Maximum rows per query'),
     maxBatchSize: z.number().default(10).describe('Maximum operations per batch request'),
-  }).default({ queryDepth: 10, maxLimit: 100, maxBatchSize: 10 }).describe('GraphQL engine settings'),
+    pgEnumsAsScalars: z.boolean().default(true).describe('Expose PG enums as opaque string scalars (Hasura-compatible) instead of GraphQL enum types'),
+  }).default({ queryDepth: 10, maxLimit: 100, maxBatchSize: 10, pgEnumsAsScalars: true }).describe('GraphQL engine settings'),
   sql: z.object({
     arrayAnyThreshold: z.number().default(20).describe('Values above which IN lists use ANY(ARRAY[...])'),
     unnestThreshold: z.number().default(500).describe('Values above which IN lists use UNNEST'),

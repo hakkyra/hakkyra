@@ -17,6 +17,11 @@ auth:
 webhook:
   allow_private_urls: true
 
+graphql:
+  # The main test suite exercises Hakkyra's GraphQL-enum mode; the
+  # Hasura-compatible scalar default is covered by pg-enum-scalars.test.ts
+  pg_enums_as_scalars: false
+
 databases:
   primary:
     url_from_env: DATABASE_URL

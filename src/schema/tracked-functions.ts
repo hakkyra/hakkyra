@@ -46,6 +46,7 @@ import type {
   BoolExp,
 } from '../types.js';
 import { customScalars, asScalar, asOutputType } from './scalars.js';
+import type { EnumLikeType } from './scalars.js';
 import { pgTypeToGraphQL, pgEnumToGraphQLName, isKnownPgScalarType } from '../introspection/type-map.js';
 import { toCamelCase, toPascalCase, tableKey } from './type-builder.js';
 import type { TypeRegistry } from './type-builder.js';
@@ -122,7 +123,7 @@ const PG_ARG_TYPE_MAP: Record<string, string> = {
 
 export function pgArgTypeToGraphQL(
   pgType: string,
-  enumTypes?: Map<string, GraphQLEnumType>,
+  enumTypes?: Map<string, EnumLikeType>,
   enumNames?: Set<string>,
 ): GraphQLInputType {
   const normalized = pgType.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -297,7 +298,7 @@ export function buildTrackedFunctionFields(
   orderByTypes: Map<string, GraphQLInputObjectType>,
   selectColumnEnums: Map<string, import('graphql').GraphQLEnumType>,
   aggregateTypes: Map<string, GraphQLObjectType>,
-  enumTypes?: Map<string, GraphQLEnumType>,
+  enumTypes?: Map<string, EnumLikeType>,
   enumNames?: Set<string>,
 ): TrackedFunctionFields {
   const queryFields: Record<string, GraphQLFieldConfig<unknown, ResolverContext>> = {};

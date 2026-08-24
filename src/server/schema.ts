@@ -279,6 +279,7 @@ export function registerRoleScopedIntrospection(
         actionsGraphql: config.actionsGraphql,
         trackedFunctions: config.trackedFunctions,
         rootFieldTables,
+        pgEnumsAsScalars: config.graphql.pgEnumsAsScalars,
       });
       // Keep the ESM schema — we execute introspection using the ESM graphql
       // `execute()` function, which avoids the CJS/ESM instanceof mismatch

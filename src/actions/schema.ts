@@ -1,3 +1,4 @@
+import type { EnumLikeType } from '../schema/scalars.js';
 /**
  * Action schema integration.
  *
@@ -67,7 +68,7 @@ export interface ActionSchemaOptions {
   /** Registry of table GraphQL object types, keyed by "schema.name" */
   tableTypeRegistry?: Map<string, GraphQLObjectType>;
   /** PG-introspected enum types, keyed by GraphQL enum name */
-  enumTypes?: Map<string, GraphQLEnumType>;
+  enumTypes?: Map<string, EnumLikeType>;
 }
 
 // ─── SDL Type Resolution ────────────────────────────────────────────────────
@@ -113,7 +114,7 @@ const SCALAR_MAP: Record<string, GraphQLOutputType & GraphQLInputType> = {
 function resolveOutputType(
   typeNode: TypeNode,
   outputTypes: Map<string, GraphQLObjectType>,
-  enumTypes?: Map<string, GraphQLEnumType>,
+  enumTypes?: Map<string, EnumLikeType>,
 ): GraphQLOutputType {
   if (typeNode.kind === 'NonNullType') {
     return new GraphQLNonNull(resolveOutputType(typeNode.type, outputTypes, enumTypes));
@@ -137,7 +138,7 @@ function resolveOutputType(
 function resolveInputType(
   typeNode: TypeNode,
   inputTypes: Map<string, GraphQLInputObjectType>,
-  enumTypes?: Map<string, GraphQLEnumType>,
+  enumTypes?: Map<string, EnumLikeType>,
 ): GraphQLInputType {
   if (typeNode.kind === 'NonNullType') {
     return new GraphQLNonNull(resolveInputType(typeNode.type, inputTypes, enumTypes));
@@ -434,7 +435,8 @@ export function buildActionFields(
   const { actions: parsedActions, inputTypeDefs, outputTypeDefs, sdlEnumDefs, sdlScalarNames } = parseActionsSDL(sdl);
 
   // Build merged enum types map: SDL-defined enums + PG-introspected enums
-  const allEnumTypes = new Map<string, GraphQLEnumType>();
+  // (in pg_enums_as_scalars mode the PG entries are opaque scalars)
+  const allEnumTypes = new Map<string, EnumLikeType>();
 
   // Add PG-introspected enum types from schema model
   if (options?.enumTypes) {
@@ -634,7 +636,7 @@ export function buildActionFields(
 
   // Collect all types to register in the schema
   // Include SDL-defined enum types so they appear in the schema
-  const sdlEnumTypes: GraphQLEnumType[] = [];
+  const sdlEnumTypes: EnumLikeType[] = [];
   for (const [name] of sdlEnumDefs) {
     const et = allEnumTypes.get(name);
     if (et) sdlEnumTypes.push(et);

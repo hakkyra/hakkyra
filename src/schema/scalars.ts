@@ -474,6 +474,38 @@ export const GraphQLTextArray = new GraphQLScalarType({
   },
 });
 
+// ─── Opaque PG Enum Scalar ──────────────────────────────────────────────────
+
+/**
+ * The type standing in for a PG enum in the generated schema: a real
+ * GraphQLEnumType in enum mode, or an opaque string scalar in scalar mode
+ * (pg_enums_as_scalars, the Hasura-compatible default). Table-based enums
+ * (is_enum: true) are always real enums — that is Hasura's enum-table feature.
+ */
+export type EnumLikeType = import('graphql').GraphQLEnumType | GraphQLScalarType;
+
+/**
+ * Opaque string scalar standing in for a PG enum type (Hasura-compatible:
+ * native PG enums are exposed as text-like scalars, not GraphQL enums).
+ * Values pass through raw in both directions. String literals are accepted;
+ * ENUM literals are also accepted for leniency with enum-mode clients.
+ */
+export function makeOpaqueEnumScalar(name: string, description: string): GraphQLScalarType {
+  const toStr = (value: unknown): string => String(value);
+  return new GraphQLScalarType({
+    name,
+    description,
+    serialize: toStr as GraphQLScalarSerializer<string>,
+    parseValue: toStr as GraphQLScalarValueParser<string>,
+    parseLiteral(ast) {
+      if (ast.kind !== Kind.STRING && ast.kind !== Kind.ENUM) {
+        throw new TypeError(`${name} must be a string, got: ${ast.kind}`);
+      }
+      return (ast as { value: string }).value;
+    },
+  });
+}
+
 // ─── Scalar Registry ────────────────────────────────────────────────────────
 
 /**

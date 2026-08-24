@@ -831,6 +831,19 @@ describe('Raw YAML Schemas (config/schemas.ts)', () => {
       expect(err.issues.length).toBeGreaterThan(0);
     });
 
+    it('accepts graphql.pg_enums_as_scalars', () => {
+      expectValid(RawServerConfigSchema, {
+        graphql: { pg_enums_as_scalars: false },
+      });
+    });
+
+    it('rejects unknown graphql section fields (strict)', () => {
+      const err = expectInvalid(RawServerConfigSchema, {
+        graphql: { pg_enums_as_scalar: false },
+      });
+      expect(err.issues.length).toBeGreaterThan(0);
+    });
+
     it('rejects non-number port', () => {
       const err = expectInvalid(RawServerConfigSchema, {
         server: { port: '8080' },
@@ -1827,7 +1840,16 @@ describe('Internal Config Schemas (config/schemas-internal.ts)', () => {
         queryDepth: 10,
         maxLimit: 100,
         maxBatchSize: 10,
+        pgEnumsAsScalars: true,
       });
+    });
+
+    it('accepts graphql.pgEnumsAsScalars override', () => {
+      const result = expectValid(HakkyraConfigSchema, {
+        ...minimalConfig,
+        graphql: { pgEnumsAsScalars: false },
+      });
+      expect(result.graphql.pgEnumsAsScalars).toBe(false);
     });
 
     it('defaults server.schemaName to hakkyra when not specified', () => {

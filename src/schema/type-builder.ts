@@ -30,6 +30,7 @@ import type {
 import type { TableInfo, ColumnInfo, FunctionInfo, ComputedFieldConfig, SelectPermission } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
+import type { EnumLikeType } from './scalars.js';
 import { pgArgTypeToGraphQL } from './tracked-functions.js';
 import { toCamelCase, toPascalCase, getRelFieldName } from '../shared/naming.js';
 
@@ -119,7 +120,7 @@ const BUILTIN_SCALARS: Record<string, GraphQLScalarType> = {
 function resolveScalarType(
   graphqlName: string,
   isList: boolean,
-  enumTypes: Map<string, GraphQLEnumType>,
+  enumTypes: Map<string, EnumLikeType>,
 ): GraphQLOutputType {
   // Check built-in scalars
   const builtin = BUILTIN_SCALARS[graphqlName];
@@ -161,7 +162,7 @@ function resolveScalarType(
  */
 export function columnToGraphQLType(
   column: ColumnInfo,
-  enumTypes: Map<string, GraphQLEnumType>,
+  enumTypes: Map<string, EnumLikeType>,
   enumNames?: Set<string>,
 ): GraphQLOutputType {
   const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
@@ -189,7 +190,7 @@ export function columnToGraphQLType(
 export function buildObjectType(
   table: TableInfo,
   typeRegistry: TypeRegistry,
-  enumTypes: Map<string, GraphQLEnumType>,
+  enumTypes: Map<string, EnumLikeType>,
   enumNames: Set<string>,
   filterTypes?: Map<string, GraphQLInputObjectType>,
   orderByTypes?: Map<string, GraphQLInputObjectType>,

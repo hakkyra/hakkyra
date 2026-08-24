@@ -23,6 +23,7 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 - **Streaming subscriptions** — cursor-based streaming with `batchSize` and `cursor` arguments
 - **Event triggers** — capture INSERT/UPDATE/DELETE changes and deliver webhooks with retry
 - **Cron triggers** — scheduled webhook invocations via pg-boss or BullMQ
+- **One-off scheduled events** — fire a single webhook at a chosen time (Hasura `hdb_scheduled_events` equivalent) via the `/v1/metadata` RPC or direct table insert
 - **Upsert** — ON CONFLICT support for inserts
 - **Batch operations** — optimized UNNEST-based bulk inserts and updateMany
 - **Distinct queries** — DISTINCT ON support
@@ -524,7 +525,7 @@ Hakkyra reads Hasura-compatible YAML metadata but does not implement all Hasura 
 - **Apollo Federation** — Hakkyra serves a standalone GraphQL API, not a federated subgraph
 
 **Intentional divergences** (better than Hasura's approach):
-- **PG enums as GraphQL enums** — Hasura treats PG enums as opaque scalars; Hakkyra uses real GraphQL enums with values for better DX (autocomplete, validation)
+- **PG enums as GraphQL enums (opt-in)** — Hasura treats native PG enums as opaque text-like scalars, and for drop-in compatibility Hakkyra does the same by default: enum columns accept inline string literals and return raw DB values. Set `graphql.pg_enums_as_scalars: false` in `hakkyra.yaml` to instead generate real GraphQL enum types with UPPER_CASE values for better DX (autocomplete, validation) — recommended for greenfield deployments. Table-based enums (`is_enum: true`) are real GraphQL enums in both modes.
 - **Column visibility** — Hakkyra only exposes columns that appear in at least one role's select permission. Hasura exposes all columns to admin regardless of permission config. Hakkyra's approach keeps the schema clean and doesn't leak admin-only column names.
 - **Grouped aggregates** — Hakkyra includes `groupedAggregates` fields on all aggregate types. Hasura does not have this. This is a Hakkyra extension always enabled.
 

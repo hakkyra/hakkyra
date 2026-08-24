@@ -36,6 +36,7 @@ import type {
 import type { TableInfo, ColumnInfo, RelationshipConfig, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
+import type { EnumLikeType } from './scalars.js';
 import { toCamelCase, getTypeName, getColumnFieldName, tableKey, getRelFieldName, getVisibleColumns } from './type-builder.js';
 
 // ─── CursorOrdering Enum ────────────────────────────────────────────────────
@@ -149,7 +150,7 @@ const BUILTIN_INPUT_SCALARS: Record<string, GraphQLInputType> = {
 function resolveInputScalarType(
   graphqlName: string,
   isList: boolean,
-  enumTypes: Map<string, GraphQLEnumType>,
+  enumTypes: Map<string, EnumLikeType>,
 ): GraphQLInputType {
   const builtin = BUILTIN_INPUT_SCALARS[graphqlName];
   if (builtin) {
@@ -173,7 +174,7 @@ function resolveInputScalarType(
 
 function columnToInputType(
   column: ColumnInfo,
-  enumTypes: Map<string, GraphQLEnumType>,
+  enumTypes: Map<string, EnumLikeType>,
   enumNames: Set<string>,
 ): GraphQLInputType {
   const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
@@ -202,7 +203,7 @@ function resolveOutputScalarType(
 function resolveOutputType(
   graphqlName: string,
   isList: boolean,
-  enumTypes?: Map<string, GraphQLEnumType>,
+  enumTypes?: Map<string, EnumLikeType>,
 ): GraphQLOutputType {
   // Check enum types first (for enum-typed columns in min/max fields)
   const enumType = enumTypes?.get(graphqlName);
@@ -339,7 +340,7 @@ export interface StreamCursorTypes {
  */
 export function buildStreamCursorTypes(
   table: TableInfo,
-  enumTypes: Map<string, GraphQLEnumType>,
+  enumTypes: Map<string, EnumLikeType>,
   enumNames: Set<string>,
 ): StreamCursorTypes {
   const typeName = getTypeName(table);
@@ -501,7 +502,7 @@ export type RelInsertInputTypes = Map<string, { objRelInsertInput: GraphQLInputO
 export function buildMutationInputTypes(
   table: TableInfo,
   objectType: GraphQLObjectType,
-  enumTypes: Map<string, GraphQLEnumType>,
+  enumTypes: Map<string, EnumLikeType>,
   enumNames: Set<string>,
   filterType?: GraphQLInputObjectType,
   orderByTypes?: Map<string, GraphQLInputObjectType>,

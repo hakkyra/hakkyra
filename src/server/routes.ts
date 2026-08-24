@@ -213,6 +213,7 @@ export function registerDocEndpoints(deps: DocEndpointsDeps): Map<string, string
             actionsGraphql: config.actionsGraphql,
             trackedFunctions: config.trackedFunctions,
             rootFieldTables,
+            pgEnumsAsScalars: config.graphql.pgEnumsAsScalars,
           });
           cachedSdl = generateGraphQLSDL(filteredSchema);
         } catch (err) {

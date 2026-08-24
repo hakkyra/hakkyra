@@ -372,6 +372,7 @@ export async function loadConfig(
       queryDepth: serverConfig?.graphql?.query_depth,
       maxLimit: serverConfig?.graphql?.max_limit,
       maxBatchSize: serverConfig?.graphql?.max_batch_size,
+      pgEnumsAsScalars: serverConfig?.graphql?.pg_enums_as_scalars,
     }),
     sql: stripUndefined({
       arrayAnyThreshold: serverConfig?.sql?.array_any_threshold,
