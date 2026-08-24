@@ -2318,6 +2318,57 @@ before changing any of the three.
 Both sides were observed directly: the handler's raw HTTP body carries the
 array, the GraphQL response carries the string.
 
+### P13.17 — Event delivery waits out the pg-boss poll instead of waking the worker (P0)
+- [x] Capture the worker id returned by `boss.work()`
+- [x] Call `boss.notifyWorker(id)` after enqueuing, so delivery starts at once
+- [x] Check whether scheduled events and cron triggers need the same — no:
+      scheduled events deliver directly from their own poller (no pg-boss
+      worker), and cron trigger jobs are enqueued inside pg-boss's scheduler
+      loop (minute granularity), where a ≤2s pickup delay is immaterial
+
+Every event hop costs up to one pg-boss polling interval. pg-boss defaults
+`pollingInterval` to 2000ms (`node_modules/pg-boss/dist/attorney.js:208`) and
+`src/shared/pg-boss-manager.ts:31` constructs it without
+`pollingIntervalSeconds`.
+
+Measured in acme: a campaign completes a consistent **3.94s** after the
+deposit row is written — two chained event hops, ~2s each, constant to within
+20ms across runs, which is the signature of a fixed poll rather than variable
+work. Under Hasura the same chain completed promptly.
+
+The wait is avoidable without touching the architecture. pg-boss exposes
+`notifyWorker(workerId)` (`dist/index.d.ts:34`), and `Worker.notify()` aborts
+the in-flight delay:
+
+```js
+notify() {
+    this.beenNotified = true;
+    if (this.loopDelayPromise) {
+        this.loopDelayPromise.abort();
+    }
+}
+```
+
+So the worker can be woken the moment a job is enqueued rather than waiting out
+the interval. `boss.work()` already returns the worker id as a `Promise<string>`
+— `src/shared/job-queue/pg-boss-adapter.ts:57` awaits it and drops the value.
+Keeping it and adding a `notify(queue)` to the JobQueue interface is enough.
+
+The pipeline already has the signal it needs:
+
+```
+PG trigger → event_log → pg-listen NOTIFY → pg-boss → webhook
+                          instant            waits out the poll
+```
+
+`enqueuePendingEvents` reacts to the PG NOTIFY immediately; only the handoff to
+the worker is delayed. Note this is an in-process wake, not PostgreSQL
+LISTEN/NOTIFY — it works because the enqueue and the worker share a process.
+That holds for the current single-process design; a multi-instance deployment
+would still fall back to the poll for jobs enqueued by another instance, which
+is an argument for lowering `pollingIntervalSeconds` as well (floor 500ms, per
+`MIN_POLLING_INTERVAL_MS`).
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.

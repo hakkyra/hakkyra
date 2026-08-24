@@ -27,6 +27,8 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
 export class PgBossAdapter implements JobQueue {
   private boss: PgBoss;
   private gracefulShutdownMs: number;
+  /** Worker ids per queue, so send() can wake them instead of waiting out the poll interval. */
+  private queueWorkerIds = new Map<string, string[]>();
 
   constructor(connectionString: string, gracefulShutdownMs: number = 10000, schemaName: string = 'hakkyra') {
     this.gracefulShutdownMs = gracefulShutdownMs;
@@ -47,14 +49,21 @@ export class PgBossAdapter implements JobQueue {
   }
 
   async send<T extends JobData>(queue: string, data: T): Promise<string | null> {
-    return this.boss.send(queue, data);
+    const jobId = await this.boss.send(queue, data);
+    if (jobId !== null) {
+      // Wake in-process workers so delivery starts now, not at the next poll
+      for (const workerId of this.queueWorkerIds.get(queue) ?? []) {
+        this.boss.notifyWorker(workerId);
+      }
+    }
+    return jobId;
   }
 
   async work<T extends JobData>(queue: string, handler: JobHandler<T>, options?: WorkOptions): Promise<void> {
     const workOptions = options?.concurrency && options.concurrency > 1
       ? { localConcurrency: options.concurrency }
       : {};
-    await this.boss.work<T>(queue, workOptions, async (pgBossJobs: PgBossJob<T>[]) => {
+    const workerId = await this.boss.work<T>(queue, workOptions, async (pgBossJobs: PgBossJob<T>[]) => {
       // Map pg-boss Job objects to our abstract Job type
       const jobs: Job<T>[] = pgBossJobs.map((j) => ({
         id: j.id,
@@ -63,6 +72,12 @@ export class PgBossAdapter implements JobQueue {
       }));
       await handler(jobs);
     });
+    const ids = this.queueWorkerIds.get(queue);
+    if (ids) {
+      ids.push(workerId);
+    } else {
+      this.queueWorkerIds.set(queue, [workerId]);
+    }
   }
 
   async createQueue(name: string, options?: QueueOptions): Promise<void> {
