@@ -1872,6 +1872,106 @@ Hakkyra's InsertInput and SetInput types include ALL introspected columns regard
 
 ---
 
+## Phase 13: Acme Migration Findings (2026-08-24)
+
+Found while replacing Hasura with Hakkyra in the acme repo. The integration
+suite runs against a real deployment: 184 passing, 3 pending, 50 failing.
+Deployment, schema generation and the 40 Hasura REST endpoints all work — root
+field parity is exact (475 queries / 952 mutations, matching Hasura live).
+Everything below is a behavioural difference from Hasura, not a startup failure.
+
+Note on failure counts: 13 of the 50 are `"before all"` hook failures, and each
+one fails its whole describe block, so defects are far fewer than failures.
+
+### P13.1 — PG enums need a Hasura-compatible scalar mode (P0)
+- [ ] Add `graphql.pg_enums_as_scalars` (default true for Hasura compatibility)
+
+`src/schema/generator.ts:132-149` builds a `GraphQLEnumType` for every PG enum
+unconditionally. The README documents this as an intentional improvement over
+Hasura, and it is a good default for greenfield users — but there is no escape
+hatch, which makes Hakkyra non-adoptable for an existing Hasura deployment.
+
+Two distinct breaks:
+
+1. **Query syntax.** Hasura exposes PG enums as opaque String scalars, so
+   clients inline `_set: {status: "ENABLED"}`. Against a real enum a
+   `StringValue` literal is a type error:
+   `Enum "FunctionStatus" cannot represent non-enum value: "ENABLED".`
+   Accounts for 18 of the 50 failures. (Variables still work — only inlined
+   literals break — because `parseValue` resolves a string by name.)
+
+2. **Returned values change.** `generator.ts:138` upper-cases enum value names
+   and graphql-js serialises output by name. `payment_state` is declared
+   lowercase (`'created'`, `'pending'`, `'cancelled'`), so a client reading
+   `payment.state` receives `"CREATED"` where Hasura returned `"created"`.
+   This is a data-level break, and it is silent — no error, just different
+   values.
+
+Blast radius in acme: 13 PG enum types backing real columns, `payment_state`
+alone on 6. Affects external API consumers (the backoffice frontend is a
+separate repo), so it cannot be fixed on the server side alone.
+
+### P13.2 — `stringify_numeric_types` is not applied to aggregates (P0)
+- [ ] Apply `shouldCastToText` to aggregate output
+- [ ] Apply it to native query / logical model fields
+
+`shouldCastToText` is only wired in at `src/sql/select.ts:536` (plain columns)
+and `:559` (computed fields). Aggregate results bypass it, so with
+`stringify_numeric_types: true` a `sum(numeric)` returns a JSON number and a
+`count` (int8) returns `0` rather than `"0"`.
+
+Observed: `expected 3000 to be a string`, `expected +0 to equal '0'`.
+
+### P13.3 — Action permissions ignore inherited roles (P0)
+- [ ] Expand inherited roles in `checkActionPermission`
+
+`src/actions/permissions.ts:20` does a flat
+`action.permissions.some((p) => session.allowedRoles.includes(p.role))`.
+Inherited roles are never expanded, so a session whose role is an inherited
+role is denied actions granted to its constituent roles.
+
+`src/permissions/lookup.ts:353` already implements this expansion for table
+permissions — the fix is to reuse it.
+
+Observed: `campaignQuery` permits role `campaign`; a JWT carrying
+`["backoffice_administrator", "backoffice", "administrator"]` is rejected even
+though `backoffice_administrator` has `role_set: [backoffice, campaign,
+administrator, manager]`. Hasura allows it.
+
+### P13.4 — One-off scheduled events (feature)
+- [ ] Support scheduling a single future webhook, Hasura `hdb_scheduled_events` equivalent
+- [ ] Expose invocation results for scheduled events
+
+Only recurring cron triggers exist. Hasura lets a client insert into
+`hdb_catalog.hdb_scheduled_events` to fire one webhook at a chosen time, with
+its own `retry_conf` and payload.
+
+This is the only finding that blocks **production** code rather than tests:
+acme's referon affiliate router schedules one-off events on registration.
+
+### P13.5 — Event log does not retain webhook response bodies (feature)
+- [ ] Store the webhook response body alongside `response_status`
+
+`src/events/schema.ts:36` keeps `response_status INTEGER` and `last_error` only.
+Hasura's `event_invocation_logs.response` holds the full response, which is how
+callers assert that an event handler produced the right output. There is
+currently no way to recover a handler's output after delivery.
+
+### P13.6 — Action errors carry `locations` and `path` (minor)
+- [ ] Match Hasura's action error shape
+
+Hasura returns action errors as `{ message, extensions }`. Hakkyra adds
+graphql-js's default `locations` and `path`, which changes the shape every
+client's error handling sees.
+
+### P13.7 — Re-triage after the above
+- [ ] Re-run the acme integration suite once P13.1-P13.3 land
+
+About 24 failures are not yet attributed. Several look like enum fallout
+(`Invalid input` on Deposits/Withdrawal, where `payment_state` is an enum), so
+they should not be chased until P13.1 is resolved — otherwise the work goes
+into cascades rather than causes.
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.
