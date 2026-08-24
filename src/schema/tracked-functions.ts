@@ -100,7 +100,7 @@ const PG_ARG_TYPE_MAP: Record<string, string> = {
   bool: 'Boolean',
   boolean: 'Boolean',
   uuid: 'Uuid',
-  json: 'json',
+  json: 'Json',
   jsonb: 'Jsonb',
   timestamp: 'Timestamp',
   'timestamp without time zone': 'Timestamp',

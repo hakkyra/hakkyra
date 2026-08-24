@@ -92,6 +92,7 @@ const SCALAR_MAP: Record<string, GraphQLOutputType & GraphQLInputType> = {
   // Canonical custom scalar names
   uuid: customScalars['Uuid']!,
   Uuid: customScalars['Uuid']!,
+  Json: customScalars['Json']!,
   json: customScalars['json']!,
   Jsonb: customScalars['Jsonb']!,
   jsonb: customScalars['jsonb']!,

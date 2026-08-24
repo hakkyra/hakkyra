@@ -2186,6 +2186,37 @@ action-relationship path added in P13.8:
 Found in acme's `searchPlayers` spec, in a case named "tests relation
 configuration through action response".
 
+### P13.12 — No `Json` scalar; pg `json` columns get a lowercase name (P0) ✅
+- [x] Map pg `json` to `Json`, matching `jsonb` -> `Jsonb`
+- [x] Check the rest of the type map for the same casing inconsistency
+
+`src/introspection/type-map.ts:124-125`:
+
+```js
+json:  { name: 'json',  isCustomScalar: true },   // lowercase
+jsonb: { name: 'Jsonb', isCustomScalar: true },   // PascalCase
+```
+
+Every other custom scalar is PascalCase (`Numeric`, `Uuid`, `Timestamptz`,
+`Jsonb`), and Hasura's graphql-default naming convention produces `Json` for
+pg `json`. Hakkyra emits no `Json` type at all, so a query written against
+Hasura fails validation:
+
+```
+POST /api/rest/functions/creditReward
+400 {"path":"$","error":"Unknown type \"Json\". Did you mean \"Jsonb\", \"json\", or \"jsonb\"?",
+     "code":"validation-failed"}
+```
+
+The query is `mutation creditReward ($code: String, $uniqKey: String, $properties: Json)`.
+
+Note the lowercase `json`/`jsonb` that do exist come from `actions.graphql`
+custom scalar declarations, which is why the error message suggests them — they
+are not substitutes for the column scalar.
+
+Found in acme: a reward-crediting function fails, surfacing as
+`Operation failed` two layers up.
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.

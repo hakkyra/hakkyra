@@ -116,7 +116,7 @@ const PG_SCALAR_MAP: Record<string, string> = {
   bpchar: 'Bpchar',
   bool: 'Boolean',
   boolean: 'Boolean',
-  json: 'json',
+  json: 'Json',
   jsonb: 'Jsonb',
   timestamp: 'Timestamptz',
   timestamptz: 'Timestamptz',

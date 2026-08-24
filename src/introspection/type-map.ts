@@ -12,7 +12,7 @@ export type GraphQLScalarName =
   | 'Bigint'
   | 'Numeric'
   | 'Uuid'
-  | 'json'
+  | 'Json'
   | 'Jsonb'
   | 'Timestamptz'
   | 'Timestamp'
@@ -121,7 +121,7 @@ const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> =
   uuid: { name: 'Uuid', isCustomScalar: true },
 
   // JSON
-  json: { name: 'json', isCustomScalar: true },
+  json: { name: 'Json', isCustomScalar: true },
   jsonb: { name: 'Jsonb', isCustomScalar: true },
 
   // Timestamps & dates
@@ -144,14 +144,14 @@ const PG_TO_GRAPHQL: Record<string, { name: string; isCustomScalar: boolean }> =
   cidr: { name: 'Inet', isCustomScalar: true },
   macaddr: { name: 'String', isCustomScalar: false },
 
-  // Geometric (expose as json for now)
-  point: { name: 'json', isCustomScalar: true },
-  line: { name: 'json', isCustomScalar: true },
-  lseg: { name: 'json', isCustomScalar: true },
-  box: { name: 'json', isCustomScalar: true },
-  path: { name: 'json', isCustomScalar: true },
-  polygon: { name: 'json', isCustomScalar: true },
-  circle: { name: 'json', isCustomScalar: true },
+  // Geometric (expose as Json for now)
+  point: { name: 'Json', isCustomScalar: true },
+  line: { name: 'Json', isCustomScalar: true },
+  lseg: { name: 'Json', isCustomScalar: true },
+  box: { name: 'Json', isCustomScalar: true },
+  path: { name: 'Json', isCustomScalar: true },
+  polygon: { name: 'Json', isCustomScalar: true },
+  circle: { name: 'Json', isCustomScalar: true },
 
   // OID
   oid: { name: 'Int', isCustomScalar: false },

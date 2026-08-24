@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { GraphQLSchema, GraphQLObjectType, GraphQLInputObjectType, GraphQLEnumType, GraphQLNonNull, GraphQLList, GraphQLScalarType } from 'graphql';
+import { GraphQLSchema, GraphQLObjectType, GraphQLInputObjectType, GraphQLEnumType, GraphQLNonNull, GraphQLList, GraphQLScalarType, parse, validate } from 'graphql';
 import { generateSchema } from '../src/schema/generator.js';
 import { introspectDatabase } from '../src/introspection/introspector.js';
 import { mergeSchemaModel, resolveTableEnums } from '../src/introspection/merger.js';
@@ -418,6 +418,12 @@ describe('GraphQL Schema Generation', () => {
     it('should register json scalar type', () => {
       const typeMap = schema.getTypeMap();
       expect(typeMap['json']).toBeDefined();
+    });
+
+    it('should register Json scalar type for pg json columns (P13.12)', () => {
+      const typeMap = schema.getTypeMap();
+      expect(typeMap['Json']).toBeDefined();
+      expect(typeMap['Json']).toBeInstanceOf(GraphQLScalarType);
     });
 
     it('should register Numeric scalar type', () => {
@@ -1223,16 +1229,17 @@ describe('GraphQL Schema Generation', () => {
       expect(innerType.name).toBe('Jsonb');
     });
 
-    it('should expose playerProfile as a query field returning json!', () => {
+    it('should expose playerProfile as a query field returning Json!', () => {
       const queryType = schema.getQueryType()!;
       const fields = queryType.getFields();
       expect(fields['playerProfile']).toBeDefined();
-      // Return type should be json! (NonNull<json>)
+      // Return type should be Json! (NonNull<Json>) — Hasura's graphql-default
+      // naming produces Json for pg json, matching Jsonb (P13.12)
       const returnType = fields['playerProfile'].type;
       expect(returnType).toBeInstanceOf(GraphQLNonNull);
       const innerType = (returnType as GraphQLNonNull<any>).ofType;
       expect(innerType).toBeInstanceOf(GraphQLScalarType);
-      expect(innerType.name).toBe('json');
+      expect(innerType.name).toBe('Json');
     });
 
     it('should have args input type for scalar-returning functions (non-null, P11.6)', () => {
@@ -1294,13 +1301,13 @@ describe('GraphQL Schema Generation', () => {
       expect(argsFields['pMetadata'].type.toString()).toBe('Jsonb');
     });
 
-    it('should use json scalar for json-typed function args', () => {
+    it('should use Json scalar for json-typed function args (P13.12)', () => {
       const queryType = schema.getQueryType()!;
       const field = queryType.getFields()['searchClientsAdvanced'];
       const argsType = (field.args.find((a) => a.name === 'args')!.type as GraphQLNonNull<GraphQLInputObjectType>).ofType as GraphQLInputObjectType;
       const argsFields = argsType.getFields();
       expect(argsFields['pExtra']).toBeDefined();
-      expect(argsFields['pExtra'].type.toString()).toBe('json');
+      expect(argsFields['pExtra'].type.toString()).toBe('Json');
     });
 
     it('should use Bigint scalar for bigint-typed function args', () => {
@@ -1319,6 +1326,46 @@ describe('GraphQL Schema Generation', () => {
       const argsFields = argsType.getFields();
       expect(argsFields['pBrandCode']).toBeDefined();
       expect(argsFields['pBrandCode'].type.toString()).toBe('Bpchar');
+    });
+  });
+
+  describe('Json scalar naming (P13.12)', () => {
+    it('pgTypeToGraphQL maps pg json to Json, matching jsonb -> Jsonb', async () => {
+      const { pgTypeToGraphQL } = await import('../src/introspection/type-map.js');
+      expect(pgTypeToGraphQL('json', false)).toEqual({
+        name: 'Json',
+        isList: false,
+        isCustomScalar: true,
+      });
+      expect(pgTypeToGraphQL('jsonb', false).name).toBe('Jsonb');
+    });
+
+    it('pgTypeToGraphQL maps geometric types to the same Json scalar', async () => {
+      const { pgTypeToGraphQL } = await import('../src/introspection/type-map.js');
+      for (const geo of ['point', 'line', 'lseg', 'box', 'path', 'polygon', 'circle']) {
+        expect(pgTypeToGraphQL(geo, false).name, geo).toBe('Json');
+      }
+    });
+
+    it('every custom scalar in the type map has a PascalCase name', async () => {
+      const { getCustomScalarNames } = await import('../src/introspection/type-map.js');
+      for (const name of getCustomScalarNames()) {
+        expect(name.charAt(0), name).toBe(name.charAt(0).toUpperCase());
+      }
+    });
+
+    it('a query declaring a Json variable passes validation (acme repro)', () => {
+      // Against Hasura, `$properties: Json` validates because graphql-default
+      // naming produces a Json scalar for pg json. Hakkyra emitted no Json
+      // type at all, failing with: Unknown type "Json".
+      const doc = parse(`
+        query($extra: Json) {
+          searchClientsAdvanced(args: { pExtra: $extra }) {
+            id
+          }
+        }
+      `);
+      expect(validate(schema, doc)).toEqual([]);
     });
   });
 

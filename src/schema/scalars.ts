@@ -231,6 +231,18 @@ const parseLiteralJSON: GraphQLScalarLiteralParser<unknown> = (ast) =>
   parseJSONLiteral(ast as unknown as Parameters<typeof parseJSONLiteral>[0]);
 
 export const GraphQLJson = new GraphQLScalarType({
+  name: 'Json',
+  description: 'PostgreSQL JSON scalar. Accepts any valid JSON value.',
+  serialize: serializeJSON,
+  parseValue: parseValueJSON,
+  parseLiteral: parseLiteralJSON,
+});
+
+/**
+ * Lowercase `json` scalar — Hasura uses this name for action argument types
+ * backed by PG function arguments (e.g., `myAction(data: json!)`).
+ */
+export const GraphQLJsonLower = new GraphQLScalarType({
   name: 'json',
   description: 'Arbitrary JSON scalar. Accepts any valid JSON value.',
   serialize: serializeJSON,
@@ -519,7 +531,8 @@ export const customScalars: Record<string, GraphQLScalarType> = {
   Timestamp: GraphQLTimestamp,
   Date: GraphQLDate,
   Time: GraphQLTime,
-  json: GraphQLJson,
+  Json: GraphQLJson,
+  json: GraphQLJsonLower,
   Jsonb: GraphQLJsonb,
   jsonb: GraphQLJsonbLower,
   Smallint: GraphQLSmallint,
