@@ -21,7 +21,7 @@ describe('Query Collections & Hasura REST Endpoints', () => {
       expect(config.queryCollections).toBeDefined();
       expect(config.queryCollections.length).toBe(1);
       expect(config.queryCollections[0].name).toBe('allowed_queries');
-      expect(config.queryCollections[0].queries.size).toBe(8);
+      expect(config.queryCollections[0].queries.size).toBe(11);
       expect(config.queryCollections[0].queries.has('GetClientById')).toBe(true);
       expect(config.queryCollections[0].queries.has('ListClients')).toBe(true);
       expect(config.queryCollections[0].queries.has('GetClientAccounts')).toBe(true);
@@ -36,7 +36,7 @@ describe('Query Collections & Hasura REST Endpoints', () => {
       const cleanDir = await getCleanMetadataDir();
       const config = await loadConfig(cleanDir, SERVER_CONFIG_PATH);
       expect(config.hasuraRestEndpoints).toBeDefined();
-      expect(config.hasuraRestEndpoints.length).toBe(8);
+      expect(config.hasuraRestEndpoints.length).toBe(12);
 
       const ep = config.hasuraRestEndpoints.find((e) => e.name === 'get_client_by_id');
       expect(ep).toBeDefined();
@@ -219,6 +219,165 @@ describe('Query Collections & Hasura REST Endpoints', () => {
         const body = await res.json() as Record<string, unknown>;
         expect(body).not.toHaveProperty('data');
         expect(Array.isArray(body['clients'])).toBe(true);
+      });
+    });
+
+    // ── P13.10: query param type coercion ───────────────────────────────
+    // Query strings and route params are always strings; Hasura coerces them
+    // to the types the named query's variable definitions declare before
+    // executing. Boolean, Int, Float, and lists are coerced; String and
+    // custom scalars are passed through untouched.
+
+    describe('query parameter type coercion (P13.10)', () => {
+      it('coerces a query param to Int', async () => {
+        const addr = getServerAddress();
+        const res = await fetch(`${addr}/api/rest/api/v1/coerce/clients?limit=2`, {
+          headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json() as Record<string, unknown>;
+        const clients = body['clients'] as Array<Record<string, unknown>>;
+        expect(Array.isArray(clients)).toBe(true);
+        expect(clients.length).toBe(2);
+      });
+
+      it('coerces a route param to Int', async () => {
+        const addr = getServerAddress();
+        const res = await fetch(`${addr}/api/rest/api/v1/coerce/clients-limited/2`, {
+          headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json() as Record<string, unknown>;
+        const clients = body['clients'] as Array<Record<string, unknown>>;
+        expect(Array.isArray(clients)).toBe(true);
+        expect(clients.length).toBe(2);
+      });
+
+      it('coerces a query param to Boolean (true)', async () => {
+        const addr = getServerAddress();
+        const res = await fetch(`${addr}/api/rest/api/v1/coerce/accounts?active=true`, {
+          headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json() as Record<string, unknown>;
+        const accounts = body['account'] as Array<Record<string, unknown>>;
+        expect(Array.isArray(accounts)).toBe(true);
+        // All seeded accounts are active
+        expect(accounts.length).toBeGreaterThanOrEqual(4);
+        for (const account of accounts) {
+          expect(account.active).toBe(true);
+        }
+      });
+
+      it('coerces a query param to Boolean (false)', async () => {
+        const addr = getServerAddress();
+        const res = await fetch(`${addr}/api/rest/api/v1/coerce/accounts?active=false`, {
+          headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json() as Record<string, unknown>;
+        // No seeded account is inactive
+        expect(body['account']).toEqual([]);
+      });
+
+      it('coerces repeated query params to a list of Int', async () => {
+        const addr = getServerAddress();
+        const res = await fetch(
+          `${addr}/api/rest/api/v1/coerce/clients-by-trust?levels=1&levels=2`,
+          { headers: { 'x-hasura-admin-secret': ADMIN_SECRET } },
+        );
+        expect(res.status).toBe(200);
+        const body = await res.json() as Record<string, unknown>;
+        const clients = body['clients'] as Array<Record<string, unknown>>;
+        const usernames = clients.map((c) => c.username).sort();
+        expect(usernames).toEqual(['alice', 'bob']);
+      });
+
+      it('wraps a single query param value into a list for list-typed variables', async () => {
+        const addr = getServerAddress();
+        const res = await fetch(
+          `${addr}/api/rest/api/v1/coerce/clients-by-trust?levels=3`,
+          { headers: { 'x-hasura-admin-secret': ADMIN_SECRET } },
+        );
+        expect(res.status).toBe(200);
+        const body = await res.json() as Record<string, unknown>;
+        const clients = body['clients'] as Array<Record<string, unknown>>;
+        expect(clients.length).toBe(1);
+        expect(clients[0].username).toBe('diana');
+      });
+
+      it('leaves non-numeric values for Int variables alone so validation still rejects them', async () => {
+        const addr = getServerAddress();
+        const res = await fetch(`${addr}/api/rest/api/v1/coerce/clients?limit=abc`, {
+          headers: { 'x-hasura-admin-secret': ADMIN_SECRET },
+        });
+        expect(res.status).toBe(400);
+        const body = await res.json() as { path?: string; code?: string };
+        expect(body.path).toBe('$');
+        expect(body.code).toBe('validation-failed');
+      });
+    });
+
+    describe('coerceRestVariables unit behavior (P13.10)', () => {
+      const load = async () => {
+        const mod = await import('../src/rest/hasura-endpoints.js') as Record<string, unknown>;
+        const coerce = mod['coerceRestVariables'] as (
+          variables: Record<string, unknown>,
+          queryString: string,
+        ) => Record<string, unknown>;
+        expect(coerce).toBeTypeOf('function');
+        return coerce;
+      };
+
+      it('coerces Boolean, Int, and Float strings to their declared types', async () => {
+        const coerce = await load();
+        const query = 'query Q($b: Boolean!, $i: Int, $f: Float) { x }';
+        expect(coerce({ b: 'true', i: '42', f: '1.5' }, query)).toEqual({
+          b: true,
+          i: 42,
+          f: 1.5,
+        });
+        expect(coerce({ b: 'false' }, query)).toEqual({ b: false });
+      });
+
+      it('coerces list-typed variables element-wise and wraps scalars', async () => {
+        const coerce = await load();
+        const query = 'query Q($ints: [Int!], $floats: [Float]) { x }';
+        expect(coerce({ ints: ['1', '2'] }, query)).toEqual({ ints: [1, 2] });
+        expect(coerce({ ints: '7' }, query)).toEqual({ ints: [7] });
+        expect(coerce({ floats: ['0.5'] }, query)).toEqual({ floats: [0.5] });
+      });
+
+      it('leaves String, ID, and custom scalar variables untouched', async () => {
+        const coerce = await load();
+        const query = 'query Q($s: String, $id: ID!, $u: Uuid!, $n: numeric) { x }';
+        expect(coerce({ s: 'true', id: '5', u: '00000000-0000-0000-0000-000000000001', n: '1.5' }, query)).toEqual({
+          s: 'true',
+          id: '5',
+          u: '00000000-0000-0000-0000-000000000001',
+          n: '1.5',
+        });
+      });
+
+      it('leaves undeclared variables and non-string values untouched', async () => {
+        const coerce = await load();
+        const query = 'query Q($i: Int) { x }';
+        expect(coerce({ i: 3, extra: 'true' }, query)).toEqual({ i: 3, extra: 'true' });
+      });
+
+      it('leaves non-coercible strings untouched for GraphQL validation to reject', async () => {
+        const coerce = await load();
+        const query = 'query Q($b: Boolean, $i: Int, $f: Float) { x }';
+        expect(coerce({ b: 'yes', i: '1.5', f: 'abc' }, query)).toEqual({
+          b: 'yes',
+          i: '1.5',
+          f: 'abc',
+        });
+      });
+
+      it('returns variables unchanged when the query string is unparseable', async () => {
+        const coerce = await load();
+        expect(coerce({ a: '1' }, 'not a graphql query {{{')).toEqual({ a: '1' });
       });
     });
 

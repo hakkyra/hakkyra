@@ -78,3 +78,44 @@
       collection_name: allowed_queries
       query_name: ListActiveServicePlans
   comment: "List all active service plans"
+
+# Endpoints for REST query param type coercion (P13.10)
+- name: rest_coerce_clients
+  url: /api/v1/coerce/clients
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: RestCoerceClients
+  comment: "Clients with an Int limit variable from query params"
+
+- name: rest_coerce_clients_limited
+  url: /api/v1/coerce/clients-limited/:limit
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: RestCoerceClients
+  comment: "Clients with an Int limit variable from a route param"
+
+- name: rest_coerce_accounts
+  url: /api/v1/coerce/accounts
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: RestCoerceAccounts
+  comment: "Accounts filtered by a Boolean variable from query params"
+
+- name: rest_coerce_clients_by_trust
+  url: /api/v1/coerce/clients-by-trust
+  methods:
+    - GET
+  definition:
+    query:
+      collection_name: allowed_queries
+      query_name: RestCoerceClientsByTrust
+  comment: "Clients filtered by an [Int!]! variable from query params"

@@ -136,3 +136,32 @@
               }
             }
           }
+
+      # Queries with non-String variables for REST query param coercion (P13.10)
+      - name: RestCoerceClients
+        query: |
+          query RestCoerceClients($limit: Int!) {
+            clients(limit: $limit) {
+              id
+              username
+            }
+          }
+
+      - name: RestCoerceAccounts
+        query: |
+          query RestCoerceAccounts($active: Boolean!) {
+            account(where: {active: {_eq: $active}}) {
+              id
+              active
+            }
+          }
+
+      - name: RestCoerceClientsByTrust
+        query: |
+          query RestCoerceClientsByTrust($levels: [Int!]!) {
+            clients(where: {trustLevel: {_in: $levels}}) {
+              id
+              username
+              trustLevel
+            }
+          }
