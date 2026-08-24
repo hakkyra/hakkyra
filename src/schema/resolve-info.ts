@@ -941,6 +941,53 @@ export function parseAggregateNodesInfo(
   return null;
 }
 
+/** Keys of AggregateSelection that carry per-column aggregate functions. */
+const AGGREGATE_COLUMN_FNS = [
+  'sum', 'avg', 'min', 'max',
+  'stddev', 'stddevPop', 'stddevSamp', 'variance', 'varPop', 'varSamp',
+] as const;
+
+export type AggregateFunctionColumns = Partial<Record<(typeof AGGREGATE_COLUMN_FNS)[number], string[]>>;
+
+/**
+ * Extract the columns requested under each aggregate function field,
+ * e.g. `aggregate { sum { balance } min { createdAt } }` →
+ * `{ sum: ['balance'], min: ['created_at'] }` (PG column names).
+ *
+ * Only real table columns are returned; computed fields are handled
+ * separately via AggregateComputedFieldRef.
+ */
+export function parseAggregateFunctionColumns(
+  info: GraphQLResolveInfo,
+  table: TableInfo,
+): AggregateFunctionColumns {
+  const result: AggregateFunctionColumns = {};
+  const fieldNode = info.fieldNodes[0];
+  if (!fieldNode.selectionSet) return result;
+
+  const columnByFieldName = new Map<string, string>();
+  for (const col of table.columns) {
+    columnByFieldName.set(getColumnFieldName(table, col.name), col.name);
+  }
+
+  for (const sel of fieldNode.selectionSet.selections) {
+    if (sel.kind !== 'Field' || sel.name.value !== 'aggregate' || !sel.selectionSet) continue;
+    for (const aggSel of sel.selectionSet.selections) {
+      if (aggSel.kind !== 'Field' || !aggSel.selectionSet) continue;
+      const fn = AGGREGATE_COLUMN_FNS.find((f) => f === aggSel.name.value);
+      if (!fn) continue;
+      const cols: string[] = result[fn] ?? [];
+      for (const colSel of aggSel.selectionSet.selections) {
+        if (colSel.kind !== 'Field') continue;
+        const pgName = columnByFieldName.get(colSel.name.value);
+        if (pgName && !cols.includes(pgName)) cols.push(pgName);
+      }
+      if (cols.length > 0) result[fn] = cols;
+    }
+  }
+  return result;
+}
+
 /**
  * Extract `columns` and `distinct` arguments from the `count` field
  * inside `aggregate { count(columns: ..., distinct: ...) }`.

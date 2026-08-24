@@ -70,6 +70,11 @@ export function shouldCastToText(udtName: string): boolean {
   return baseType in stringifyNumericOverrides;
 }
 
+/** True when stringify_numeric_types is enabled via configureStringifyNumericTypes(true). */
+export function isStringifyNumericEnabled(): boolean {
+  return stringifyNumericOverrides !== null;
+}
+
 /**
  * Mapping from PostgreSQL udt_name (without leading underscore for arrays)
  * to GraphQL scalar name and whether it's custom.

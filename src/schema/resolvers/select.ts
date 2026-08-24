@@ -11,7 +11,7 @@ import type {
 import type { AggregateSelection, AggregateComputedFieldRef } from '../../sql/select.js';
 import { compileSelect, compileSelectByPk, compileSelectAggregate } from '../../sql/select.js';
 import { toCamelCase } from '../type-builder.js';
-import { parseResolveInfo, parseAggregateNodesInfo, parseAggregateCountArgs } from '../resolve-info.js';
+import { parseResolveInfo, parseAggregateNodesInfo, parseAggregateCountArgs, parseAggregateFunctionColumns } from '../resolve-info.js';
 import {
   type ResolverContext,
   permissionDenied,
@@ -291,6 +291,16 @@ export function makeSelectAggregateResolver(
       },
     };
 
+    // Column aggregates actually requested in the selection (sum { balance } etc.),
+    // filtered by the role's permitted columns.
+    const requestedAggs = parseAggregateFunctionColumns(info, table);
+    const allowedAggCols = perm && perm.columns !== '*' ? new Set(perm.columns) : null;
+    const aggRecord = aggregate as unknown as Record<string, unknown>;
+    for (const [fn, cols] of Object.entries(requestedAggs)) {
+      const filtered = allowedAggCols ? cols.filter((c) => allowedAggCols.has(c)) : cols;
+      if (filtered.length > 0) aggRecord[fn] = filtered;
+    }
+
     // Build computed field refs for aggregation
     const numericCFRefs: AggregateComputedFieldRef[] = [];
     if (table.computedFields) {
@@ -302,27 +312,21 @@ export function makeSelectAggregateResolver(
         if (!fn || fn.isSetReturning) continue;
         const NUMERIC_PG_RETURN = new Set(['int2', 'smallint', 'int4', 'integer', 'int8', 'bigint', 'float4', 'real', 'float8', 'double precision', 'numeric', 'serial', 'serial4', 'serial8', 'bigserial', 'oid']);
         if (NUMERIC_PG_RETURN.has(fn.returnType)) {
-          numericCFRefs.push({ name: toCamelCase(cf.name), functionName: cf.function.name, schema: fnSchema });
+          numericCFRefs.push({ name: toCamelCase(cf.name), functionName: cf.function.name, schema: fnSchema, returnType: fn.returnType });
         }
       }
     }
 
-    // When distinctOn is present, also request sum/avg/stddev/variance for numeric columns
+    // When distinctOn is present, fall back to all numeric columns for any
+    // aggregate function the selection parse did not fill in.
     if (distinctOn) {
       const numericCols = table.columns
         .filter((c) => isNumericColumn(c))
         .map((c) => c.name);
       if (numericCols.length > 0) {
-        aggregate.sum = numericCols;
-        aggregate.avg = numericCols;
-        aggregate.min = numericCols;
-        aggregate.max = numericCols;
-        aggregate.stddev = numericCols;
-        aggregate.stddevPop = numericCols;
-        aggregate.stddevSamp = numericCols;
-        aggregate.variance = numericCols;
-        aggregate.varPop = numericCols;
-        aggregate.varSamp = numericCols;
+        for (const fn of ['sum', 'avg', 'min', 'max', 'stddev', 'stddevPop', 'stddevSamp', 'variance', 'varPop', 'varSamp'] as const) {
+          if (!aggregate[fn]) aggRecord[fn] = numericCols;
+        }
       }
     }
 

@@ -121,6 +121,43 @@ export interface AggregateComputedFieldRef {
   name: string;
   functionName: string;
   schema: string;
+  /** PG return type of the function (for stringify_numeric_types casting). */
+  returnType?: string;
+}
+
+/**
+ * PG result type of an aggregate function applied to a column type.
+ * Used to decide text-casting under stringify_numeric_types: Hasura
+ * stringifies by the aggregate RESULT type (count → int8, sum(int4) → int8,
+ * avg → numeric/float8), not the source column type.
+ */
+function aggregateResultPgType(fn: string, udtName: string): string {
+  const base = udtName.startsWith('_') ? udtName.slice(1) : udtName;
+  switch (fn) {
+    case 'count':
+      return 'int8';
+    case 'sum':
+      if (['int2', 'smallint', 'int4', 'integer', 'serial', 'serial4'].includes(base)) return 'int8';
+      if (['int8', 'bigint', 'bigserial', 'serial8'].includes(base)) return 'numeric';
+      return base;
+    case 'avg':
+    case 'stddev':
+    case 'stddevPop':
+    case 'stddevSamp':
+    case 'variance':
+    case 'varPop':
+    case 'varSamp':
+      if (['float4', 'real', 'float8', 'double precision'].includes(base)) return 'float8';
+      return 'numeric';
+    default: // min/max keep the column type
+      return base;
+  }
+}
+
+/** Wrap an aggregate expression in a ::text cast when stringify_numeric_types applies. */
+function maybeCastAggregate(expr: string, fn: string, udtName: string | undefined): string {
+  if (!udtName) return expr;
+  return shouldCastToText(aggregateResultPgType(fn, udtName)) ? `(${expr})::text` : expr;
 }
 
 export interface AggregateSelection {
@@ -822,18 +859,19 @@ function buildAggregateRelationshipSubquery(
         (c) => `${quoteIdentifier(subAlias)}.${quoteIdentifier(c)}`,
       ).join(', ');
       const distinct = agg.count.distinct ? 'DISTINCT ' : '';
-      aggFields.push(`'count', count(${distinct}${colRefs})`);
+      aggFields.push(`'count', ${maybeCastAggregate(`count(${distinct}${colRefs})`, 'count', 'int8')}`);
     } else {
-      aggFields.push(`'count', count(*)`);
+      aggFields.push(`'count', ${maybeCastAggregate('count(*)', 'count', 'int8')}`);
     }
   }
 
   for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
     const fieldCols = agg[fn];
     if (fieldCols && fieldCols.length > 0) {
-      const colParts = fieldCols.map(
-        (c) => `'${c}', ${fn}(${quoteIdentifier(subAlias)}.${quoteIdentifier(c)})`,
-      ).join(', ');
+      const colParts = fieldCols.map((c) => {
+        const expr = `${fn}(${quoteIdentifier(subAlias)}.${quoteIdentifier(c)})`;
+        return `'${c}', ${maybeCastAggregate(expr, fn, aggColumnLookup.get(c)?.udtName)}`;
+      }).join(', ');
       aggFields.push(`'${fn}', json_build_object(${colParts})`);
     }
   }
@@ -851,9 +889,10 @@ function buildAggregateRelationshipSubquery(
   for (const { key, sqlFn } of STAT_AGG_MAP_REL) {
     const fieldCols = agg[key] as string[] | undefined;
     if (fieldCols && fieldCols.length > 0) {
-      const colParts = fieldCols.map(
-        (c) => `'${c}', ${sqlFn}(${quoteIdentifier(subAlias)}.${quoteIdentifier(c)})`,
-      ).join(', ');
+      const colParts = fieldCols.map((c) => {
+        const expr = `${sqlFn}(${quoteIdentifier(subAlias)}.${quoteIdentifier(c)})`;
+        return `'${c}', ${maybeCastAggregate(expr, key, aggColumnLookup.get(c)?.udtName)}`;
+      }).join(', ');
       aggFields.push(`'${key}', json_build_object(${colParts})`);
     }
   }
@@ -1193,9 +1232,9 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
         (c) => `${quoteIdentifier(alias)}.${quoteIdentifier(c)}`,
       ).join(', ');
       const distinct = agg.count.distinct ? 'DISTINCT ' : '';
-      aggFields.push(`'count', count(${distinct}${colRefs})`);
+      aggFields.push(`'count', ${maybeCastAggregate(`count(${distinct}${colRefs})`, 'count', 'int8')}`);
     } else {
-      aggFields.push(`'count', count(*)`);
+      aggFields.push(`'count', ${maybeCastAggregate('count(*)', 'count', 'int8')}`);
     }
   }
 
@@ -1205,13 +1244,14 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
     const allParts: string[] = [];
     if (fieldCols && fieldCols.length > 0) {
       for (const c of fieldCols) {
-        allParts.push(`'${c}', ${fn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`);
+        const expr = `${fn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`;
+        allParts.push(`'${c}', ${maybeCastAggregate(expr, fn, aggColumnLookup.get(c)?.udtName)}`);
       }
     }
     if (cfRefs && cfRefs.length > 0) {
       for (const cf of cfRefs) {
         const funcCall = `${quoteIdentifier(cf.schema)}.${quoteIdentifier(cf.functionName)}(${quoteIdentifier(alias)})`;
-        allParts.push(`'${cf.name}', ${fn}(${funcCall})`);
+        allParts.push(`'${cf.name}', ${maybeCastAggregate(`${fn}(${funcCall})`, fn, cf.returnType)}`);
       }
     }
     if (allParts.length > 0) {
@@ -1236,13 +1276,14 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
     const allParts: string[] = [];
     if (fieldCols && fieldCols.length > 0) {
       for (const c of fieldCols) {
-        allParts.push(`'${c}', ${sqlFn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`);
+        const expr = `${sqlFn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`;
+        allParts.push(`'${c}', ${maybeCastAggregate(expr, key, aggColumnLookup.get(c)?.udtName)}`);
       }
     }
     if (cfRefs && cfRefs.length > 0) {
       for (const cf of cfRefs) {
         const funcCall = `${quoteIdentifier(cf.schema)}.${quoteIdentifier(cf.functionName)}(${quoteIdentifier(alias)})`;
-        allParts.push(`'${cf.name}', ${sqlFn}(${funcCall})`);
+        allParts.push(`'${cf.name}', ${maybeCastAggregate(`${sqlFn}(${funcCall})`, key, cf.returnType)}`);
       }
     }
     if (allParts.length > 0) {
@@ -1282,9 +1323,9 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
             (c) => `${quoteIdentifier(alias)}.${quoteIdentifier(c)}`,
           ).join(', ');
           const distinct = agg.count.distinct ? 'DISTINCT ' : '';
-          innerAggFields.push(`count(${distinct}${colRefs}) AS "_count_"`);
+          innerAggFields.push(`${maybeCastAggregate(`count(${distinct}${colRefs})`, 'count', 'int8')} AS "_count_"`);
         } else {
-          innerAggFields.push(`count(*) AS "_count_"`);
+          innerAggFields.push(`${maybeCastAggregate('count(*)', 'count', 'int8')} AS "_count_"`);
         }
       }
 
@@ -1292,8 +1333,9 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
         const fieldCols = agg[fn];
         if (fieldCols && fieldCols.length > 0) {
           for (const c of fieldCols) {
+            const expr = `${fn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`;
             innerAggFields.push(
-              `${fn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)}) AS "_${fn}_${c}_"`,
+              `${maybeCastAggregate(expr, fn, aggColumnLookup.get(c)?.udtName)} AS "_${fn}_${c}_"`,
             );
           }
         }
@@ -1313,8 +1355,9 @@ export function compileSelectAggregate(opts: SelectAggregateOptions): CompiledQu
         const fieldCols = agg[key] as string[] | undefined;
         if (fieldCols && fieldCols.length > 0) {
           for (const c of fieldCols) {
+            const expr = `${sqlFn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)})`;
             innerAggFields.push(
-              `${sqlFn}(${quoteIdentifier(alias)}.${quoteIdentifier(c)}) AS "_${key}_${c}_"`,
+              `${maybeCastAggregate(expr, key, aggColumnLookup.get(c)?.udtName)} AS "_${key}_${c}_"`,
             );
           }
         }

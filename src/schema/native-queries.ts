@@ -45,6 +45,46 @@ import {
 import { OrderByDirection } from './inputs.js';
 import { randomUUID } from 'crypto';
 import { createAsyncQueue } from './subscription-resolvers.js';
+import { quoteIdentifier } from '../sql/utils.js';
+import { shouldCastToText, isStringifyNumericEnabled } from '../introspection/type-map.js';
+
+// ─── stringify_numeric_types support ────────────────────────────────────────
+
+/** Logical-model type spellings → PG udt names understood by shouldCastToText. */
+const NQ_PG_TYPE_ALIASES: Record<string, string> = {
+  int: 'int4', integer: 'int4', bigint: 'int8', decimal: 'numeric',
+  float: 'float8', double: 'float8', 'double precision': 'float8',
+};
+
+/**
+ * Build a SELECT list that casts stringify-numeric fields to text, or null
+ * when stringify is off / no field needs casting. Checked at request time so
+ * hot reload with the setting toggled works.
+ */
+function buildStringifyProjection(model: LogicalModel): string | null {
+  if (!isStringifyNumericEnabled()) return null;
+  let needsCast = false;
+  const cols = model.fields.map((f) => {
+    const t = f.type.toLowerCase();
+    const udt = NQ_PG_TYPE_ALIASES[t] ?? t;
+    if (shouldCastToText(udt)) {
+      needsCast = true;
+      return `(${quoteIdentifier(f.name)})::text AS ${quoteIdentifier(f.name)}`;
+    }
+    return quoteIdentifier(f.name);
+  });
+  return needsCast ? cols.join(', ') : null;
+}
+
+/**
+ * Wrap native query SQL so stringify-numeric logical model fields are
+ * text-cast (applied AFTER permission filtering so filters compare native
+ * types; must sit INSIDE row_to_json for subscriptions).
+ */
+export function applyStringifyProjection(sql: string, model: LogicalModel): string {
+  const proj = buildStringifyProjection(model);
+  return proj ? `SELECT ${proj} FROM (${sql}) AS "__nq_str"` : sql;
+}
 
 // ─── Type Mapping ────────────────────────────────────────────────────────────
 
@@ -507,7 +547,12 @@ function makeNativeQueryResolver(
 
       // Apply column filtering
       const allowedColumns = new Set(perm.columns);
-      const result = await queryWithSession(finalSQL, finalParams, auth, 'read');
+      const result = await queryWithSession(
+        applyStringifyProjection(finalSQL, logicalModel),
+        finalParams,
+        auth,
+        'read',
+      );
       const rows = result.rows as Record<string, unknown>[];
 
       return rows.map((row) => {
@@ -523,7 +568,12 @@ function makeNativeQueryResolver(
 
     // Admin path — no permission filtering
     const params: unknown[] = paramNames.map((name) => nqArgs[name] ?? null);
-    const result = await queryWithSession(parameterizedSQL, params, auth, 'read');
+    const result = await queryWithSession(
+      applyStringifyProjection(parameterizedSQL, logicalModel),
+      params,
+      auth,
+      'read',
+    );
     return result.rows;
   };
 }
@@ -612,14 +662,14 @@ function makeNativeQuerySubscriptionSubscribe(
           params.length,
         );
         const innerSQL = `SELECT * FROM (${parameterizedSQL}) AS __nq WHERE ${filterSQL}`;
-        compiledSQL = wrapForSubscription(innerSQL);
+        compiledSQL = wrapForSubscription(applyStringifyProjection(innerSQL, logicalModel));
         compiledParams = [...params, ...filterParams];
       } else {
-        compiledSQL = wrapForSubscription(parameterizedSQL);
+        compiledSQL = wrapForSubscription(applyStringifyProjection(parameterizedSQL, logicalModel));
         compiledParams = params;
       }
     } else {
-      compiledSQL = wrapForSubscription(parameterizedSQL);
+      compiledSQL = wrapForSubscription(applyStringifyProjection(parameterizedSQL, logicalModel));
       compiledParams = params;
     }
 

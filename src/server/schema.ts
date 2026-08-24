@@ -17,6 +17,7 @@ import type { PermissionLookup } from '../permissions/lookup.js';
 import { filterTablesForRole } from '../docs/role-filter.js';
 import { generateSchema } from '../schema/generator.js';
 import { resetComparisonTypeCache } from '../schema/filters.js';
+import { isStringifyNumericEnabled } from '../introspection/type-map.js';
 
 // ─── CJS/ESM schema reconciliation ──────────────────────────────────────────
 
@@ -44,8 +45,30 @@ export function buildCjsSchema(esmSchema: GraphQLSchema): GraphQLSchema {
 
   copyEsmToCjs(esmSchema, cjsSchema);
   applyStringCoercion(cjsSchema, cjsGraphql);
+  applyStringifyNumericSerialization(cjsSchema);
 
   return cjsSchema;
+}
+
+/**
+ * Hasura compatibility: with stringify_numeric_types enabled, aggregate
+ * results are text-cast in SQL (count → "0"). The built-in Int/Float
+ * serializers would coerce those strings back to numbers, so let string
+ * values pass through untouched. Gated at call time so hot-reload with the
+ * setting toggled works (the built-ins are shared module instances).
+ */
+function applyStringifyNumericSerialization(cjsSchema: GraphQLSchema): void {
+  const typeMap = cjsSchema.getTypeMap();
+  for (const name of ['Int', 'Float']) {
+    const scalar = typeMap[name] as
+      | (import('graphql').GraphQLScalarType & { __hakkyraStringifyPatched?: boolean })
+      | undefined;
+    if (!scalar || scalar.__hakkyraStringifyPatched) continue;
+    const orig = scalar.serialize.bind(scalar);
+    scalar.serialize = (value: unknown) =>
+      isStringifyNumericEnabled() && typeof value === 'string' && value !== '' ? value : orig(value);
+    scalar.__hakkyraStringifyPatched = true;
+  }
 }
 
 /**
