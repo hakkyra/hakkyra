@@ -9,6 +9,7 @@
 import type { Pool } from 'pg';
 import type { TableInfo, EventTriggerConfig } from '../types.js';
 import { quoteIdentifier } from '../sql/utils.js';
+import { shouldCastToText } from '../introspection/type-map.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,27 @@ export interface GeneratedEventTrigger {
 }
 
 // ─── Trigger SQL generation ────────────────────────────────────────────────
+
+/**
+ * jsonb expression for a trigger row variable (NEW/OLD). With
+ * stringify_numeric_types enabled, int8/numeric/float8/money columns are cast
+ * to text so event payloads carry them as JSON strings — matching Hasura, and
+ * preserving precision for values outside the IEEE-754 safe range.
+ */
+function rowToJsonbExpr(rowVar: 'NEW' | 'OLD', table: TableInfo): string {
+  const overrides = table.columns
+    .filter((col) => shouldCastToText(col.udtName))
+    .map((col) => {
+      const colRef = `${rowVar}.${quoteIdentifier(col.name)}`;
+      const cast = col.isArray || col.udtName.startsWith('_')
+        ? `to_jsonb((${colRef})::text[])`
+        : `(${colRef})::text`;
+      return `${quoteLiteral(col.name)}, ${cast}`;
+    });
+
+  if (overrides.length === 0) return `to_jsonb(${rowVar})`;
+  return `to_jsonb(${rowVar}) || jsonb_build_object(${overrides.join(', ')})`;
+}
 
 /**
  * Generate structured event trigger SQL for a specific table.
@@ -44,6 +66,9 @@ export function generateEventTriggerSQL(
   const updateTriggers = triggers.filter((t) => t.definition.update);
   const deleteTriggers = triggers.filter((t) => t.definition.delete);
 
+  const newJsonb = rowToJsonbExpr('NEW', table);
+  const oldJsonb = rowToJsonbExpr('OLD', table);
+
   const blocks: string[] = [];
 
   // Session vars capture
@@ -54,7 +79,7 @@ export function generateEventTriggerSQL(
     blocks.push(`  IF TG_OP = 'INSERT' THEN`);
     for (const trigger of insertTriggers) {
       blocks.push(`    INSERT INTO ${quoteIdentifier(schemaName)}.event_log(trigger_name, table_schema, table_name, operation, new_data, session_vars)
-    VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'INSERT', to_jsonb(NEW), _session_vars);`);
+    VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'INSERT', ${newJsonb}, _session_vars);`);
     }
     blocks.push(`  END IF;`);
   }
@@ -71,11 +96,11 @@ export function generateEventTriggerSQL(
         );
         blocks.push(`    IF ${conditions.join(' OR ')} THEN`);
         blocks.push(`      INSERT INTO ${quoteIdentifier(schemaName)}.event_log(trigger_name, table_schema, table_name, operation, old_data, new_data, session_vars)
-      VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'UPDATE', to_jsonb(OLD), to_jsonb(NEW), _session_vars);`);
+      VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'UPDATE', ${oldJsonb}, ${newJsonb}, _session_vars);`);
         blocks.push(`    END IF;`);
       } else {
         blocks.push(`    INSERT INTO ${quoteIdentifier(schemaName)}.event_log(trigger_name, table_schema, table_name, operation, old_data, new_data, session_vars)
-    VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'UPDATE', to_jsonb(OLD), to_jsonb(NEW), _session_vars);`);
+    VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'UPDATE', ${oldJsonb}, ${newJsonb}, _session_vars);`);
       }
     }
     blocks.push(`  END IF;`);
@@ -86,7 +111,7 @@ export function generateEventTriggerSQL(
     blocks.push(`  IF TG_OP = 'DELETE' THEN`);
     for (const trigger of deleteTriggers) {
       blocks.push(`    INSERT INTO ${quoteIdentifier(schemaName)}.event_log(trigger_name, table_schema, table_name, operation, old_data, session_vars)
-    VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'DELETE', to_jsonb(OLD), _session_vars);`);
+    VALUES (${quoteLiteral(trigger.name)}, TG_TABLE_SCHEMA, TG_TABLE_NAME, 'DELETE', ${oldJsonb}, _session_vars);`);
     }
     blocks.push(`  END IF;`);
   }

@@ -2248,6 +2248,76 @@ function following it.
 Found while verifying P13.12: with the `Json` scalar fixed, the same
 `creditReward` endpoint now fails here instead.
 
+### P13.14 — `stringify_numeric_types` is not applied to event payloads (P0)
+- [x] Stringify the same types in event trigger `new_data` / `old_data`
+- [x] Check scheduled event payloads for the same gap — no gap: scheduled event
+      payloads are user-supplied JSON delivered verbatim (no table data)
+
+With `stringify_numeric_types: true`, int8 and numeric columns still reach event
+webhooks as JSON numbers. Hasura delivered them as strings, so a handler that
+compares an event value against one it read back from the database gets a
+number-vs-string mismatch.
+
+```
+select new_data from hakkyra.event_log where trigger_name = 'fs_payment' ...
+
+{"id": 137, "player_id": 376, "amount": 500, ...}     -- Hakkyra
+{"id": "137", "player_id": "376", "amount": "500"}    -- Hasura
+```
+
+`public.payment.id` and `player_id` are `int8`, `amount` is `numeric` — the
+three types already covered by STRINGIFY_NUMERIC_OVERRIDES for column output.
+
+Found in acme: a function returns the event row unchanged, and the test
+compares it with a row read through knex (which returns int8 as string).
+
+### P13.15 — `stringify_numeric_types` IS applied to action inputs (P0)
+- [x] Restrict the override to output; forward action arguments with their JSON types
+
+The mirror image of P13.14, and the more damaging of the two. A `numeric`
+argument is handed to the action handler as a string, so any handler that
+validates its input as a number rejects the call:
+
+```
+mutation CreditBonus ($bonusKey: String!, $amount: numeric!) { ... }
+
+handler receives: {"bonusKey":"Cash_RAFCB","amount":"100"}
+handler responds: Invalid input — Expected number, received string
+```
+
+Confirmed by calling the handler directly: `amount: 100` passes validation and
+proceeds, `amount: "100"` produces exactly the error seen through Hakkyra.
+
+Hasura's `stringify_numeric_types` affects output serialisation only; inputs
+keep the types the caller sent. Handlers written against Hasura will validate
+numeric arguments as numbers, so this breaks them silently — the schema accepts
+the request and the failure appears inside the handler.
+
+### P13.16 — Non-string `extensions.code` becomes "[object Object]" (P0)
+- [x] Pass handler `extensions` values through without coercion
+
+An action handler returning a structured value in `extensions.code` has it
+stringified:
+
+```
+handler sends:    {"message":"Invalid input",
+                   "extensions":{"code":[{"code":"invalid_type","path":["amount"], ...}]}}
+client receives:  {"message":"Invalid input","extensions":{"code":"[object Object]"}}
+```
+
+A string code (`MISSING_AUTHORIZATION_HEADER`) survives intact, so the coercion
+only affects non-string values.
+
+Worth noting the obvious paths all look correct: `src/actions/proxy.ts:193`
+keeps `parsed.extensions`, `src/actions/schema.ts:724` forwards
+`result.extensions`, and the error formatter at `src/server.ts:233` copies
+`ext` verbatim. The coercion is likely inside mercurius's
+`defaultErrorFormatter`, which the formatter calls first — worth checking there
+before changing any of the three.
+
+Both sides were observed directly: the handler's raw HTTP body carries the
+array, the GraphQL response carries the string.
+
 ## YAML Configuration Documentation
 
 Generate comprehensive API documentation for all YAML configuration files from Zod schemas. Documentation lives as `.describe()` annotations on Zod schema fields — a single source of truth for validation, types, and docs.
