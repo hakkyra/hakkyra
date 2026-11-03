@@ -22,6 +22,7 @@ import {
 } from 'graphql';
 import type {
   GraphQLOutputType,
+  GraphQLNullableOutputType,
   GraphQLFieldConfigMap,
   GraphQLFieldConfigArgumentMap,
   GraphQLScalarType,
@@ -121,7 +122,7 @@ function resolveScalarType(
   graphqlName: string,
   isList: boolean,
   enumTypes: Map<string, EnumLikeType>,
-): GraphQLOutputType {
+): GraphQLNullableOutputType {
   // Check built-in scalars
   const builtin = BUILTIN_SCALARS[graphqlName];
   if (builtin) {
@@ -164,7 +165,7 @@ export function columnToGraphQLType(
   column: ColumnInfo,
   enumTypes: Map<string, EnumLikeType>,
   enumNames?: Set<string>,
-): GraphQLOutputType {
+): GraphQLNullableOutputType {
   const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
   return resolveScalarType(mapping.name, mapping.isList, enumTypes);
 }
@@ -213,7 +214,7 @@ export function buildObjectType(
         // Skip columns not visible in any role's select permission
         if (visibleColumns && !visibleColumns.has(column.name)) continue;
         const fieldName = getColumnFieldName(table, column.name);
-        let fieldType = columnToGraphQLType(column, enumTypes, enumNames);
+        let fieldType: GraphQLOutputType = columnToGraphQLType(column, enumTypes, enumNames);
 
         // Non-nullable columns that aren't primary keys with defaults
         // are wrapped in GraphQLNonNull

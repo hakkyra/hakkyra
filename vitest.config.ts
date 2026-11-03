@@ -5,7 +5,9 @@ import { createRequire } from 'node:module';
 // Resolve graphql from the actual node_modules (handles git worktrees where
 // import.meta.dirname may not be where node_modules lives).
 const require_ = createRequire(import.meta.url);
-const graphqlDir = path.dirname(require_.resolve('graphql/package.json'));
+// (graphql 17's exports map no longer exposes package.json, so resolve the
+// entry point instead — it sits at the package root.)
+const graphqlDir = path.dirname(require_.resolve('graphql'));
 
 export default defineConfig({
   resolve: {

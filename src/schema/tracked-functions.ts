@@ -36,6 +36,7 @@ import type {
   GraphQLFieldConfigArgumentMap,
   GraphQLInputType,
   GraphQLOutputType,
+  GraphQLNullableOutputType,
   GraphQLScalarType,
 } from 'graphql';
 import type {
@@ -151,7 +152,7 @@ export function pgArgTypeToGraphQL(
  * Uses the canonical pgTypeToGraphQL mapping from type-map.ts
  * so that e.g. jsonb → Jsonb!, json → json!, text → String!, etc.
  */
-export function pgScalarReturnTypeToGraphQL(pgType: string): GraphQLOutputType {
+export function pgScalarReturnTypeToGraphQL(pgType: string): GraphQLNullableOutputType {
   const gqlType = pgTypeToGraphQL(pgType, false);
   const builtin = BUILTIN_SCALARS[gqlType.name];
   if (builtin) return asOutputType(builtin);

@@ -35,7 +35,7 @@ Hakkyra introspects your PostgreSQL database, reads YAML metadata (compatible wi
 
 ### Prerequisites
 
-- Node.js >= 20
+- Node.js >= 26
 - PostgreSQL 17+
 
 ### Install and Run

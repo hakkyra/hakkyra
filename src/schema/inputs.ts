@@ -31,6 +31,8 @@ import type {
   GraphQLInputFieldConfigMap,
   GraphQLInputType,
   GraphQLOutputType,
+  GraphQLNullableInputType,
+  GraphQLNullableOutputType,
   GraphQLFieldConfigMap,
 } from 'graphql';
 import type { TableInfo, ColumnInfo, RelationshipConfig, FunctionInfo } from '../types.js';
@@ -140,7 +142,7 @@ function buildSelectColumnEnum(table: TableInfo, typeName: string, visibleColumn
 
 // ─── Scalar Resolution (Input Types) ────────────────────────────────────────
 
-const BUILTIN_INPUT_SCALARS: Record<string, GraphQLInputType> = {
+const BUILTIN_INPUT_SCALARS: Record<string, GraphQLNullableInputType> = {
   Int: GraphQLInt,
   Float: GraphQLFloat,
   String: GraphQLString,
@@ -151,7 +153,7 @@ function resolveInputScalarType(
   graphqlName: string,
   isList: boolean,
   enumTypes: Map<string, EnumLikeType>,
-): GraphQLInputType {
+): GraphQLNullableInputType {
   const builtin = BUILTIN_INPUT_SCALARS[graphqlName];
   if (builtin) {
     return isList ? new GraphQLList(new GraphQLNonNull(builtin)) : builtin;
@@ -176,14 +178,14 @@ function columnToInputType(
   column: ColumnInfo,
   enumTypes: Map<string, EnumLikeType>,
   enumNames: Set<string>,
-): GraphQLInputType {
+): GraphQLNullableInputType {
   const mapping = pgTypeToGraphQL(column.udtName, column.isArray, enumNames);
   return resolveInputScalarType(mapping.name, mapping.isList, enumTypes);
 }
 
 // ─── Output Type Resolution (for aggregate fields) ─────────────────────────
 
-const BUILTIN_OUTPUT_SCALARS: Record<string, GraphQLOutputType> = {
+const BUILTIN_OUTPUT_SCALARS: Record<string, GraphQLNullableOutputType> = {
   Int: GraphQLInt,
   Float: GraphQLFloat,
   String: GraphQLString,
@@ -192,7 +194,7 @@ const BUILTIN_OUTPUT_SCALARS: Record<string, GraphQLOutputType> = {
 
 function resolveOutputScalarType(
   graphqlName: string,
-): GraphQLOutputType {
+): GraphQLNullableOutputType {
   return BUILTIN_OUTPUT_SCALARS[graphqlName] ?? customScalars[graphqlName] ?? asScalar(GraphQLString);
 }
 

@@ -74,17 +74,23 @@ const log = pino({ name: 'hakkyra:config' });
 
 // ─── YAML Schema with !include support ─────────────────────────────────────
 
-const IncludeYamlType = new yaml.Type('!include', {
-  kind: 'scalar',
-  resolve(data: string) {
-    return typeof data === 'string' && data.length > 0;
-  },
-  construct(data: string) {
-    return new IncludeRef(data);
-  },
+const IncludeYamlTag = yaml.defineScalarTag<IncludeRef>('!include', {
+  resolve: (source) => (source.length > 0 ? new IncludeRef(source) : yaml.NOT_RESOLVED),
+  identify: () => false, // load-only
 });
 
-const HAKKYRA_SCHEMA = yaml.DEFAULT_SCHEMA.extend([IncludeYamlType]);
+// js-yaml v5's default CORE_SCHEMA drops the extra tags v4's DEFAULT_SCHEMA
+// carried; add them back so existing metadata (merge keys, timestamps, …)
+// parses the same way.
+const HAKKYRA_SCHEMA = yaml.CORE_SCHEMA.withTags(
+  yaml.timestampTag,
+  yaml.mergeTag,
+  yaml.binaryTag,
+  yaml.omapTag,
+  yaml.pairsTag,
+  yaml.setTag,
+  IncludeYamlTag,
+);
 
 // ─── File helpers ───────────────────────────────────────────────────────────
 
@@ -98,7 +104,15 @@ async function fileExists(filePath: string): Promise<boolean> {
 }
 
 function loadYaml(content: string, filename?: string): unknown {
-  return yaml.load(content, { schema: HAKKYRA_SCHEMA, filename });
+  // v5's load() throws on empty/comment-only input; v4 returned undefined,
+  // and empty metadata files are common. loadAll() yields [] for those.
+  const docs = yaml.loadAll(content, { schema: HAKKYRA_SCHEMA, filename });
+  if (docs.length > 1) {
+    throw new yaml.YAMLException(
+      `expected a single document${filename ? ` in ${filename}` : ''}, but found ${docs.length}`,
+    );
+  }
+  return docs[0];
 }
 
 async function readYaml(filePath: string): Promise<unknown> {

@@ -27,6 +27,14 @@ import type { RelationshipSelection, OrderByItem } from '../sql/select.js';
 import type { ResolverPermissionLookup } from './resolvers/index.js';
 import { toCamelCase, getColumnFieldName, getRelFieldName } from './type-builder.js';
 
+/**
+ * Coerced operation variables. graphql 17 wraps them as
+ * `{ sources, coerced }` instead of exposing a plain map.
+ */
+function getVariableValues(info: GraphQLResolveInfo): Record<string, unknown> {
+  return info.variableValues.coerced as Record<string, unknown>;
+}
+
 // ─── Public Interface ────────────────────────────────────────────────────────
 
 export interface ParsedSelection {
@@ -427,7 +435,7 @@ export function parseResolveInfo(
     allTables,
     permissionLookup,
     session,
-    info.variableValues as Record<string, unknown>,
+    getVariableValues(info),
     info.fragments,
     functions,
   );
@@ -873,7 +881,7 @@ export function parseReturningInfo(
   const fieldNode = info.fieldNodes[0];
   if (!fieldNode.selectionSet) return null;
 
-  const variableValues = info.variableValues as Record<string, unknown>;
+  const variableValues = getVariableValues(info);
 
   // Find the "returning" field in the mutation response selection
   for (const selection of fieldNode.selectionSet.selections) {
@@ -917,7 +925,7 @@ export function parseAggregateNodesInfo(
   const fieldNode = info.fieldNodes[0];
   if (!fieldNode.selectionSet) return null;
 
-  const variableValues = info.variableValues as Record<string, unknown>;
+  const variableValues = getVariableValues(info);
 
   // Find the "nodes" field in the aggregate selection
   for (const selection of fieldNode.selectionSet.selections) {
@@ -998,7 +1006,7 @@ export function parseAggregateCountArgs(
   const fieldNode = info.fieldNodes[0];
   if (!fieldNode.selectionSet) return {};
 
-  const variableValues = info.variableValues as Record<string, unknown>;
+  const variableValues = getVariableValues(info);
 
   // Find the "aggregate" field
   for (const sel of fieldNode.selectionSet.selections) {

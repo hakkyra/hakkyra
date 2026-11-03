@@ -17,7 +17,7 @@ import {
   GraphQLBoolean,
   GraphQLEnumType,
 } from 'graphql';
-import type { GraphQLInputType } from 'graphql';
+import type { GraphQLInputType, GraphQLNullableInputType } from 'graphql';
 import type { TableInfo, ColumnInfo, FunctionInfo } from '../types.js';
 import { pgTypeToGraphQL } from '../introspection/type-map.js';
 import { customScalars, asScalar } from './scalars.js';
@@ -33,7 +33,7 @@ import { getTypeName, toCamelCase, getColumnFieldName, tableKey, getRelFieldName
 const comparisonTypeCache = new Map<string, GraphQLInputObjectType>();
 
 /** Operators available for all types */
-function baseComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
+function baseComparisonFields(scalarType: GraphQLNullableInputType): Record<string, { type: GraphQLInputType }> {
   return {
     _eq: { type: scalarType },
     _neq: { type: scalarType },
@@ -44,7 +44,7 @@ function baseComparisonFields(scalarType: GraphQLInputType): Record<string, { ty
 }
 
 /** Operators for ordered types (numbers, dates, strings) */
-function orderedComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
+function orderedComparisonFields(scalarType: GraphQLNullableInputType): Record<string, { type: GraphQLInputType }> {
   return {
     ...baseComparisonFields(scalarType),
     _gt: { type: scalarType },
@@ -55,7 +55,7 @@ function orderedComparisonFields(scalarType: GraphQLInputType): Record<string, {
 }
 
 /** Operators for string-like types (text, varchar, etc.) */
-function stringComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
+function stringComparisonFields(scalarType: GraphQLNullableInputType): Record<string, { type: GraphQLInputType }> {
   return {
     ...orderedComparisonFields(scalarType),
     _like: { type: scalarType },
@@ -87,7 +87,7 @@ function getJsonbCastExpType(): GraphQLInputObjectType {
 }
 
 /** Operators for JSONB types */
-function jsonbComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
+function jsonbComparisonFields(scalarType: GraphQLNullableInputType): Record<string, { type: GraphQLInputType }> {
   return {
     ...orderedComparisonFields(scalarType),
     _cast: { type: getJsonbCastExpType() },
@@ -100,7 +100,7 @@ function jsonbComparisonFields(scalarType: GraphQLInputType): Record<string, { t
 }
 
 /** Map of GraphQL scalar name to the function that produces its comparison fields. */
-type ComparisonFieldsFactory = (scalarType: GraphQLInputType) => Record<string, { type: GraphQLInputType }>;
+type ComparisonFieldsFactory = (scalarType: GraphQLNullableInputType) => Record<string, { type: GraphQLInputType }>;
 
 const COMPARISON_FACTORIES: Record<string, ComparisonFieldsFactory> = {
   String: stringComparisonFields,
@@ -133,13 +133,13 @@ function getComparisonType(scalarName: string): GraphQLInputObjectType {
   const factory = COMPARISON_FACTORIES[scalarName] ?? baseComparisonFields;
 
   // Resolve the actual GraphQL scalar type
-  const builtinScalars: Record<string, GraphQLInputType> = {
+  const builtinScalars: Record<string, GraphQLNullableInputType> = {
     Int: GraphQLInt,
     Float: GraphQLFloat,
     String: GraphQLString,
     Boolean: GraphQLBoolean,
   };
-  const scalarType: GraphQLInputType =
+  const scalarType: GraphQLNullableInputType =
     builtinScalars[scalarName] ?? customScalars[scalarName] ?? asScalar(GraphQLString);
 
   const compType = new GraphQLInputObjectType({
@@ -185,7 +185,7 @@ function getEnumComparisonType(
  * Array comparison uses PG array operators (@>, <@) and standard
  * comparison operators that work on arrays.
  */
-function arrayComparisonFields(scalarType: GraphQLInputType): Record<string, { type: GraphQLInputType }> {
+function arrayComparisonFields(scalarType: GraphQLNullableInputType): Record<string, { type: GraphQLInputType }> {
   const arrayType = new GraphQLList(new GraphQLNonNull(scalarType));
   const arrayOfArraysType = new GraphQLList(new GraphQLNonNull(arrayType));
   return {
@@ -213,13 +213,13 @@ function getArrayComparisonType(scalarName: string): GraphQLInputObjectType {
   if (cached) return cached;
 
   // Resolve the actual GraphQL scalar type
-  const builtinScalars: Record<string, GraphQLInputType> = {
+  const builtinScalars: Record<string, GraphQLNullableInputType> = {
     Int: GraphQLInt,
     Float: GraphQLFloat,
     String: GraphQLString,
     Boolean: GraphQLBoolean,
   };
-  const scalarType: GraphQLInputType =
+  const scalarType: GraphQLNullableInputType =
     builtinScalars[scalarName] ?? customScalars[scalarName] ?? asScalar(GraphQLString);
 
   const compType = new GraphQLInputObjectType({

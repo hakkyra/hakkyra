@@ -64,9 +64,13 @@ function applyStringifyNumericSerialization(cjsSchema: GraphQLSchema): void {
       | (import('graphql').GraphQLScalarType & { __hakkyraStringifyPatched?: boolean })
       | undefined;
     if (!scalar || scalar.__hakkyraStringifyPatched) continue;
-    const orig = scalar.serialize.bind(scalar);
-    scalar.serialize = (value: unknown) =>
+    // graphql 17 executes `coerceOutputValue` (captured at construction);
+    // `serialize` is its deprecated alias — patch both.
+    const orig = scalar.coerceOutputValue.bind(scalar);
+    const patched = (value: unknown) =>
       isStringifyNumericEnabled() && typeof value === 'string' && value !== '' ? value : orig(value);
+    scalar.coerceOutputValue = patched;
+    scalar.serialize = patched;
     scalar.__hakkyraStringifyPatched = true;
   }
 }
@@ -98,13 +102,19 @@ function copyEsmToCjs(esmSchema: GraphQLSchema, cjsSchema: GraphQLSchema): void 
       }
     }
 
-    // Copy serialize/parseValue/parseLiteral for custom scalars
-    if ('serialize' in cjsType && 'serialize' in esmType) {
+    // Copy coercion functions for custom scalars. graphql 17 executes the
+    // coerce* hooks (bound at construction), so copying only the deprecated
+    // serialize/parseValue/parseLiteral names would silently skip validation.
+    if ('coerceOutputValue' in cjsType && 'coerceOutputValue' in esmType) {
       const cjsScalar = cjsType as import('graphql').GraphQLScalarType;
       const esmScalar = esmType as import('graphql').GraphQLScalarType;
-      cjsScalar.serialize = esmScalar.serialize as typeof cjsScalar.serialize;
-      cjsScalar.parseValue = esmScalar.parseValue as typeof cjsScalar.parseValue;
-      cjsScalar.parseLiteral = esmScalar.parseLiteral as typeof cjsScalar.parseLiteral;
+      cjsScalar.serialize = esmScalar.serialize;
+      cjsScalar.parseValue = esmScalar.parseValue;
+      cjsScalar.parseLiteral = esmScalar.parseLiteral;
+      cjsScalar.coerceOutputValue = esmScalar.coerceOutputValue;
+      cjsScalar.coerceInputValue = esmScalar.coerceInputValue;
+      cjsScalar.coerceInputLiteral = esmScalar.coerceInputLiteral;
+      cjsScalar.valueToLiteral = esmScalar.valueToLiteral;
     }
 
     // Copy enum internal values (buildSchema loses value mappings from SDL)
@@ -136,18 +146,24 @@ function applyStringCoercion(
   if (!cjsStringScalar) return;
 
   const { Kind: CjsKind } = cjsGraphql;
-  cjsStringScalar.parseLiteral = (ast) => {
+  const coerceLiteral = (ast: import('graphql').ValueNode) => {
     if (ast.kind === CjsKind.STRING) return ast.value;
     if (ast.kind === CjsKind.INT || ast.kind === CjsKind.FLOAT) return (ast as { value: string }).value;
     throw new cjsGraphql.GraphQLError(
       `String cannot represent a non string value: ${(ast as { value?: string }).value ?? ast.kind}`,
     );
   };
-  const origParseValue = cjsStringScalar.parseValue.bind(cjsStringScalar);
-  cjsStringScalar.parseValue = (value: unknown) => {
+  const origCoerceInputValue = cjsStringScalar.coerceInputValue.bind(cjsStringScalar);
+  const coerceValue = (value: unknown) => {
     if (typeof value === 'number') return String(value);
-    return origParseValue(value);
+    return origCoerceInputValue(value);
   };
+  // graphql 17 executes coerceInputLiteral/coerceInputValue; keep the
+  // deprecated parseLiteral/parseValue aliases in sync.
+  cjsStringScalar.coerceInputLiteral = coerceLiteral;
+  cjsStringScalar.coerceInputValue = coerceValue;
+  cjsStringScalar.parseLiteral = coerceLiteral;
+  cjsStringScalar.parseValue = coerceValue;
 }
 
 // ─── Introspection control ───────────────────────────────────────────────────

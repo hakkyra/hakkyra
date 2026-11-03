@@ -55,7 +55,9 @@ async function insertEvent(overrides?: Partial<{
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,
     [
       overrides?.webhook_conf ?? `${webhook.baseUrl}/scheduled/test`,
-      overrides?.scheduled_time ?? new Date().toISOString(),
+      // Backdated: the DB's now() can trail the host clock (e.g. Docker VM)
+      // by a millisecond or so, which would make a "now" event not yet due.
+      overrides?.scheduled_time ?? new Date(Date.now() - 1000).toISOString(),
       overrides?.payload !== undefined ? JSON.stringify(overrides.payload) : JSON.stringify({ hello: 'world' }),
       overrides?.retry_conf !== undefined ? JSON.stringify(overrides.retry_conf) : null,
       overrides?.comment ?? null,

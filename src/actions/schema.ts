@@ -35,6 +35,8 @@ import type {
   GraphQLFieldConfig,
   GraphQLOutputType,
   GraphQLInputType,
+  GraphQLNullableOutputType,
+  GraphQLNullableInputType,
   GraphQLNamedType,
   GraphQLFieldConfigMap,
   GraphQLResolveInfo,
@@ -126,7 +128,8 @@ function resolveOutputType(
   enumTypes?: Map<string, EnumLikeType>,
 ): GraphQLOutputType {
   if (typeNode.kind === 'NonNullType') {
-    return new GraphQLNonNull(resolveOutputType(typeNode.type, outputTypes, enumTypes));
+    // SDL grammar: the inner type of `T!` is never itself non-null.
+    return new GraphQLNonNull(resolveOutputType(typeNode.type, outputTypes, enumTypes) as GraphQLNullableOutputType);
   }
   if (typeNode.kind === 'ListType') {
     return new GraphQLList(resolveOutputType(typeNode.type, outputTypes, enumTypes));
@@ -150,7 +153,8 @@ function resolveInputType(
   enumTypes?: Map<string, EnumLikeType>,
 ): GraphQLInputType {
   if (typeNode.kind === 'NonNullType') {
-    return new GraphQLNonNull(resolveInputType(typeNode.type, inputTypes, enumTypes));
+    // SDL grammar: the inner type of `T!` is never itself non-null.
+    return new GraphQLNonNull(resolveInputType(typeNode.type, inputTypes, enumTypes) as GraphQLNullableInputType);
   }
   if (typeNode.kind === 'ListType') {
     return new GraphQLList(resolveInputType(typeNode.type, inputTypes, enumTypes));

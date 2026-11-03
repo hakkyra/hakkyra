@@ -28,8 +28,8 @@ export function asScalar(scalar: GraphQLScalarType<unknown, unknown>): GraphQLSc
  * GraphQLScalarType satisfies GraphQLInputType at runtime, but TypeScript's
  * structural check sometimes fails for the generic parameterised variant.
  */
-export function asInputType(scalar: GraphQLScalarType<unknown, unknown>): import('graphql').GraphQLInputType {
-  return scalar as import('graphql').GraphQLInputType;
+export function asInputType(scalar: GraphQLScalarType<unknown, unknown>): import('graphql').GraphQLNullableInputType {
+  return scalar as import('graphql').GraphQLNullableInputType;
 }
 
 /**
@@ -38,8 +38,8 @@ export function asInputType(scalar: GraphQLScalarType<unknown, unknown>): import
  * GraphQLScalarType satisfies GraphQLOutputType at runtime, but TypeScript's
  * structural check sometimes fails for the generic parameterised variant.
  */
-export function asOutputType(scalar: GraphQLScalarType<unknown, unknown>): import('graphql').GraphQLOutputType {
-  return scalar as import('graphql').GraphQLOutputType;
+export function asOutputType(scalar: GraphQLScalarType<unknown, unknown>): import('graphql').GraphQLNullableOutputType {
+  return scalar as import('graphql').GraphQLNullableOutputType;
 }
 
 // ─── UUID ────────────────────────────────────────────────────────────────────
